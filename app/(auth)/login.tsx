@@ -4,27 +4,28 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-    Dimensions,
-    Image,
-    Keyboard,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    Pressable,
-    Text,
-    TextInput,
-    View,
+  Dimensions,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 import Animated, {
-    Easing,
-    interpolate,
-    useAnimatedStyle,
-    useSharedValue,
-    withDelay,
-    withRepeat,
-    withTiming,
+  Easing,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withTiming,
 } from "react-native-reanimated";
+
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -151,9 +152,10 @@ export default function LoginScreen() {
   const canSubmit = idOk && pwOk && agree;
 
   const onSubmit = () => {
-    if (!canSubmit) return;
-    router.replace("/(tabs)/home");
-  };
+  if (!canSubmit) return;
+  router.replace("/mariculture");
+};
+
 
   const idRef = useRef<TextInput>(null);
   const pwRef = useRef<TextInput>(null);
@@ -283,11 +285,35 @@ export default function LoginScreen() {
               </Animated.View>
 
               <View className="mt-0 items-center">
-                <Text className="text-white text-[35px] font-extrabold tracking-wider">ROOTVERSE</Text>
-                <Text className="text-sky-300 text-[18px] font-semibold tracking-[3px] mt-1">BLUE ECONOMY</Text>
-                <Text className="text-sky-300 text-[18px] font-semibold tracking-[3px] mt-1">
-                  TRACEABILITY SYSTEM
-                </Text>
+                              <Text style={{
+                                  fontFamily: 'System',
+                                  fontWeight: '900',
+                                  fontSize: 50,
+                                  letterSpacing: 3,
+                                  color: 'white',
+                                  textAlign: 'center',
+                                  textTransform: 'uppercase'
+                              }}>ROOTVERSE</Text>
+
+                              <Text style={{
+                                  fontFamily: 'System',
+                                  fontWeight: '800', // Extra bold
+                                  fontSize: 18,
+                                  letterSpacing: 3,
+                                  color: '#0ea5e9', // sky-300 equivalent
+                                  textAlign: 'center',
+                                  marginTop: 4
+                              }}>BLUE ECONOMY</Text>
+                              
+                              <Text style={{
+                                  fontFamily: 'System',
+                                  fontWeight: '800', // Extra bold
+                                  fontSize: 18,
+                                  letterSpacing: 3,
+                                  color: '#0ea5e9', // sky-300 equivalent
+                                  textAlign: 'center',
+                                  marginTop: 4
+                              }}>TRACEABILITY SYSTEM</Text>
               </View>
             </View>
           </Animated.View>
