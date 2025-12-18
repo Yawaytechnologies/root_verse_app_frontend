@@ -2,15 +2,15 @@ import React, { useMemo, useState } from "react";
 import { ScrollView, View } from "react-native";
 import Animated, { FadeInUp } from "react-native-reanimated";
 
-import MCBackground from "../../src/mariculture/components/common/MCBackground";
-import MCSectionTitle from "../../src/mariculture/components/common/MCSectionTitle";
-import MCNeedsAttention from "../../src/mariculture/components/units/MCNeedsAttention";
-import MCUnitCard, { UnitItem } from "../../src/mariculture/components/units/MCUnitCard";
-import MCUnitsHeader from "../../src/mariculture/components/units/MCUnitsHeader";
-import MCUnitsKpiStrip from "../../src/mariculture/components/units/MCUnitsKpiStrip";
+import MCBackground from "../../src/components/mariculture/common/MCBackground";
+import MCSectionTitle from "../../src/components/mariculture/common/MCSectionTitle";
+import MCNeedsAttention from "../../units/MCNeedsAttention";
+import MCUnitCard, { UnitItem } from "../../units/MCUnitCard";
+import MCUnitsHeader from "../../units/MCUnitsHeader";
+import MCUnitsKpiStrip from "../../units/MCUnitsKpiStrip";
 import MCUnitsSearchFilters, {
     UnitFilter,
-} from "../../src/mariculture/components/units/MCUnitsSearchFilters";
+} from "../../units/MCUnitsSearchFilters";
 
 const UNITS: UnitItem[] = [
   {

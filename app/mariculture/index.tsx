@@ -1,19 +1,19 @@
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import {
-  Dimensions,
-  RefreshControl,
-  ScrollView,
-  StatusBar,
-  View,
+    Dimensions,
+    RefreshControl,
+    ScrollView,
+    StatusBar,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import MCBottomBar from "@/src/mariculture/components/dashboard/MCBottomBar";
-import MCHeader from "@/src/mariculture/components/dashboard/MCHeader";
-import MCKpiGrid from "@/src/mariculture/components/dashboard/MCKpiGrid";
-import MCQuickActions from "@/src/mariculture/components/dashboard/MCQuickActions";
-import MCUnitsList from "@/src/mariculture/components/dashboard/MCUitsList";
+import MCBottomBar from "@/src/components/mariculture/dashboard/MCBottomBar";
+import MCHeader from "@/src/components/mariculture/dashboard/MCHeader";
+import MCKpiGrid from "@/src/components/mariculture/dashboard/MCKpiGrid";
+import MCQuickActions from "@/src/components/mariculture/dashboard/MCQuickActions";
+import MCUnitsList from "@/src/components/mariculture/dashboard/MCUitsList";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 

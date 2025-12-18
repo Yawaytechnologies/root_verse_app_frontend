@@ -2,7 +2,7 @@
 import { router, Slot, usePathname } from "expo-router";
 import React from "react";
 import { View } from "react-native";
-import MCBottomBar from "../../src/mariculture/components/dashboard/MCBottomBar";
+import MCBottomBar from "../../src/components/mariculture/dashboard/MCBottomBar";
 
 type TabKey = "dashboard" | "units" | "scan" | "profile";
 
