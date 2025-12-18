@@ -153,7 +153,7 @@ export default function LoginScreen() {
 
   const onSubmit = () => {
   if (!canSubmit) return;
-  router.replace("/mariculture");
+  router.replace("/dashboard");
 };
 
 
