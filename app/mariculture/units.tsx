@@ -4,13 +4,13 @@ import Animated, { FadeInUp } from "react-native-reanimated";
 
 import MCBackground from "../../src/components/mariculture/common/MCBackground";
 import MCSectionTitle from "../../src/components/mariculture/common/MCSectionTitle";
-import MCNeedsAttention from "../../units/MCNeedsAttention";
-import MCUnitCard, { UnitItem } from "../../units/MCUnitCard";
-import MCUnitsHeader from "../../units/MCUnitsHeader";
-import MCUnitsKpiStrip from "../../units/MCUnitsKpiStrip";
+import MCNeedsAttention from "../../src/components/mariculture/units/MCNeedsAttention";
+import MCUnitCard, { UnitItem } from "../../src/components/mariculture/units/MCUnitCard";
+import MCUnitsHeader from "../../src/components/mariculture/units/MCUnitsHeader";
+import MCUnitsKpiStrip from "../../src/components/mariculture/units/MCUnitsKpiStrip";
 import MCUnitsSearchFilters, {
     UnitFilter,
-} from "../../units/MCUnitsSearchFilters";
+} from "../../src/components/mariculture/units/MCUnitsSearchFilters";
 
 const UNITS: UnitItem[] = [
   {
