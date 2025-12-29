@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useMemo, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
+import { useIsDarkTheme } from "../../../store/useIsDarkTheme";
 
 type TabKey = "dashboard" | "units" | "scan" | "profile";
 
@@ -23,6 +24,7 @@ export default function MCBottomBar({
   active?: TabKey;
   onTab?: (key: TabKey) => void;
 }) {
+  const isDark = useIsDarkTheme();
   const [rowW, setRowW] = useState(0);
 
   const activeIndex = Math.max(0, TABS.findIndex((t) => t.k === active));
@@ -33,6 +35,24 @@ export default function MCBottomBar({
     return { left: w * activeIndex, width: w };
   }, [rowW, activeIndex]);
 
+  // ✅ Theme tokens
+  const scrimColors = isDark
+    ? ["rgba(0,0,0,0.00)", "rgba(3,6,12,0.55)", "rgba(3,6,12,0.92)"]
+    : ["rgba(255,255,255,0.00)", "rgba(241,245,249,0.65)", "rgba(241,245,249,0.95)"];
+
+  const barGrad = isDark
+    ? ["#0B1220", "#070B14", "#05070E"]
+    : ["#FFFFFF", "#F6F8FC", "#EEF2F7"];
+
+  const border = isDark ? "rgba(255,255,255,0.10)" : "rgba(2,6,23,0.10)";
+  const divider = isDark ? "rgba(255,255,255,0.10)" : "rgba(2,6,23,0.08)";
+
+  const inactiveIcon = isDark ? "rgba(226,232,240,0.70)" : "rgba(15,23,42,0.55)";
+  const inactiveText = isDark ? "rgba(226,232,240,0.62)" : "rgba(15,23,42,0.55)";
+
+  const activeIcon = "#0ea5e9"; // sky-500
+  const activeText = "rgba(14,165,233,0.98)";
+
   return (
     <View
       style={{
@@ -42,7 +62,7 @@ export default function MCBottomBar({
         bottom: Platform.OS === "ios" ? 18 : 14,
       }}
     >
-      {/* ✅ Premium background scrim (prevents content showing behind) */}
+      {/* ✅ Background scrim */}
       <View
         pointerEvents="none"
         style={{
@@ -54,11 +74,7 @@ export default function MCBottomBar({
         }}
       >
         <LinearGradient
-          colors={[
-            "rgba(0,0,0,0.00)",
-            "rgba(3,6,12,0.55)",
-            "rgba(3,6,12,0.92)",
-          ]}
+          colors={scrimColors}
           start={{ x: 0.5, y: 0 }}
           end={{ x: 0.5, y: 1 }}
           style={{ flex: 1 }}
@@ -79,7 +95,7 @@ export default function MCBottomBar({
             ? { elevation: 18 }
             : {
                 shadowColor: "#000",
-                shadowOpacity: 0.45,
+                shadowOpacity: isDark ? 0.45 : 0.18,
                 shadowRadius: 18,
                 shadowOffset: { width: 0, height: 12 },
               }),
@@ -88,7 +104,7 @@ export default function MCBottomBar({
 
       <View style={{ borderRadius: 34, overflow: "hidden" }}>
         <LinearGradient
-          colors={["#0B1220", "#070B14", "#05070E"]}
+          colors={barGrad}
           start={{ x: 0.2, y: 0 }}
           end={{ x: 0.8, y: 1 }}
           style={{ borderRadius: 34 }}
@@ -97,11 +113,11 @@ export default function MCBottomBar({
             style={{
               borderRadius: 34,
               borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.10)",
+              borderColor: border,
               overflow: "hidden",
             }}
           >
-            <View style={{ height: 1, backgroundColor: "rgba(255,255,255,0.10)" }} />
+            <View style={{ height: 1, backgroundColor: divider }} />
 
             {/* Items */}
             <View
@@ -122,18 +138,18 @@ export default function MCBottomBar({
                   }}
                 >
                   <LinearGradient
-                    colors={[
-                      "rgba(125,211,252,0.20)",
-                      "rgba(56,189,248,0.10)",
-                      "rgba(0,0,0,0)",
-                    ]}
+                    colors={
+                      isDark
+                        ? ["rgba(125,211,252,0.20)", "rgba(56,189,248,0.10)", "rgba(0,0,0,0)"]
+                        : ["rgba(14,165,233,0.14)", "rgba(14,165,233,0.08)", "rgba(255,255,255,0)"]
+                    }
                     start={{ x: 0.2, y: 0 }}
                     end={{ x: 0.8, y: 1 }}
                     style={{
                       flex: 1,
                       borderRadius: 20,
                       borderWidth: 1,
-                      borderColor: "rgba(125,211,252,0.18)",
+                      borderColor: isDark ? "rgba(125,211,252,0.18)" : "rgba(14,165,233,0.18)",
                     }}
                   />
                 </View>
@@ -165,27 +181,31 @@ export default function MCBottomBar({
                         alignItems: "center",
                         justifyContent: "center",
                         backgroundColor: isActive
-                          ? "rgba(125,211,252,0.14)"
-                          : "rgba(255,255,255,0.05)",
+                          ? isDark
+                            ? "rgba(125,211,252,0.14)"
+                            : "rgba(14,165,233,0.10)"
+                          : isDark
+                            ? "rgba(255,255,255,0.05)"
+                            : "rgba(2,6,23,0.04)",
                         borderWidth: 1,
                         borderColor: isActive
-                          ? "rgba(125,211,252,0.22)"
-                          : "rgba(255,255,255,0.10)",
+                          ? isDark
+                            ? "rgba(125,211,252,0.22)"
+                            : "rgba(14,165,233,0.20)"
+                          : border,
                       }}
                     >
                       <Ionicons
                         name={t.icon}
                         size={20}
-                        color={isActive ? "#7dd3fc" : "rgba(226,232,240,0.70)"}
+                        color={isActive ? activeIcon : inactiveIcon}
                       />
                     </View>
 
                     <Text
                       className="mt-2 text-[12px]"
                       style={{
-                        color: isActive
-                          ? "rgba(125,211,252,0.98)"
-                          : "rgba(226,232,240,0.62)",
+                        color: isActive ? activeText : inactiveText,
                         fontWeight: isActive ? "800" : "700",
                         letterSpacing: 0.25,
                       }}
@@ -201,7 +221,9 @@ export default function MCBottomBar({
                         width: 5,
                         borderRadius: 99,
                         backgroundColor: isActive
-                          ? "rgba(125,211,252,0.95)"
+                          ? isDark
+                            ? "rgba(125,211,252,0.95)"
+                            : "rgba(14,165,233,0.95)"
                           : "transparent",
                       }}
                     />
@@ -211,7 +233,11 @@ export default function MCBottomBar({
             </View>
 
             <LinearGradient
-              colors={["rgba(255,255,255,0.00)", "rgba(0,0,0,0.35)"]}
+              colors={
+                isDark
+                  ? ["rgba(255,255,255,0.00)", "rgba(0,0,0,0.35)"]
+                  : ["rgba(2,6,23,0.00)", "rgba(2,6,23,0.06)"]
+              }
               start={{ x: 0.5, y: 0 }}
               end={{ x: 0.5, y: 1 }}
               style={{ height: 10 }}

@@ -1,6 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import React from "react";
-import { Text, View } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
+
+import { toggleTheme } from "../../../features/theme/themeSlice";
+import { useAppDispatch } from "../../../store/hooks";
+import { useIsDarkTheme } from "../../../store/useIsDarkTheme";
 
 export default function MCHeader({
   title,
@@ -11,61 +16,117 @@ export default function MCHeader({
   subtitle: string;
   rightHint?: string;
 }) {
+  const dispatch = useAppDispatch();
+  const isDark = useIsDarkTheme();
+
+  // ✅ High-contrast tokens (professional light mode)
+  const titleColor = isDark ? "#6ee7b7" : "#065f46";
+  const mainText = isDark ? "#ffffff" : "#0B1220";
+  const subText = isDark ? "rgba(226,232,240,0.76)" : "rgba(15,23,42,0.74)";
+
+  // ✅ Mobile needs stronger contrast than web
+  const btnBg = isDark
+    ? Platform.OS === "web"
+      ? "rgba(255,255,255,0.05)"
+      : "rgba(15,23,42,0.72)" // stronger on mobile dark
+    : Platform.OS === "web"
+      ? "rgba(2,6,23,0.04)"
+      : "rgba(255,255,255,0.92)"; // stronger on mobile light
+
+  const btnBorder = isDark ? "rgba(255,255,255,0.12)" : "rgba(2,6,23,0.12)";
+  const iconColor = isDark ? "#e2e8f0" : "rgba(15,23,42,0.82)";
+
+  // ✅ Solid icons look better on mobile (outline looks too thin)
+  const toggleIconName =
+    Platform.OS === "web"
+      ? (isDark ? "sunny-outline" : "moon-outline")
+      : (isDark ? "sunny" : "moon");
+
+  const toggleIconSize = Platform.OS === "web" ? 18 : 20;
+
+  const shadowStyle =
+    Platform.OS === "android"
+      ? { elevation: 6 }
+      : {
+          shadowColor: "#000",
+          shadowOpacity: isDark ? 0.22 : 0.10,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 6 },
+        };
+
   return (
-    <View className="px-5 pt-10 pb-3">
-      <View className="flex-row items-start">
+    <View style={{ paddingHorizontal: 20, paddingTop: 40, paddingBottom: 12 }}>
+      <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
         {/* Back */}
+        <Pressable
+          onPress={() => router.back()}
+          style={{
+            height: 44,
+            width: 44,
+            borderRadius: 18,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: btnBg,
+            borderWidth: 1,
+            borderColor: btnBorder,
+            ...shadowStyle,
+          }}
+        >
+          <Ionicons name="chevron-back" size={18} color={iconColor} />
+        </Pressable>
 
         {/* Title + subtitle */}
-        <View className="flex-1 ml-3" style={{ minWidth: 0 }}>
-          <Text
-            numberOfLines={1}
-            style={{
-              fontSize: 32,          // ✅ bigger (try 34 if you want)
-              fontWeight: "900",
-              letterSpacing: 0.4,
-              color: "#34D399",
-              textShadowColor: "rgba(0,0,0,0.35)",
-              textShadowOffset: { width: 0, height: 2 },
-              textShadowRadius: 10,
-            }}
-          >
+        <View style={{ flex: 1, marginLeft: 14 }}>
+          <Text style={{ color: titleColor, fontSize: 28, fontWeight: "900" }}>
             {title}
           </Text>
 
-
           <Text
-            numberOfLines={2}
-            className="text-slate-300 text-[12px] mt-1"
             style={{
-              lineHeight: 16,
-              opacity: 0.95,
+              color: mainText,
+              fontSize: 16,
+              marginTop: 4,
+              fontWeight: "900",
             }}
           >
             {subtitle}
           </Text>
-        </View>
 
-        {/* Right badge (never overflow) */}
-        <View style={{ maxWidth: 170, marginLeft: 10, alignSelf: "center" }}>
-          <View
-            className="flex-row items-center px-4 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-300/20"
+          <Text
             style={{
-              transform: [{ translateY: 6 }], // ✅ moves it a little below to match title line
+              color: subText,
+              fontSize: 12,
+              marginTop: 8,
+              fontWeight: isDark ? "700" : "800",
+              letterSpacing: 0.2,
             }}
           >
-            <Ionicons name="leaf-outline" size={16} color="#6EE7B7" />
-            <Text
-              numberOfLines={1}
-              ellipsizeMode="tail"
-              className="ml-2 text-[11px]"
-              style={{ fontWeight: "800", color: "#A7F3D0" }}
-            >
-              {rightHint}
-            </Text>
-          </View>
+            {rightHint}
+          </Text>
         </View>
 
+        {/* Theme toggle */}
+        <Pressable
+          onPress={() => dispatch(toggleTheme())}
+          style={{
+            height: 44,
+            width: 44,
+            borderRadius: 18,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: btnBg,
+            borderWidth: 1,
+            borderColor: btnBorder,
+            ...shadowStyle,
+          }}
+          accessibilityLabel="Toggle theme"
+        >
+          <Ionicons
+            name={toggleIconName as any}
+            size={toggleIconSize}
+            color={isDark ? "#fde68a" : "rgba(15,23,42,0.82)"}
+          />
+        </Pressable>
       </View>
     </View>
   );

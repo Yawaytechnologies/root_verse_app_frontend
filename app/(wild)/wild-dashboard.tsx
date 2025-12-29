@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from "react";
-import { router } from "expo-router";
-import { Pressable, Text, View, ScrollView, Modal } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
+import React, { useMemo, useState } from "react";
+import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 import WildBottomNav from "../../src/components/WildBottomNav";
 import { useTrace } from "../../src/data/wild/trace.store";
 

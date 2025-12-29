@@ -2,12 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-    Modal,
-    Pressable,
-    ScrollView,
-    Text,
-    useColorScheme,
-    View,
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  useColorScheme,
+  View,
 } from "react-native";
 import i18n, { setAppLanguage } from "../../../src/components/aqua/i18n/i18n";
 

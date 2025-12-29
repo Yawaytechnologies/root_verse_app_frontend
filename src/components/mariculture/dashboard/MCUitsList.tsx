@@ -1,6 +1,7 @@
+import { useIsDarkTheme } from "@/src/store/useIsDarkTheme";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import React from "react";
+import React, { useMemo } from "react";
 import { Text, View } from "react-native";
 import Animated, {
   FadeInUp,
@@ -24,26 +25,44 @@ export default function MCUnitsList({
     status: "Active" | "Maintenance" | "Inactive";
   }>;
 }) {
+  const isDark = useIsDarkTheme();
+
+  // ✅ Contrast tokens (same palette, stronger visibility)
+  const T = useMemo(() => {
+    const title = isDark ? "rgba(255,255,255,0.98)" : "#0f172a";
+    const sub = isDark ? "rgba(226,232,240,0.82)" : "rgba(15,23,42,0.65)";
+    const faint = isDark ? "rgba(226,232,240,0.72)" : "rgba(15,23,42,0.55)";
+
+    const chipBg = isDark ? "rgba(15,23,42,0.88)" : "rgba(15,23,42,0.10)";
+    const chipBd = isDark ? "rgba(148,163,184,0.55)" : "rgba(15,23,42,0.14)";
+    const chipTx = isDark ? "rgba(255,255,255,0.96)" : "#0f172a";
+    const chipIcon = isDark ? "rgba(255,255,255,0.92)" : "rgba(15,23,42,0.70)";
+
+    const divider = isDark ? "rgba(255,255,255,0.12)" : "rgba(15,23,42,0.10)";
+
+    return { title, sub, faint, chipBg, chipBd, chipTx, chipIcon, divider };
+  }, [isDark]);
+
   return (
     <GlassCard radius={24} pad={18}>
       {/* Header */}
       <View className="flex-row items-center justify-between">
         <View className="flex-1">
           <Text
-            className="text-white text-[17px]"
-            style={{ fontWeight: "900", letterSpacing: 0.2 }}
+            className="text-[17px]"
+            style={{ color: T.title, fontWeight: "900", letterSpacing: 0.2 }}
           >
             Cultivation Units
           </Text>
           <Text
-            className="text-slate-300 text-[12px] mt-1"
-            style={{ lineHeight: 16 }}
+            className="text-[12px] mt-1"
+            style={{ color: T.sub, lineHeight: 16, fontWeight: "700" }}
           >
             Live view of all active, maintenance and inactive units
           </Text>
         </View>
 
-        {/* Count chip – same style as QuickActions "See all" */}
+        {/* Count chip */}
         <View
           style={{
             flexDirection: "row",
@@ -51,15 +70,15 @@ export default function MCUnitsList({
             paddingHorizontal: 12,
             paddingVertical: 8,
             borderRadius: 999,
-            backgroundColor: "rgba(15,23,42,0.85)",
+            backgroundColor: T.chipBg,
             borderWidth: 1,
-            borderColor: "rgba(148,163,184,0.7)",
+            borderColor: T.chipBd,
           }}
         >
-          <Ionicons name="grid-outline" size={16} color="#e5e7eb" />
+          <Ionicons name="grid-outline" size={16} color={T.chipIcon} />
           <Text
             className="text-[12px] ml-2"
-            style={{ color: "#f9fafb", fontWeight: "800", letterSpacing: 0.3 }}
+            style={{ color: T.chipTx, fontWeight: "900", letterSpacing: 0.3 }}
           >
             {units.length} units
           </Text>
@@ -67,7 +86,7 @@ export default function MCUnitsList({
       </View>
 
       {/* Divider */}
-      <View className="mt-4 h-[1px] bg-white/10" />
+      <View className="mt-4 h-[1px]" style={{ backgroundColor: T.divider }} />
 
       {/* List */}
       <View className="mt-4">
@@ -79,7 +98,12 @@ export default function MCUnitsList({
       {/* Soft bottom fade */}
       <View className="mt-4">
         <LinearGradient
-          colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.25)"]}
+          colors={
+            // Light mode fade should be lighter, dark mode fade is darker
+            isDark
+              ? ["rgba(0,0,0,0)", "rgba(0,0,0,0.28)"]
+              : ["rgba(0,0,0,0)", "rgba(15,23,42,0.08)"]
+          }
           start={{ x: 0.5, y: 0 }}
           end={{ x: 0.5, y: 1 }}
           style={{ height: 12, borderRadius: 12 }}
@@ -102,6 +126,22 @@ function UnitRow({
   };
   index: number;
 }) {
+  const isDark = useIsDarkTheme();
+
+  const T = useMemo(() => {
+    const title = isDark ? "rgba(255,255,255,0.98)" : "#0f172a";
+    const sub = isDark ? "rgba(226,232,240,0.86)" : "rgba(15,23,42,0.62)";
+    const label = isDark ? "rgba(148,163,184,0.95)" : "rgba(15,23,42,0.50)";
+    const value = isDark ? "rgba(255,255,255,0.95)" : "#0f172a";
+
+    const rowBorder = isDark ? "rgba(255,255,255,0.14)" : "rgba(15,23,42,0.12)";
+    const chevron = isDark ? "rgba(255,255,255,0.82)" : "rgba(15,23,42,0.55)";
+    const chevronBg = isDark ? "rgba(255,255,255,0.07)" : "rgba(15,23,42,0.06)";
+    const chevronBd = isDark ? "rgba(255,255,255,0.12)" : "rgba(15,23,42,0.10)";
+
+    return { title, sub, label, value, rowBorder, chevron, chevronBg, chevronBd };
+  }, [isDark]);
+
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -126,27 +166,31 @@ function UnitRow({
           marginBottom: 10,
           overflow: "hidden",
           borderWidth: 1,
-          borderColor: "rgba(255,255,255,0.10)", // ✅ QuickActions border
+          borderColor: T.rowBorder, // ✅ stronger border
         },
         animatedStyle,
       ]}
       onTouchStart={handlePressIn}
       onTouchEnd={handlePressOut}
     >
-      {/* ✅ QuickActions-style subtle gradient background */}
+      {/* ✅ Slightly stronger gradient so text reads better */}
       <LinearGradient
-        colors={[
-          "rgba(255,255,255,0.06)",
-          "rgba(255,255,255,0.03)",
-          "rgba(0,0,0,0.15)",
-        ]}
+        colors={
+          isDark
+            ? [
+                "rgba(255,255,255,0.08)",
+                "rgba(255,255,255,0.04)",
+                "rgba(0,0,0,0.18)",
+              ]
+            : ["rgba(255,255,255,0.92)", "rgba(255,255,255,0.78)", "rgba(15,23,42,0.03)"]
+        }
         start={{ x: 0.1, y: 0 }}
         end={{ x: 0.9, y: 1 }}
         style={{ paddingHorizontal: 14, paddingVertical: 14 }}
       >
         <View className="flex-row items-center justify-between">
           <View className="flex-row items-center flex-1">
-            {/* ✅ Icon badge same as QuickActions */}
+            {/* Icon badge */}
             <View
               style={{
                 height: 46,
@@ -154,25 +198,26 @@ function UnitRow({
                 borderRadius: 18,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: "rgba(125,211,252,0.12)",
+                backgroundColor: isDark ? "rgba(125,211,252,0.16)" : "rgba(125,211,252,0.22)",
                 borderWidth: 1,
-                borderColor: "rgba(125,211,252,0.22)",
+                borderColor: isDark ? "rgba(125,211,252,0.30)" : "rgba(125,211,252,0.38)",
               }}
             >
-              <Ionicons name="cube-outline" size={20} color="#7dd3fc" />
+              <Ionicons name="cube-outline" size={20} color={isDark ? "rgba(125,211,252,1)" : "rgba(2,132,199,0.95)"} />
             </View>
 
             <View className="flex-1" style={{ marginLeft: 12 }}>
               <Text
-                className="text-white text-[14px]"
-                style={{ fontWeight: "900", letterSpacing: 0.15 }}
+                className="text-[14px]"
+                style={{ color: T.title, fontWeight: "900", letterSpacing: 0.15 }}
                 numberOfLines={1}
               >
                 {unit.unitId}
               </Text>
+
               <Text
-                className="text-slate-300 text-[12px] mt-1"
-                style={{ lineHeight: 16 }}
+                className="text-[12px] mt-1"
+                style={{ color: T.sub, lineHeight: 16, fontWeight: "700" }}
                 numberOfLines={1}
                 ellipsizeMode="tail"
               >
@@ -190,7 +235,7 @@ function UnitRow({
           <View className="flex-row items-center">
             <StatusPill status={unit.status} />
 
-            {/* ✅ Chevron pill same as QuickActions */}
+            {/* Chevron pill */}
             <View
               style={{
                 height: 30,
@@ -199,16 +244,12 @@ function UnitRow({
                 marginLeft: 8,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: "rgba(255,255,255,0.06)",
+                backgroundColor: T.chevronBg,
                 borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.10)",
+                borderColor: T.chevronBd,
               }}
             >
-              <Ionicons
-                name="chevron-forward"
-                size={16}
-                color="rgba(226,232,240,0.75)"
-              />
+              <Ionicons name="chevron-forward" size={16} color={T.chevron} />
             </View>
           </View>
         </View>
@@ -218,17 +259,22 @@ function UnitRow({
 }
 
 function Info({ label, value }: { label: string; value: string }) {
+  const isDark = useIsDarkTheme();
+
+  const T = useMemo(() => {
+    const labelColor = isDark ? "rgba(148,163,184,0.95)" : "rgba(15,23,42,0.52)";
+    const valueColor = isDark ? "rgba(255,255,255,0.96)" : "#0f172a";
+    return { labelColor, valueColor };
+  }, [isDark]);
+
   return (
     <View style={{ flex: 1 }}>
-      <Text
-        className="text-[10px]"
-        style={{ color: "rgba(148,163,184,0.9)", letterSpacing: 0.4 }}
-      >
+      <Text className="text-[10px]" style={{ color: T.labelColor, letterSpacing: 0.4, fontWeight: "900" }}>
         {label}
       </Text>
       <Text
         className="text-[12px] mt-1"
-        style={{ color: "#f9fafb", fontWeight: "700" }}
+        style={{ color: T.valueColor, fontWeight: "800" }}
         numberOfLines={1}
         ellipsizeMode="tail"
       >
@@ -243,24 +289,26 @@ function StatusPill({
 }: {
   status: "Active" | "Maintenance" | "Inactive";
 }) {
-  // Keeping your same status mapping (already matches the vibe)
+  const isDark = useIsDarkTheme();
+
+  // ✅ higher-contrast text + borders (same mapping)
   const map = {
     Active: {
       bg: "rgba(34,197,94,0.18)",
-      bd: "rgba(22,163,74,0.9)",
-      tx: "#bbf7d0",
+      bd: isDark ? "rgba(22,163,74,0.92)" : "rgba(22,163,74,0.70)",
+      tx: isDark ? "#bbf7d0" : "#065f46",
       icon: "checkmark-circle-outline",
     },
     Maintenance: {
       bg: "rgba(56,189,248,0.20)",
-      bd: "rgba(56,189,248,0.85)",
-      tx: "#e0f2fe",
+      bd: isDark ? "rgba(56,189,248,0.92)" : "rgba(2,132,199,0.60)",
+      tx: isDark ? "#e0f2fe" : "#075985",
       icon: "time-outline",
     },
     Inactive: {
-      bg: "rgba(255,255,255,0.06)", // slightly more aligned with QuickActions
-      bd: "rgba(255,255,255,0.12)",
-      tx: "rgba(226,232,240,0.85)",
+      bg: isDark ? "rgba(255,255,255,0.06)" : "rgba(15,23,42,0.06)",
+      bd: isDark ? "rgba(255,255,255,0.14)" : "rgba(15,23,42,0.12)",
+      tx: isDark ? "rgba(226,232,240,0.92)" : "rgba(15,23,42,0.70)",
       icon: "pause-circle-outline",
     },
   }[status];
@@ -279,7 +327,7 @@ function StatusPill({
       }}
     >
       <Ionicons name={map.icon as any} size={14} color={map.tx} />
-      <Text className="text-[11px] ml-1" style={{ color: map.tx, fontWeight: "800" }}>
+      <Text className="text-[11px] ml-1" style={{ color: map.tx, fontWeight: "900" }}>
         {status}
       </Text>
     </View>

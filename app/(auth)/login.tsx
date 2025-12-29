@@ -26,6 +26,16 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+// ✅ Redux + Mock login
+import {
+  clearAuthError,
+  loginFail,
+  loginStart,
+  loginSuccess,
+} from "../../src/features/auth/authSlice";
+import { ROUTE_BY_MODULE } from "../../src/navigation/moduleRoutes";
+import { loginApi } from "../../src/services/auth/authApi";
+import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -141,6 +151,9 @@ function ForgotGlassModal({
 
 /* -------------------- Screen -------------------- */
 export default function LoginScreen() {
+  const dispatch = useAppDispatch();
+  const { loading } = useAppSelector((s) => s.auth);
+
   const [userId, setUserId] = useState("");
   const [pw, setPw] = useState("");
   const [show, setShow] = useState(false);
@@ -149,13 +162,26 @@ export default function LoginScreen() {
 
   const idOk = useMemo(() => userId.trim().length >= 3, [userId]);
   const pwOk = useMemo(() => pw.length >= 4, [pw]);
-  const canSubmit = idOk && pwOk && agree;
+  const canSubmit = idOk && pwOk && agree && !loading;
 
-  const onSubmit = () => {
-  if (!canSubmit) return;
-  router.replace("/dashboard");
-};
+  const onSubmit = async () => {
+    if (!canSubmit) return;
 
+    dispatch(clearAuthError());
+    dispatch(loginStart());
+
+    try {
+      // ✅ MOCK login now (AQ... => aqua, WC... => wild, else mariculture)
+      const data = await loginApi({ userId, password: pw });
+
+      dispatch(loginSuccess(data));
+
+      const nextPath = ROUTE_BY_MODULE[data.module] || "/mariculture";
+      router.replace(nextPath);
+    } catch (e: any) {
+      dispatch(loginFail(e?.message || "Login failed"));
+    }
+  };
 
   const idRef = useRef<TextInput>(null);
   const pwRef = useRef<TextInput>(null);
@@ -285,35 +311,47 @@ export default function LoginScreen() {
               </Animated.View>
 
               <View className="mt-0 items-center">
-                              <Text style={{
-                                  fontFamily: 'System',
-                                  fontWeight: '900',
-                                  fontSize: 50,
-                                  letterSpacing: 3,
-                                  color: 'white',
-                                  textAlign: 'center',
-                                  textTransform: 'uppercase'
-                              }}>ROOTVERSE</Text>
+                <Text
+                  style={{
+                    fontFamily: "System",
+                    fontWeight: "900",
+                    fontSize: 50,
+                    letterSpacing: 3,
+                    color: "white",
+                    textAlign: "center",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  ROOTVERSE
+                </Text>
 
-                              <Text style={{
-                                  fontFamily: 'System',
-                                  fontWeight: '800', // Extra bold
-                                  fontSize: 18,
-                                  letterSpacing: 3,
-                                  color: '#0ea5e9', // sky-300 equivalent
-                                  textAlign: 'center',
-                                  marginTop: 4
-                              }}>BLUE ECONOMY</Text>
-                              
-                              <Text style={{
-                                  fontFamily: 'System',
-                                  fontWeight: '800', // Extra bold
-                                  fontSize: 18,
-                                  letterSpacing: 3,
-                                  color: '#0ea5e9', // sky-300 equivalent
-                                  textAlign: 'center',
-                                  marginTop: 4
-                              }}>TRACEABILITY SYSTEM</Text>
+                <Text
+                  style={{
+                    fontFamily: "System",
+                    fontWeight: "800",
+                    fontSize: 18,
+                    letterSpacing: 3,
+                    color: "#0ea5e9",
+                    textAlign: "center",
+                    marginTop: 4,
+                  }}
+                >
+                  BLUE ECONOMY
+                </Text>
+
+                <Text
+                  style={{
+                    fontFamily: "System",
+                    fontWeight: "800",
+                    fontSize: 18,
+                    letterSpacing: 3,
+                    color: "#0ea5e9",
+                    textAlign: "center",
+                    marginTop: 4,
+                  }}
+                >
+                  TRACEABILITY SYSTEM
+                </Text>
               </View>
             </View>
           </Animated.View>

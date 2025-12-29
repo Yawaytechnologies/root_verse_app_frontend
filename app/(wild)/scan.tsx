@@ -1,21 +1,20 @@
-import React, { useEffect, useState } from "react";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { router } from "expo-router";
-import { Alert, Pressable, Text, View } from "react-native";
-import { BarCodeScanner } from "expo-barcode-scanner";
+import React, { useCallback, useEffect, useState } from "react";
+import { Pressable, Text, View } from "react-native";
 
 export default function ScanQR() {
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      const { status } = await BarCodeScanner.requestPermissionsAsync();
-      setHasPermission(status === "granted");
-    })();
-  }, []);
+    // auto ask permission on open (nice for demo)
+    if (permission && !permission.granted) {
+      requestPermission();
+    }
+  }, [permission, requestPermission]);
 
-  const goToTrace = (raw: string) => {
-    // QR can be just crateId or full URL containing crateId
+  const goToTrace = useCallback((raw: string) => {
     let crateId = raw.trim();
 
     // If QR contains URL like .../trace/RV-CRATE-000123
@@ -24,40 +23,61 @@ export default function ScanQR() {
 
     if (!crateId) return;
 
-    router.replace(`/(wild)/trace/${crateId}` as const);
-  };
+    // ✅ IMPORTANT: do NOT include (wild) in the path
+    // Your file should be: app/(wild)/trace/[crateId].tsx
+    // The URL path is: /trace/<crateId>
+    router.replace(`/trace/${crateId}` as const);
+  }, []);
 
-  if (hasPermission === null) {
+  const onBarcodeScanned = useCallback(
+    ({ data }: { data: string }) => {
+      if (scanned) return;
+      setScanned(true);
+      goToTrace(data);
+    },
+    [scanned, goToTrace]
+  );
+
+  if (!permission) {
     return (
       <View className="flex-1 bg-slate-50 items-center justify-center p-4">
-        <Text className="text-slate-700">Requesting camera permission…</Text>
+        <Text className="text-slate-700">Checking camera permission…</Text>
       </View>
     );
   }
 
-  if (hasPermission === false) {
+  if (!permission.granted) {
     return (
       <View className="flex-1 bg-slate-50 items-center justify-center p-4">
-        <Text className="text-slate-900 font-bold">Camera permission denied</Text>
+        <Text className="text-slate-900 font-bold">Camera permission needed</Text>
         <Text className="mt-2 text-slate-600 text-center">
           Enable camera permission to scan QR stickers.
         </Text>
+
+        <Pressable
+          onPress={requestPermission}
+          className="mt-4 rounded-2xl bg-slate-900 px-5 py-3 active:opacity-80"
+        >
+          <Text className="text-white font-semibold">Grant Permission</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => router.back()}
+          className="mt-3 rounded-2xl bg-slate-200 px-5 py-3 active:opacity-80"
+        >
+          <Text className="text-slate-900 font-semibold">Cancel</Text>
+        </Pressable>
       </View>
     );
   }
 
   return (
     <View className="flex-1 bg-black">
-      <BarCodeScanner
-        onBarCodeScanned={
-          scanned
-            ? undefined
-            : ({ data }) => {
-                setScanned(true);
-                goToTrace(data);
-              }
-        }
+      <CameraView
         style={{ flex: 1 }}
+        facing="back"
+        barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+        onBarcodeScanned={scanned ? undefined : onBarcodeScanned}
       />
 
       {/* Overlay */}
