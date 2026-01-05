@@ -1,7 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { View, Text, Pressable } from "react-native";
 import { router } from "expo-router";
-import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-camera";
+import { CameraView, useCameraPermissions } from "expo-camera";
+
+type ScanResult = {
+  data?: string;
+  type?: string;
+};
 
 export default function ScanQR() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -9,22 +14,33 @@ export default function ScanQR() {
 
   useEffect(() => {
     if (!permission) return;
-    if (!permission.granted) requestPermission();
+
+    // ✅ Ask only when possible; avoids infinite prompts
+    if (!permission.granted && permission.canAskAgain) {
+      requestPermission();
+    }
   }, [permission, requestPermission]);
 
-  const onBarcodeScanned = (result: BarcodeScanningResult) => {
-    if (scanned) return;
-    setScanned(true);
+  const onBarcodeScanned = useCallback(
+    (result: ScanResult) => {
+      if (scanned) return;
+      setScanned(true);
 
-    const data = result.data?.trim?.() || "";
+      const data = String(result?.data ?? "").trim();
 
-    // ✅ Example navigation — change this to your route
-    // If QR contains crateId:
-    // router.push(`/(wild)/trace/${data}` as const);
+      // If you want to require valid data:
+      if (!data) {
+        setScanned(false);
+        return;
+      }
 
-    // For now just go back:
-    router.back();
-  };
+      // ✅ Your navigation (enable when ready)
+      // router.push(`/(wild)/trace/${data}` as const);
+
+      router.back();
+    },
+    [scanned]
+  );
 
   if (!permission) {
     return (
@@ -40,11 +56,16 @@ export default function ScanQR() {
         <Text className="text-base font-semibold text-[#2b2b2b] text-center">
           Camera permission is required to scan QR.
         </Text>
+
         <Pressable
           onPress={requestPermission}
           className="mt-4 rounded-2xl bg-[#a06b2a] px-5 py-3"
         >
           <Text className="text-white font-semibold">Allow Camera</Text>
+        </Pressable>
+
+        <Pressable onPress={() => router.back()} className="mt-3">
+          <Text className="text-sky-600 font-semibold">Back</Text>
         </Pressable>
       </View>
     );
@@ -55,17 +76,20 @@ export default function ScanQR() {
       <CameraView
         style={{ flex: 1 }}
         facing="back"
+        // ✅ Stop scanning after first success
+        onBarcodeScanned={scanned ? undefined : onBarcodeScanned}
         barcodeScannerSettings={{
-          // You can restrict formats if you want
-          // barcodeTypes: ["qr"]
+          // If you only want QR:
+          // barcodeTypes: ["qr"],
         }}
-        onBarcodeScanned={onBarcodeScanned}
       />
 
       {/* Overlay */}
       <View className="absolute inset-0 items-center justify-center">
         <View className="h-56 w-56 rounded-3xl border-2 border-white/80" />
-        <Text className="mt-4 text-white/90 font-semibold">Align QR inside the box</Text>
+        <Text className="mt-4 text-white/90 font-semibold">
+          Align QR inside the box
+        </Text>
 
         {scanned && (
           <Pressable
