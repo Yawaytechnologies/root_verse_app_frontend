@@ -28,7 +28,6 @@ export default function ScanQR() {
 
       const data = String(result?.data ?? "").trim();
 
-      // If you want to require valid data:
       if (!data) {
         setScanned(false);
         return;
@@ -76,7 +75,6 @@ export default function ScanQR() {
       <CameraView
         style={{ flex: 1 }}
         facing="back"
-        // ✅ Stop scanning after first success
         onBarcodeScanned={scanned ? undefined : onBarcodeScanned}
         barcodeScannerSettings={{
           // If you only want QR:
