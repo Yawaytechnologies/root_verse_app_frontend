@@ -172,7 +172,7 @@ export default function LoginScreen() {
 
   const onSubmit = () => {
     if (!canSubmit) return;
-    router.replace("/(aqua)/tabs/dashboard");
+    router.replace("/dashboard");
   };
 
   const idRef = useRef<TextInput>(null);

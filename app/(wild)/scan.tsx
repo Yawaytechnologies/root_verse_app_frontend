@@ -1,7 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
+import { View, Text, Pressable } from "react-native";
 import { router } from "expo-router";
-import { Pressable, Text, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+
+type ScanResult = {
+  data?: string;
+  type?: string;
+};
 
 export default function ScanQR() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -9,46 +14,57 @@ export default function ScanQR() {
 
   useEffect(() => {
     if (!permission) return;
-    if (!permission.granted) requestPermission();
-  }, [permission]);
 
-  const goToTrace = (raw: string) => {
-    let crateId = (raw ?? "").trim();
+    // ✅ Ask only when possible; avoids infinite prompts
+    if (!permission.granted && permission.canAskAgain) {
+      requestPermission();
+    }
+  }, [permission, requestPermission]);
 
-    // If QR contains URL like .../trace/RV-CRATE-000123
-    const match = crateId.match(/trace\/([A-Za-z0-9-_.]+)/);
-    if (match?.[1]) crateId = match[1];
+  const onBarcodeScanned = useCallback(
+    (result: ScanResult) => {
+      if (scanned) return;
+      setScanned(true);
 
-    if (!crateId) return;
+      const data = String(result?.data ?? "").trim();
 
-    router.replace(`/(wild)/trace/${crateId}` as const);
-  };
+      if (!data) {
+        setScanned(false);
+        return;
+      }
+
+      // ✅ Your navigation (enable when ready)
+      // router.push(`/(wild)/trace/${data}` as const);
+
+      router.back();
+    },
+    [scanned]
+  );
 
   if (!permission) {
     return (
-      <View className="flex-1 bg-slate-50 items-center justify-center p-4">
-        <Text className="text-slate-700">Requesting camera permission…</Text>
+      <View className="flex-1 items-center justify-center bg-[#fbf6f1]">
+        <Text>Loading camera permission...</Text>
       </View>
     );
   }
 
   if (!permission.granted) {
     return (
-      <View className="flex-1 bg-slate-50 items-center justify-center p-4">
-        <Text className="text-slate-900 font-bold">Camera permission denied</Text>
-        <Text className="mt-2 text-slate-600 text-center">
-          Enable camera permission to scan QR stickers.
+      <View className="flex-1 items-center justify-center bg-[#fbf6f1] px-5">
+        <Text className="text-base font-semibold text-[#2b2b2b] text-center">
+          Camera permission is required to scan QR.
         </Text>
 
         <Pressable
           onPress={requestPermission}
-          className="mt-4 rounded-2xl bg-black px-5 py-3"
+          className="mt-4 rounded-2xl bg-[#a06b2a] px-5 py-3"
         >
-          <Text className="text-white font-semibold">Grant Permission</Text>
+          <Text className="text-white font-semibold">Allow Camera</Text>
         </Pressable>
 
         <Pressable onPress={() => router.back()} className="mt-3">
-          <Text className="text-sky-600 font-semibold">Go Back</Text>
+          <Text className="text-sky-600 font-semibold">Back</Text>
         </Pressable>
       </View>
     );
@@ -58,45 +74,37 @@ export default function ScanQR() {
     <View className="flex-1 bg-black">
       <CameraView
         style={{ flex: 1 }}
+        facing="back"
+        onBarcodeScanned={scanned ? undefined : onBarcodeScanned}
         barcodeScannerSettings={{
-          barcodeTypes: ["qr"],
+          // If you only want QR:
+          // barcodeTypes: ["qr"],
         }}
-        onBarcodeScanned={
-          scanned
-            ? undefined
-            : (result) => {
-                // result.data is the QR text
-                setScanned(true);
-                goToTrace(result.data);
-              }
-        }
       />
 
       {/* Overlay */}
       <View className="absolute inset-0 items-center justify-center">
-        <View className="h-64 w-64 rounded-2xl border-2 border-white/80" />
-        <Text className="mt-6 text-white font-semibold">Align QR inside the box</Text>
-        <Text className="mt-1 text-white/70 text-xs">Sticker should contain crateId</Text>
-      </View>
-
-      {/* Bottom controls */}
-      <View className="absolute bottom-0 left-0 right-0 p-4 bg-black/50">
-        <Pressable
-          onPress={() => router.back()}
-          className="rounded-2xl bg-white/10 p-4 active:opacity-80"
-        >
-          <Text className="text-center text-white font-semibold">Cancel</Text>
-        </Pressable>
+        <View className="h-56 w-56 rounded-3xl border-2 border-white/80" />
+        <Text className="mt-4 text-white/90 font-semibold">
+          Align QR inside the box
+        </Text>
 
         {scanned && (
           <Pressable
             onPress={() => setScanned(false)}
-            className="mt-3 rounded-2xl bg-white/10 p-4 active:opacity-80"
+            className="mt-4 rounded-2xl bg-white/15 px-5 py-3"
           >
-            <Text className="text-center text-white font-semibold">Scan Again</Text>
+            <Text className="text-white font-semibold">Scan again</Text>
           </Pressable>
         )}
       </View>
+
+      <Pressable
+        onPress={() => router.back()}
+        className="absolute left-4 top-12 rounded-full bg-white/15 px-4 py-2"
+      >
+        <Text className="text-white font-semibold">Back</Text>
+      </Pressable>
     </View>
   );
 }

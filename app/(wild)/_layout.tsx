@@ -6,8 +6,13 @@ import { useLanguage } from "../../src/data/wild/lang.store";
 function LangButton() {
   const { lang, toggleLang } = useLanguage();
   return (
-    <Pressable onPress={toggleLang} className="mr-3 rounded-xl border border-slate-200 bg-white px-3 py-1.5 active:opacity-80">
-      <Text className="text-xs font-semibold text-slate-900">{lang === "en" ? "EN" : "TA"}</Text>
+    <Pressable
+      onPress={toggleLang}
+      className="mr-3 rounded-xl border border-slate-200 bg-white px-3 py-1.5 active:opacity-80"
+    >
+      <Text className="text-xs font-semibold text-slate-900">
+        {lang === "en" ? "EN" : "TA"}
+      </Text>
     </Pressable>
   );
 }

@@ -1,9 +1,10 @@
-import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
-import { Stack } from "expo-router";
+import "react-native-reanimated";
 import React, { useEffect, useState } from "react";
 import { View, useColorScheme } from "react-native";
+import { Stack } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 
 import "./global.css";
 
@@ -36,10 +37,10 @@ export default function RootLayout() {
     };
   }, []);
 
-  if (!ready) return null;
-
   const isDark = scheme === "dark";
   const bg = isDark ? "#050B16" : "#F5F7FB";
+
+  if (!ready) return null;
 
   return (
     <Provider store={store}>
