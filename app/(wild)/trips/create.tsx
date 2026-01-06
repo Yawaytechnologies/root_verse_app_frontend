@@ -1,215 +1,129 @@
 import React, { useMemo, useRef, useState } from "react";
-import { router, useLocalSearchParams } from "expo-router";
-import {
-  Alert,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { router } from "expo-router";
+import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import * as ImagePicker from "expo-image-picker";
 import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
-import { useTrace } from "../../../src/data/wild/trace.store";
 
-/** ---------------- Dummy reference tables (replace from API later) ---------------- */
-const FISHING_METHODS = ["Hook & Line", "Longline", "Gillnet", "Trawling", "Pole & Line"];
-const PORTS = ["Chennai", "Nagapattinam", "Thoothukudi", "Ramanathapuram", "Kanyakumari"];
-const SPECIES = ["Yellowfin Tuna", "Red Snapper", "Squid", "White Pomfret", "Seer Fish"];
+import { createTrip as createTripDummy } from "../../../src/data/wild/trips.dummy";
+import { useAppDispatch } from "../../../src/store/hooks";
+import { createTrip as createTripThunk } from "../../../src/features/trip/tripSlice";
 
-/** ---------------- Helpers ---------------- */
-const genTripId = () => {
-  const yy = String(new Date().getFullYear()).slice(-2);
-  const rnd = Math.floor(1000 + Math.random() * 9000);
-  return `T${yy}${rnd}`;
+type Lang = "ta" | "en";
+
+const FISHING_METHODS = ["Pole & Line", "Hook & Line", "Longline", "Gillnet", "Trawling"];
+
+const LANDING_CENTERS = [
+  "Chennai Fishing Harbor",
+  "Nagapattinam Fishing Harbor",
+  "Thoothukudi Fishing Harbor",
+  "Ramanathapuram Fishing Harbor",
+];
+
+const i18n = {
+  en: {
+    title: "New Trip Request",
+    online: "Online",
+    ownerName: "Owner Name",
+    regNo: "Registration No",
+    tripDetails: "Trip Details",
+    tripName: "Trip Name",
+    fishingMethod: "Fishing Method",
+    landingCenter: "Nearest Station",
+    tapToSelect: "Tap to select",
+    select: "Select",
+    plannedTripDT: "Planned Trip Date & Time",
+    crewDetails: "Crew Details",
+    crewMembers: "Crew members",
+    crewHelp: "Use + / − to adjust (min 0)",
+
+    qrCount: "QR Count",
+    qrCountPH: "e.g. 10",
+    qrHelp: "How many QR codes needed for this trip",
+
+    planning: "Planning",
+    expectedReturn: "Arrival Date (optional)",
+    suppliesCost: "Supplies Cost (Auto)",
+    diesel: "Diesel",
+    liters: "Liters",
+    ratePerLiter: "₹ / Liter",
+    dieselCost: "Diesel Cost",
+    ice: "Ice",
+    kg: "Kg",
+    ratePerKg: "₹ / Kg",
+    iceCost: "Ice Cost",
+    totalCost: "Total",
+    totalHelp: "Diesel + Ice (auto-calculated)",
+    cancel: "Cancel",
+    submit: "Submit",
+
+    errMethod: "Select fishing method",
+    errLanding: "Select nearest station",
+    errPlanned: "Select planned trip date & time",
+    posting: "Creating trip...",
+    sent: "Trip request sent ✅",
+    status: "Status",
+
+    apiFailDummy: "API failed — saved locally (dummy).",
+  },
+  ta: {
+    title: "புதிய பயணம் கோரிக்கை",
+    online: "இணையத்தில்",
+    ownerName: "உரிமையாளர் பெயர்",
+    regNo: "பதிவு எண்",
+    tripDetails: "பயண விவரங்கள்",
+    tripName: "பயண பெயர்",
+    fishingMethod: "மீன்பிடி முறை",
+    landingCenter: "அருகிலுள்ள நிலையம்",
+    tapToSelect: "தேர்வு செய்ய தட்டுங்கள்",
+    select: "தேர்வு செய்",
+    plannedTripDT: "திட்டமிட்ட பயண தேதி & நேரம்",
+    crewDetails: "குழு விவரங்கள்",
+    crewMembers: "குழு உறுப்பினர்கள்",
+    crewHelp: "குறை / கூட்டு பட்டன்களை பயன்படுத்தவும் (குறைந்தபட்சம் 0)",
+
+    qrCount: "QR எண்ணிக்கை",
+    qrCountPH: "உதா: 10",
+    qrHelp: "இந்த பயணத்திற்கு எத்தனை QR தேவை?",
+
+    planning: "திட்டம்",
+    expectedReturn: "வருகை தேதி (விருப்பம்)",
+    suppliesCost: "செலவுகள் (தானாக கணக்கு)",
+    diesel: "டீசல்",
+    liters: "லிட்டர்",
+    ratePerLiter: "₹ / லிட்டர்",
+    dieselCost: "டீசல் செலவு",
+    ice: "ஐஸ்",
+    kg: "கிலோ",
+    ratePerKg: "₹ / கிலோ",
+    iceCost: "ஐஸ் செலவு",
+    totalCost: "மொத்தம்",
+    totalHelp: "டீசல் + ஐஸ் (தானாக கணக்கு)",
+    cancel: "ரத்து",
+    submit: "சமர்ப்பி",
+
+    errMethod: "மீன்பிடி முறையை தேர்வு செய்யவும்",
+    errLanding: "அருகிலுள்ள நிலையத்தை தேர்வு செய்யவும்",
+    errPlanned: "பயண தேதி & நேரம் தேர்வு செய்யவும்",
+    posting: "பயணம் உருவாக்கப்படுகிறது...",
+    sent: "பயண கோரிக்கை அனுப்பப்பட்டது ✅",
+    status: "நிலை",
+
+    apiFailDummy: "API தோல்வி — உள்ளூரில் சேமிக்கப்பட்டது (dummy).",
+  },
 };
 
-const toNum = (v: string) => {
-  const n = Number(String(v).replace(/[^0-9.]/g, ""));
-  return Number.isFinite(n) ? n : 0;
-};
-
-const moneyINR = (n: number) =>
-  n.toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
-
-const fmtDate = (d?: Date | null) => {
-  if (!d) return "";
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-};
-
-const parseYMD = (s: string): Date | null => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const d = Number(m[3]);
-  const dt = new Date(y, mo - 1, d);
-  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
-  return dt;
-};
-
-/** ---------------- UI bits ---------------- */
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <View className={`rounded-2xl border border-slate-200 bg-white ${className}`}>{children}</View>;
+  return <View className={`rounded-2xl border border-[#ead7c8] bg-white ${className}`}>{children}</View>;
 }
 
-function FieldCard({ children }: { children: React.ReactNode }) {
-  return <View className="rounded-2xl border border-slate-200 bg-white px-4 py-3">{children}</View>;
+function Label({ children }: { children: React.ReactNode }) {
+  return <Text className="text-xs text-[#7a6f66]">{children}</Text>;
 }
 
-function SelectField({
-  label,
-  value,
-  placeholder,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} className="active:opacity-80">
-      <Text className="text-xs text-slate-500">{label}</Text>
-      <Text className={`mt-1 text-base ${value ? "text-slate-900" : "text-slate-400"}`}>
-        {value || placeholder}
-      </Text>
-      <Text className="mt-1 text-[11px] text-slate-400">Tap to choose ▾</Text>
-    </Pressable>
-  );
+function FieldBox({ children }: { children: React.ReactNode }) {
+  return <View className="mt-2 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">{children}</View>;
 }
 
-function DateField({
-  label,
-  value,
-  placeholder,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} className="active:opacity-80">
-      <Text className="text-xs text-slate-500">{label}</Text>
-      <Text className={`mt-1 text-base ${value ? "text-slate-900" : "text-slate-400"}`}>
-        {value || placeholder}
-      </Text>
-      <Text className="mt-1 text-[11px] text-slate-400">Tap to pick date 📅</Text>
-    </Pressable>
-  );
-}
-
-function WebDateModal({
-  open,
-  title,
-  value,
-  onClose,
-  onSave,
-}: {
-  open: boolean;
-  title: string;
-  value: string;
-  onClose: () => void;
-  onSave: (v: string) => void;
-}) {
-  const [v, setV] = useState(value);
-  if (!open) return null;
-
-  return (
-    <View className="absolute inset-0 items-center justify-center bg-black/50 px-6">
-      <View className="w-full rounded-2xl border border-slate-200 bg-white p-4">
-        <Text className="text-base font-bold text-slate-900">{title}</Text>
-        <Text className="mt-1 text-xs text-slate-500">Format: YYYY-MM-DD</Text>
-
-        <View className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-          <TextInput
-            value={v}
-            onChangeText={setV}
-            placeholder="2025-12-20"
-            className="text-base text-slate-900"
-          />
-        </View>
-
-        <View className="mt-4 flex-row gap-3">
-          <Pressable
-            onPress={onClose}
-            className="flex-1 rounded-2xl border border-slate-200 p-3 active:opacity-80"
-          >
-            <Text className="text-center font-semibold text-slate-700">Cancel</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => {
-              onSave(v);
-              onClose();
-            }}
-            className="flex-1 rounded-2xl bg-slate-900 p-3 active:opacity-90"
-          >
-            <Text className="text-center font-semibold text-white">Save</Text>
-          </Pressable>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-/** ✅ Native Picker Modal (fix: never behind form) */
-function PickerModal({
-  open,
-  title,
-  value,
-  onClose,
-  onPick,
-}: {
-  open: boolean;
-  title: string;
-  value: Date;
-  onClose: () => void;
-  onPick: (d: Date) => void;
-}) {
-  if (!open) return null;
-
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable onPress={onClose} className="flex-1 bg-black/50 justify-end">
-        <Pressable onPress={() => {}} className="rounded-t-3xl bg-white p-4">
-          <View className="flex-row items-center justify-between">
-            <Text className="text-base font-bold text-slate-900">{title}</Text>
-            <Pressable onPress={onClose} className="px-3 py-2 active:opacity-70">
-              <Text className="text-sm font-semibold text-blue-600">Done</Text>
-            </Pressable>
-          </View>
-
-          <View className="mt-3">
-            <DateTimePicker
-              value={value}
-              mode="date"
-              display={Platform.OS === "ios" ? "spinner" : "default"}
-              onChange={(event, date) => {
-                if (Platform.OS !== "ios") {
-                  if ((event as any).type === "dismissed") return onClose();
-                  if (date) onPick(date);
-                  return onClose();
-                }
-                if (date) onPick(date);
-              }}
-            />
-          </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
-/** ---------------- Bottom Sheet Picker ---------------- */
 function PickerSheet({
   title,
   value,
@@ -242,14 +156,14 @@ function PickerSheet({
     >
       <BottomSheetView style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
         <View className="flex-row items-center justify-between">
-          <Text className="text-base font-bold text-slate-900">{title}</Text>
+          <Text className="text-base font-bold text-[#2b2b2b]">{title}</Text>
           <Pressable onPress={() => sheetRef.current?.dismiss()} className="rounded-full px-3 py-2 active:opacity-80">
-            <Text className="text-sm font-semibold text-blue-600">Done</Text>
+            <Text className="text-sm font-semibold text-[#a06b2a]">Done</Text>
           </Pressable>
         </View>
 
-        <View className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-          <TextInput value={q} onChangeText={setQ} placeholder="Search..." className="text-base text-slate-900" />
+        <View className="mt-3 rounded-xl border border-[#ead7c8] bg-[#fbf6f1] px-3 py-2">
+          <TextInput value={q} onChangeText={setQ} placeholder="Search..." className="text-base text-[#2b2b2b]" />
         </View>
 
         <ScrollView className="mt-3" keyboardShouldPersistTaps="handled">
@@ -262,13 +176,11 @@ function PickerSheet({
                   onSelect(item);
                   sheetRef.current?.dismiss();
                 }}
-                className={`mb-2 rounded-2xl border px-4 py-3 active:opacity-80 ${
-                  active ? "border-blue-200 bg-blue-50" : "border-slate-200 bg-white"
+                className={`mb-2 rounded-xl border px-4 py-3 active:opacity-80 ${
+                  active ? "border-[#a06b2a] bg-[#fff3e7]" : "border-[#ead7c8] bg-white"
                 }`}
               >
-                <Text className={`text-sm font-semibold ${active ? "text-blue-700" : "text-slate-900"}`}>
-                  {item}
-                </Text>
+                <Text className={`text-sm font-semibold ${active ? "text-[#7a4a12]" : "text-[#2b2b2b]"}`}>{item}</Text>
               </Pressable>
             );
           })}
@@ -278,366 +190,487 @@ function PickerSheet({
   );
 }
 
-/** ---------------- Screen ---------------- */
-export default function CreateTrip() {
-  const { crateId } = useLocalSearchParams<{ crateId?: string }>();
-  const trace = useTrace();
+function toISO(dt: Date) {
+  return dt.toISOString();
+}
 
-  // Core
-  const [tripId] = useState(genTripId());
+function toISOArrival(dateOnly: Date) {
+  // set fixed arrival time = 18:00 local (safe)
+  const d = new Date(dateOnly);
+  d.setHours(18, 0, 0, 0);
+  return d.toISOString();
+}
+
+function formatDateTime(dt: Date) {
+  const yyyy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  let hr = dt.getHours();
+  const min = String(dt.getMinutes()).padStart(2, "0");
+  const ampm = hr >= 12 ? "PM" : "AM";
+  hr = hr % 12;
+  hr = hr === 0 ? 12 : hr;
+  return `${yyyy}-${mm}-${dd} ${String(hr).padStart(2, "0")}:${min} ${ampm}`;
+}
+
+function onlyDecimal(v: string) {
+  let s = (v || "").replace(/[^0-9.]/g, "");
+  const firstDot = s.indexOf(".");
+  if (firstDot !== -1) {
+    s = s.slice(0, firstDot + 1) + s.slice(firstDot + 1).replace(/\./g, "");
+  }
+  return s;
+}
+function onlyInt(v: string) {
+  return (v || "").replace(/[^0-9]/g, "");
+}
+function toNum(v: string) {
+  const n = Number(String(v ?? "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+function money(n: number) {
+  return `₹${n.toFixed(2)}`;
+}
+
+function mapMethodToApi(label: string) {
+  const l = label.toLowerCase();
+  if (l.includes("pole")) return "pole&line";
+  if (l.includes("hook")) return "hook&line";
+  if (l.includes("long")) return "longline";
+  if (l.includes("gill")) return "gillnet";
+  return "trawling";
+}
+
+export default function NewTripRequest() {
+  const dispatch = useAppDispatch();
+
+  const [lang, setLang] = useState<Lang>("ta");
+  const t = i18n[lang];
+
+  const ownerName = "Sriharan";
+  const registrationNo = "TN02F5678";
+
+  const [tripName] = useState(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    return `${registrationNo}/${y}${m}${day}_${hh}${mi}`;
+  });
+
   const [method, setMethod] = useState("");
-  const [departurePort, setDeparturePort] = useState("");
-  const [targetSpecies, setTargetSpecies] = useState("");
-  const [crewMembers, setCrewMembers] = useState("");
+  const [nearStation, setNearStation] = useState("");
 
-  // Dates (native)
-  const [startDate, setStartDate] = useState<Date | null>(null);
-  const [returnDate, setReturnDate] = useState<Date | null>(null);
-  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [plannedDT, setPlannedDT] = useState<Date | null>(null);
+  const [showPlannedDate, setShowPlannedDate] = useState(false);
+  const [showPlannedTime, setShowPlannedTime] = useState(false);
+
+  const [expectedReturn, setExpectedReturn] = useState<Date | null>(null);
   const [showReturnPicker, setShowReturnPicker] = useState(false);
 
-  // Dates (web fallback)
-  const [webStartOpen, setWebStartOpen] = useState(false);
-  const [webReturnOpen, setWebReturnOpen] = useState(false);
-  const [webStartStr, setWebStartStr] = useState("");
-  const [webReturnStr, setWebReturnStr] = useState("");
+  const [crewCount, setCrewCount] = useState(0);
 
-  // Expenses
-  const [fuelLiters, setFuelLiters] = useState("100");
-  const [fuelPrice, setFuelPrice] = useState("100");
-  const [iceKg, setIceKg] = useState("1000");
-  const [icePrice, setIcePrice] = useState("10");
-  const [foodExpenses, setFoodExpenses] = useState("5000");
-  const [otherExpenses, setOtherExpenses] = useState("1000");
+  const [qrCount, setQrCount] = useState("");
 
-  // Images
-  const [images, setImages] = useState<string[]>([]);
+  const [dieselLiters, setDieselLiters] = useState("");
+  const [dieselRate, setDieselRate] = useState("95");
+  const [iceKg, setIceKg] = useState("");
+  const [iceRate, setIceRate] = useState("15");
 
-  // Bottom sheets
+  const dieselCost = useMemo(() => toNum(dieselLiters) * toNum(dieselRate), [dieselLiters, dieselRate]);
+  const iceCost = useMemo(() => toNum(iceKg) * toNum(iceRate), [iceKg, iceRate]);
+  const totalCost = useMemo(() => dieselCost + iceCost, [dieselCost, iceCost]);
+
+  const plannedStr = plannedDT ? formatDateTime(plannedDT) : "";
+  const returnStr = expectedReturn ? formatDateTime(expectedReturn).split(" ")[0] : "";
+
+  const [posting, setPosting] = useState(false);
+
   const methodRef = useRef<BottomSheetModal>(null);
-  const portRef = useRef<BottomSheetModal>(null);
-  const speciesRef = useRef<BottomSheetModal>(null);
+  const stationRef = useRef<BottomSheetModal>(null);
 
-  const fuelTotal = useMemo(() => toNum(fuelLiters) * toNum(fuelPrice), [fuelLiters, fuelPrice]);
-  const iceTotal = useMemo(() => toNum(iceKg) * toNum(icePrice), [iceKg, icePrice]);
-  const totalExpenses = useMemo(
-    () => fuelTotal + iceTotal + toNum(foodExpenses) + toNum(otherExpenses),
-    [fuelTotal, iceTotal, foodExpenses, otherExpenses]
-  );
+  const submit = async () => {
+    if (!method) return Alert.alert(t.title, t.errMethod);
+    if (!nearStation) return Alert.alert(t.title, t.errLanding);
+    if (!plannedDT) return Alert.alert(t.title, t.errPlanned);
 
-  const startDateStr = useMemo(() => fmtDate(startDate), [startDate]);
-  const returnDateStr = useMemo(() => fmtDate(returnDate), [returnDate]);
+    const apiPayload = {
+      fishing_method: mapMethodToApi(method),
+      near_station: nearStation,
+      planned_at: toISO(plannedDT),
+      arrival_at: expectedReturn ? toISOArrival(expectedReturn) : null,
 
-  const shownStart = Platform.OS === "web" ? webStartStr : startDateStr;
-  const shownReturn = Platform.OS === "web" ? webReturnStr : returnDateStr;
-
-  const pickImages = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Permission needed", "Allow photo access to upload images.");
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsMultipleSelection: true,
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-      selectionLimit: 6,
-    });
-
-    if (result.canceled) return;
-
-    const uris = result.assets.map((a) => a.uri);
-    setImages((prev) => [...prev, ...uris].slice(0, 10));
-  };
-
-  const removeImage = (uri: string) => setImages((prev) => prev.filter((u) => u !== uri));
-
-  const save = () => {
-    if (!method) return Alert.alert("Missing", "Fishing method is required");
-    if (!departurePort) return Alert.alert("Missing", "Departure port is required");
-    if (!targetSpecies) return Alert.alert("Missing", "Target species is required");
-
-    // Validate start date depending on platform
-    if (Platform.OS === "web") {
-      const dt = parseYMD(webStartStr);
-      if (!dt) return Alert.alert("Missing", "Trip start date is required (YYYY-MM-DD)");
-    } else {
-      if (!startDate) return Alert.alert("Missing", "Trip start date is required");
-    }
-
-    const payload = {
-      tripId,
-      method,
-      departurePort,
-      targetSpecies,
-      tripStartDate: shownStart,
-      expectedReturnDate: shownReturn,
-      crewMembers: toNum(crewMembers),
-      fuel: { liters: toNum(fuelLiters), pricePerQty: toNum(fuelPrice), total: fuelTotal },
-      ice: { kg: toNum(iceKg), pricePerQty: toNum(icePrice), total: iceTotal },
-      foodExpenses: toNum(foodExpenses),
-      otherExpenses: toNum(otherExpenses),
-      totalExpenses,
-      images,
+      // backend output shows diesel/ice/total as string decimals → send costs
+      diesel: dieselCost.toFixed(2),
+      ice: iceCost.toFixed(2),
+      qr_count: Number(qrCount || 0),
+      total: totalCost.toFixed(2),
     };
 
-    // ✅ If opened from Trace Wizard via QR scan, create trace event and return to wizard
-    if (crateId) {
-      trace.addEvent({
-        crateId: String(crateId),
-        stage: "TRIP",
-        data: payload,
-        createdBy: "Owner",
-      });
+    // always save dummy too (offline-friendly)
+    createTripDummy({
+      tripId: tripName,
+      tripName,
+      ownerName,
+      registrationNo,
+      method,
+      landingCenter: nearStation,
+      locationCode: "",
 
-      Alert.alert("Saved", `Trip linked to Sticker ${String(crateId)}\nTrip ID: ${tripId}`);
-      router.replace(`/(wild)/trace/${String(crateId)}` as const);
-      return;
+      plannedTripDateTime: plannedStr,
+      expectedReturnDate: returnStr || null,
+      crewCount,
+      qrCount: Number(qrCount || 0),
+
+      dieselLiters: toNum(dieselLiters),
+      dieselRate: toNum(dieselRate),
+      dieselCost,
+
+      iceKg: toNum(iceKg),
+      iceRate: toNum(iceRate),
+      iceCost,
+
+      totalCost,
+      status: "pending",
+    } as any);
+
+    try {
+      setPosting(true);
+      Alert.alert(t.posting);
+
+      const created = await dispatch(createTripThunk(apiPayload)).unwrap();
+
+      router.replace("/(wild)/trips" as const);
+      Alert.alert(t.sent, `${t.status}: ${created.approval_status}\n${t.totalCost}: ${money(totalCost)}`);
+    } catch (e: any) {
+      // API failed -> dummy already saved
+      router.replace("/(wild)/trips" as const);
+      Alert.alert(t.apiFailDummy, String(e?.message || e));
+    } finally {
+      setPosting(false);
     }
-
-    Alert.alert("Saved (demo)", `Trip ${payload.tripId}\nTotal: ${moneyINR(totalExpenses)}`);
-    router.back();
   };
 
   return (
-    <View className="flex-1 bg-slate-50">
-      {/* Web date modals */}
-      <WebDateModal
-        open={webStartOpen}
-        title="Trip Start Date"
-        value={webStartStr}
-        onClose={() => setWebStartOpen(false)}
-        onSave={(v) => setWebStartStr(v)}
-      />
-      <WebDateModal
-        open={webReturnOpen}
-        title="Expected Return Date"
-        value={webReturnStr}
-        onClose={() => setWebReturnOpen(false)}
-        onSave={(v) => setWebReturnStr(v)}
-      />
-
-      {/* ✅ Native date picker overlays (FIXED: not behind form) */}
-      <PickerModal
-        open={showStartPicker && Platform.OS !== "web"}
-        title="Trip Start Date"
-        value={startDate ?? new Date()}
-        onClose={() => setShowStartPicker(false)}
-        onPick={(d) => setStartDate(d)}
-      />
-      <PickerModal
-        open={showReturnPicker && Platform.OS !== "web"}
-        title="Expected Return Date"
-        value={returnDate ?? new Date()}
-        onClose={() => setShowReturnPicker(false)}
-        onPick={(d) => setReturnDate(d)}
-      />
-
-      {/* Bottom sheet pickers */}
+    <View className="flex-1 bg-[#fbf6f1]">
       <PickerSheet
-        title="Choose Fishing Method"
+        title={t.fishingMethod}
         value={method}
         options={FISHING_METHODS}
         onSelect={setMethod}
         sheetRef={methodRef}
       />
       <PickerSheet
-        title="Choose Departure Port"
-        value={departurePort}
-        options={PORTS}
-        onSelect={setDeparturePort}
-        sheetRef={portRef}
-      />
-      <PickerSheet
-        title="Choose Target Species"
-        value={targetSpecies}
-        options={SPECIES}
-        onSelect={setTargetSpecies}
-        sheetRef={speciesRef}
+        title={t.landingCenter}
+        value={nearStation}
+        options={LANDING_CENTERS}
+        onSelect={setNearStation}
+        sheetRef={stationRef}
       />
 
       <ScrollView contentContainerClassName="p-4 pb-10">
         {/* Header */}
-        <Card className="p-4">
-          <Text className="text-lg font-bold text-slate-900">New Fishing Trip</Text>
-          <Text className="mt-1 text-sm text-slate-600">Full trip registration form.</Text>
-
-          {crateId ? (
-            <View className="mt-3 rounded-xl bg-amber-100 px-3 py-2">
-              <Text className="text-xs font-semibold text-amber-800">
-                Linked to Sticker: {String(crateId)}
-              </Text>
+        <View className="mb-3 flex-row items-center justify-between">
+          <View>
+            <Text className="text-lg font-bold text-[#2b2b2b]">{t.title}</Text>
+            <View className="mt-1 flex-row items-center gap-2">
+              <View className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+              <Text className="text-xs font-semibold text-emerald-700">{t.online}</Text>
             </View>
-          ) : null}
+          </View>
 
-          <View className="mt-3">
-            <Text className="text-xs text-slate-500">Trip ID</Text>
-            <Text className="mt-1 text-base font-bold text-slate-900">{tripId}</Text>
+          <Pressable
+            onPress={() => setLang((x) => (x === "ta" ? "en" : "ta"))}
+            className="rounded-full border border-[#ead7c8] bg-white px-3 py-2 active:opacity-80"
+          >
+            <Text className="text-xs font-semibold text-[#2b2b2b]">{lang === "ta" ? "English" : "தமிழ்"}</Text>
+          </Pressable>
+        </View>
+
+        <Card className="p-4">
+          <View className="flex-row justify-between">
+            <View>
+              <Label>{t.ownerName}:</Label>
+              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">{ownerName}</Text>
+            </View>
+            <View>
+              <Label>{t.regNo}:</Label>
+              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">{registrationNo}</Text>
+            </View>
           </View>
         </Card>
 
-        {/* Core Fields */}
-        <View className="mt-4 gap-3">
-          <FieldCard>
-            <SelectField
-              label="Fishing Method"
-              value={method}
-              placeholder="Choose fishing method"
-              onPress={() => methodRef.current?.present()}
-            />
-          </FieldCard>
+        {/* Trip Details */}
+        <View className="mt-4">
+          <Text className="text-base font-bold text-[#2b2b2b]">{t.tripDetails}</Text>
 
-          <FieldCard>
-            <SelectField
-              label="Departure Fishing Port"
-              value={departurePort}
-              placeholder="Choose departure port"
-              onPress={() => portRef.current?.present()}
-            />
-          </FieldCard>
+          <Card className="mt-3 p-4">
+            <Label>{t.tripName}</Label>
+            <FieldBox>
+              <Text className="text-base text-[#2b2b2b]">{tripName}</Text>
+            </FieldBox>
 
-          <FieldCard>
-            <SelectField
-              label="Target Species"
-              value={targetSpecies}
-              placeholder="Choose target species"
-              onPress={() => speciesRef.current?.present()}
-            />
-          </FieldCard>
+            <View className="mt-3">
+              <FieldBox>
+                <Pressable onPress={() => methodRef.current?.present()} className="active:opacity-80">
+                  <Label>{t.fishingMethod}</Label>
+                  <Text className={`mt-1 text-base ${method ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                    {method || t.select}
+                  </Text>
+                  <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
+                </Pressable>
+              </FieldBox>
+            </View>
 
-          <FieldCard>
-            <DateField
-              label="Trip Start Date"
-              value={shownStart}
-              placeholder="Choose start date"
-              onPress={() => (Platform.OS === "web" ? setWebStartOpen(true) : setShowStartPicker(true))}
-            />
-          </FieldCard>
+            <View className="mt-3">
+              <FieldBox>
+                <Pressable onPress={() => stationRef.current?.present()} className="active:opacity-80">
+                  <Label>{t.landingCenter}</Label>
+                  <Text className={`mt-1 text-base ${nearStation ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                    {nearStation || t.select}
+                  </Text>
+                  <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
+                </Pressable>
+              </FieldBox>
+            </View>
 
-          <FieldCard>
-            <DateField
-              label="Expected Return Date"
-              value={shownReturn}
-              placeholder="Choose return date"
-              onPress={() => (Platform.OS === "web" ? setWebReturnOpen(true) : setShowReturnPicker(true))}
-            />
-          </FieldCard>
+            <View className="mt-3">
+              <FieldBox>
+                <Pressable onPress={() => setShowPlannedDate(true)} className="active:opacity-80">
+                  <Label>{t.plannedTripDT}</Label>
+                  <Text className={`mt-1 text-base ${plannedStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                    {plannedStr || t.select}
+                  </Text>
+                </Pressable>
+              </FieldBox>
 
-          <FieldCard>
-            <Text className="text-xs text-slate-500">Crew Members</Text>
-            <TextInput
-              value={crewMembers}
-              onChangeText={setCrewMembers}
-              keyboardType="numeric"
-              placeholder="e.g., 6"
-              className="mt-1 text-base text-slate-900"
-            />
-          </FieldCard>
+              {showPlannedDate && Platform.OS !== "web" && (
+                <DateTimePicker
+                  value={plannedDT ?? new Date()}
+                  mode="date"
+                  display={Platform.OS === "ios" ? "spinner" : "default"}
+                  onChange={(e, date) => {
+                    if ((e as any).type === "dismissed") return setShowPlannedDate(false);
+                    setShowPlannedDate(false);
+                    if (date) {
+                      const base = plannedDT ?? new Date();
+                      const merged = new Date(date);
+                      merged.setHours(base.getHours(), base.getMinutes(), 0, 0);
+                      setPlannedDT(merged);
+                      setShowPlannedTime(true);
+                    }
+                  }}
+                />
+              )}
+
+              {showPlannedTime && Platform.OS !== "web" && (
+                <DateTimePicker
+                  value={plannedDT ?? new Date()}
+                  mode="time"
+                  display={Platform.OS === "ios" ? "spinner" : "default"}
+                  onChange={(e, date) => {
+                    if ((e as any).type === "dismissed") return setShowPlannedTime(false);
+                    setShowPlannedTime(false);
+                    if (date) {
+                      const base = plannedDT ?? new Date();
+                      const merged = new Date(base);
+                      merged.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                      setPlannedDT(merged);
+                    }
+                  }}
+                />
+              )}
+            </View>
+          </Card>
         </View>
 
-        {/* Expenses */}
-        <View className="mt-6">
-          <Text className="mb-2 text-base font-bold text-slate-900">Expenses</Text>
+        {/* Crew Details (Tamil safe layout) */}
+        <View className="mt-4">
+          <Text className="text-base font-bold text-[#2b2b2b]">{t.crewDetails}</Text>
 
-          {/* Fuel */}
-          <Card className="p-4">
-            <Text className="text-sm font-bold text-slate-900">Fuel</Text>
-            <View className="mt-3 flex-row gap-3">
-              <View className="flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <Text className="text-xs text-slate-500">Fuel (liters)</Text>
-                <TextInput value={fuelLiters} onChangeText={setFuelLiters} keyboardType="numeric" className="mt-1 text-base text-slate-900" />
-              </View>
-
-              <View className="flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <Text className="text-xs text-slate-500">Price per Qty</Text>
-                <TextInput value={fuelPrice} onChangeText={setFuelPrice} keyboardType="numeric" className="mt-1 text-base text-slate-900" />
-              </View>
-            </View>
-
-            <View className="mt-3 flex-row items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-              <Text className="text-xs text-slate-500">Total Fuel Cost</Text>
-              <Text className="text-sm font-bold text-slate-900">{moneyINR(fuelTotal)}</Text>
-            </View>
-          </Card>
-
-          {/* Ice */}
           <Card className="mt-3 p-4">
-            <Text className="text-sm font-bold text-slate-900">Ice</Text>
-            <View className="mt-3 flex-row gap-3">
-              <View className="flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <Text className="text-xs text-slate-500">Ice (kg)</Text>
-                <TextInput value={iceKg} onChangeText={setIceKg} keyboardType="numeric" className="mt-1 text-base text-slate-900" />
+            <View className="flex-row items-start">
+              <View className="flex-1 pr-3" style={{ flexShrink: 1 }}>
+                <Text className="text-sm font-semibold text-[#2b2b2b]" numberOfLines={1}>
+                  {t.crewMembers}: {crewCount}
+                </Text>
+                <Text className="mt-1 text-[11px] text-[#7a6f66]" numberOfLines={2}>
+                  {t.crewHelp}
+                </Text>
               </View>
 
-              <View className="flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <Text className="text-xs text-slate-500">Price per Qty</Text>
-                <TextInput value={icePrice} onChangeText={setIcePrice} keyboardType="numeric" className="mt-1 text-base text-slate-900" />
-              </View>
-            </View>
+              <View className="flex-row items-center" style={{ flexShrink: 0 }}>
+                <Pressable
+                  onPress={() => setCrewCount((c) => Math.max(0, c - 1))}
+                  disabled={crewCount === 0}
+                  className="h-10 w-10 items-center justify-center rounded-full border border-[#ead7c8] bg-white active:opacity-80"
+                  style={{ opacity: crewCount === 0 ? 0.45 : 1 }}
+                >
+                  <Text className="text-base font-extrabold text-[#2b2b2b]">−</Text>
+                </Pressable>
 
-            <View className="mt-3 flex-row items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-              <Text className="text-xs text-slate-500">Total Ice Cost</Text>
-              <Text className="text-sm font-bold text-slate-900">{moneyINR(iceTotal)}</Text>
-            </View>
-          </Card>
+                <View style={{ width: 10 }} />
 
-          {/* Food & Other */}
-          <Card className="mt-3 p-4">
-            <Text className="text-sm font-bold text-slate-900">Other</Text>
-
-            <View className="mt-3 gap-3">
-              <View className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <Text className="text-xs text-slate-500">Food Expenses</Text>
-                <TextInput value={foodExpenses} onChangeText={setFoodExpenses} keyboardType="numeric" className="mt-1 text-base text-slate-900" />
-              </View>
-
-              <View className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <Text className="text-xs text-slate-500">Other Expense</Text>
-                <TextInput value={otherExpenses} onChangeText={setOtherExpenses} keyboardType="numeric" className="mt-1 text-base text-slate-900" />
-              </View>
-
-              <View className="flex-row items-center justify-between rounded-xl bg-slate-100 px-3 py-3">
-                <Text className="text-sm font-semibold text-slate-700">Total Expenses</Text>
-                <Text className="text-base font-bold text-slate-900">{moneyINR(totalExpenses)}</Text>
+                <Pressable
+                  onPress={() => setCrewCount((c) => c + 1)}
+                  className="h-10 w-10 items-center justify-center rounded-full border border-[#a06b2a] bg-[#fff3e7] active:opacity-80"
+                >
+                  <Text className="text-base font-extrabold text-[#7a4a12]">+</Text>
+                </Pressable>
               </View>
             </View>
           </Card>
         </View>
 
-        {/* Uploads */}
-        <View className="mt-6">
-          <Text className="mb-2 text-base font-bold text-slate-900">Uploads</Text>
+        {/* Planning + Costs */}
+        <View className="mt-4">
+          <Text className="text-base font-bold text-[#2b2b2b]">{t.planning}</Text>
 
-          <Card className="p-4">
-            <Text className="text-sm font-semibold text-slate-900">Upload Vessel & Fishing Gear Images</Text>
-            <Text className="mt-1 text-xs text-slate-600">Add up to 10 images.</Text>
+          <Card className="mt-3 p-4">
+            <FieldBox>
+              <Pressable onPress={() => setShowReturnPicker(true)} className="active:opacity-80">
+                <Label>{t.expectedReturn}</Label>
+                <Text className={`mt-1 text-base ${returnStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                  {returnStr || t.select}
+                </Text>
+              </Pressable>
+            </FieldBox>
 
-            <Pressable onPress={pickImages} className="mt-3 rounded-2xl bg-slate-900 px-4 py-3 active:opacity-90">
-              <Text className="text-center text-white font-semibold">Pick Images</Text>
-            </Pressable>
-
-            {images.length > 0 && (
-              <View className="mt-3 gap-2">
-                {images.map((uri, idx) => (
-                  <View key={uri} className="flex-row items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <Text className="flex-1 text-xs text-slate-700" numberOfLines={1}>
-                      Image {idx + 1}: {uri}
-                    </Text>
-                    <Pressable onPress={() => removeImage(uri)} className="ml-3 rounded-full bg-rose-100 px-3 py-1 active:opacity-80">
-                      <Text className="text-xs font-semibold text-rose-700">Remove</Text>
-                    </Pressable>
-                  </View>
-                ))}
-              </View>
+            {showReturnPicker && Platform.OS !== "web" && (
+              <DateTimePicker
+                value={expectedReturn ?? new Date()}
+                mode="date"
+                display={Platform.OS === "ios" ? "spinner" : "default"}
+                onChange={(e, date) => {
+                  if ((e as any).type === "dismissed") return setShowReturnPicker(false);
+                  setShowReturnPicker(false);
+                  if (date) setExpectedReturn(date);
+                }}
+              />
             )}
+
+            {/* QR Count */}
+            <View className="mt-4">
+              <Label>{t.qrCount}</Label>
+              <FieldBox>
+                <Text className="text-[11px] text-[#7a6f66]">{t.qrHelp}</Text>
+                <TextInput
+                  value={qrCount}
+                  onChangeText={(v) => setQrCount(onlyInt(v))}
+                  placeholder={t.qrCountPH}
+                  keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
+                  inputMode="numeric"
+                  className="mt-1 text-base text-[#2b2b2b]"
+                />
+              </FieldBox>
+            </View>
+
+            {/* Supplies Cost */}
+            <View className="mt-4">
+              <Text className="text-sm font-bold text-[#2b2b2b]">{t.suppliesCost}</Text>
+
+              {/* Diesel */}
+              <View className="mt-3">
+                <Label>{t.diesel}</Label>
+                <View className="mt-2 flex-row gap-3">
+                  <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
+                    <Text className="text-[11px] text-[#7a6f66]">{t.liters}</Text>
+                    <TextInput
+                      value={dieselLiters}
+                      onChangeText={(v) => setDieselLiters(onlyDecimal(v))}
+                      placeholder="e.g. 120"
+                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
+                      inputMode="decimal"
+                      className="mt-1 text-base text-[#2b2b2b]"
+                    />
+                  </View>
+                  <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
+                    <Text className="text-[11px] text-[#7a6f66]">{t.ratePerLiter}</Text>
+                    <TextInput
+                      value={dieselRate}
+                      onChangeText={(v) => setDieselRate(onlyDecimal(v))}
+                      placeholder="e.g. 95"
+                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
+                      inputMode="decimal"
+                      className="mt-1 text-base text-[#2b2b2b]"
+                    />
+                  </View>
+                </View>
+
+                <View className="mt-2 rounded-xl border border-[#ffd9b6] bg-[#fff3e7] px-3 py-2">
+                  <Text className="text-xs font-semibold text-[#7a4a12]">
+                    {t.dieselCost}: {money(dieselCost)}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Ice */}
+              <View className="mt-4">
+                <Label>{t.ice}</Label>
+                <View className="mt-2 flex-row gap-3">
+                  <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
+                    <Text className="text-[11px] text-[#7a6f66]">{t.kg}</Text>
+                    <TextInput
+                      value={iceKg}
+                      onChangeText={(v) => setIceKg(onlyDecimal(v))}
+                      placeholder="e.g. 60"
+                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
+                      inputMode="decimal"
+                      className="mt-1 text-base text-[#2b2b2b]"
+                    />
+                  </View>
+                  <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
+                    <Text className="text-[11px] text-[#7a6f66]">{t.ratePerKg}</Text>
+                    <TextInput
+                      value={iceRate}
+                      onChangeText={(v) => setIceRate(onlyDecimal(v))}
+                      placeholder="e.g. 15"
+                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
+                      inputMode="decimal"
+                      className="mt-1 text-base text-[#2b2b2b]"
+                    />
+                  </View>
+                </View>
+
+                <View className="mt-2 rounded-xl border border-[#ffd9b6] bg-[#fff3e7] px-3 py-2">
+                  <Text className="text-xs font-semibold text-[#7a4a12]">
+                    {t.iceCost}: {money(iceCost)}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Total */}
+              <View className="mt-4 rounded-2xl border border-[#a06b2a] bg-[#fff3e7] px-4 py-3">
+                <Text className="text-xs text-[#7a4a12]">{t.totalCost}</Text>
+                <Text className="mt-1 text-lg font-extrabold text-[#2b2b2b]">{money(totalCost)}</Text>
+                <Text className="mt-1 text-[11px] text-[#7a6f66]">{t.totalHelp}</Text>
+              </View>
+            </View>
           </Card>
         </View>
 
-        {/* Save */}
-        <Pressable onPress={save} className="mt-6 rounded-2xl bg-slate-900 p-4 active:opacity-90">
-          <Text className="text-center text-white font-semibold">Save Trip</Text>
-        </Pressable>
+        {/* Actions */}
+        <View className="mt-6 flex-row gap-3">
+          <Pressable
+            onPress={() => router.back()}
+            disabled={posting}
+            className="flex-1 rounded-2xl border border-[#ead7c8] bg-white p-4 active:opacity-80"
+            style={{ opacity: posting ? 0.7 : 1 }}
+          >
+            <Text className="text-center text-[#2b2b2b] font-semibold">{t.cancel}</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={submit}
+            disabled={posting}
+            className="flex-1 rounded-2xl bg-[#a06b2a] p-4 active:opacity-90"
+            style={{ opacity: posting ? 0.7 : 1 }}
+          >
+            <Text className="text-center text-white font-semibold">{posting ? "..." : t.submit}</Text>
+          </Pressable>
+        </View>
       </ScrollView>
     </View>
   );

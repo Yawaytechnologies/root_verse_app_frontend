@@ -27,15 +27,6 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-/* ✅ Redux (keep) */
-import {
-  clearAuthError,
-  loginFail,
-  loginStart,
-  loginSuccess,
-} from "../../src/features/auth/authSlice";
-import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
-
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
 /* -------------------- Forgot glass modal (keep as-is) -------------------- */
@@ -112,48 +103,36 @@ function ForgotGlassModal({
                   backgroundColor: "rgba(0,0,0,0.35)",
                 }}
               >
-                <View className="flex-row items-center justify-between">
+              <View className="flex-row items-center justify-between">
                   <View className="flex-row items-center">
                     <View className="h-9 w-9 rounded-2xl items-center justify-center bg-white/5 border border-white/10">
-                      <Ionicons
-                        name="shield-checkmark-outline"
-                        size={18}
-                        color="#7dd3fc"
-                      />
+                      <Ionicons name="shield-checkmark-outline" size={18} color="#7dd3fc" />
                     </View>
-                    <Text className="text-white text-[14px] font-semibold ml-3">
-                      Help
+            <Text className="text-white text-[14px] font-semibold ml-3">
+                      Password recovery
                     </Text>
                   </View>
 
-                  <Pressable onPress={onClose} className="p-2 -mr-2">
+                  <Pressable onPress={onClose} style={{ padding: 8, marginRight: -8 }}>
                     <Ionicons name="close" size={18} color="#cbd5e1" />
                   </Pressable>
                 </View>
 
-                <Text className="text-slate-300 text-[12px] mt-3 leading-5">
-                  OTP login is handled via your registered mobile number. If you
-                  don’t receive OTP, please contact your administrator.
+              <Text className="text-slate-300 text-[12px] mt-3 leading-5">
+                  For security reasons, password reset is handled by your administrator.
+                  Please contact admin to recover/reset your password.
                 </Text>
 
-                <View className="mt-5 flex-row">
-                  <Pressable
-                    onPress={onClose}
-                    className="flex-1 rounded-2xl overflow-hidden"
-                  >
+              <View className="mt-5 flex-row">
+                  <Pressable onPress={onClose} className="flex-1 rounded-2xl overflow-hidden">
                     <View className="py-3 items-center rounded-2xl bg-white/5 border border-white/10">
-                      <Text className="text-slate-200 text-[12px] font-semibold">
-                        Got it
-                      </Text>
+                      <Text className="text-slate-200 text-[12px] font-semibold">Got it</Text>
                     </View>
                   </Pressable>
 
                   <View style={{ width: 10 }} />
 
-                  <Pressable
-                    onPress={onClose}
-                    className="flex-1 rounded-2xl overflow-hidden"
-                  >
+              <Pressable onPress={onClose} className="flex-1 rounded-2xl overflow-hidden">
                     <LinearGradient
                       colors={["#34d399", "#10b981", "#06b6d4"]}
                       start={{ x: 0, y: 0.5 }}
@@ -164,9 +143,7 @@ function ForgotGlassModal({
                         alignItems: "center",
                       }}
                     >
-                      <Text className="text-black text-[12px] font-semibold">
-                        Contact admin
-                      </Text>
+                  <Text className="text-black text-[12px] font-semibold">Contact admin</Text>
                     </LinearGradient>
                   </Pressable>
                 </View>
@@ -196,33 +173,18 @@ export default function LoginScreen() {
 
   const phoneRef = useRef<TextInput>(null);
 
-  const onSubmit = async () => {
-    if (!canSubmit) return;
+const onSubmit = () => {
+  if (!canSubmit) return;
+  router.replace("/dashboard");
+};
 
-    dispatch(clearAuthError());
-    dispatch(loginStart());
 
-    try {
-      // ✅ format for India (+91) — adjust if backend expects different
-      const e164 = `+91${phoneDigits}`;
-
-      // ✅ For now: just route to OTP screen.
-      // Later you will call backend "send OTP" API here.
-      dispatch(loginSuccess({ step: "OTP_SENT", phone: e164 } as any));
-
-      router.push({
-        pathname: "/(auth)/otp",
-        params: { phone: e164 },
-      });
-    } catch (e: any) {
-      dispatch(loginFail(e?.message || "OTP send failed"));
-    }
-  };
+  const idRef = useRef<TextInput>(null);
+  const pwRef = useRef<TextInput>(null);
 
   const keyboardOpen = useSharedValue(0);
   const keyboardH = useSharedValue(0);
 
-  // ✅ Full screen dim value
   const bgDim = useSharedValue(0);
 
   const dimOn = () => {
@@ -251,11 +213,7 @@ export default function LoginScreen() {
     const subShow = Keyboard.addListener(showEvt, (e: any) => {
       const h = e?.endCoordinates?.height ?? 0;
       keyboardH.value = h;
-
-      keyboardOpen.value = withTiming(1, {
-        duration: 240,
-        easing: Easing.out(Easing.cubic),
-      });
+      keyboardOpen.value = withTiming(1, { duration: 240, easing: Easing.out(Easing.cubic) });
       dimOn();
     });
 
@@ -350,8 +308,7 @@ export default function LoginScreen() {
   const heroFishHeight = heroFishWidth * 0.6;
 
   return (
-    <View className="flex-1 bg-black" style={{ position: "relative" }}>
-      {/* Base gradient BG */}
+    <View style={{ flex: 1, backgroundColor: "black", position: "relative" }}>
       <LinearGradient
         colors={[
           "rgba(16,185,129,0.22)",
@@ -365,22 +322,15 @@ export default function LoginScreen() {
 
       <ForgotGlassModal open={helpOpen} onClose={() => setHelpOpen(false)} />
 
-      {/* ✅ No ScrollView */}
+    {/* ✅ No ScrollView at all => nothing can scroll */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        {/* Hero */}
-        <View
-          style={{
-            flex: 1,
-            justifyContent: "center",
-            alignItems: "center",
-            paddingHorizontal: 20,
-          }}
-        >
+        {/* Hero (fixed) */}
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 20 }}>
           <Animated.View style={heroAnim}>
-            <View className="items-center">
+            <View style={{ alignItems: "center" }}>
               <Animated.View style={fishAnim}>
                 <Image
                   source={require("../../assets/images/Fish.png")}
@@ -389,82 +339,75 @@ export default function LoginScreen() {
                 />
               </Animated.View>
 
-              <View className="mt-0 items-center">
-                <Text
-                  style={{
-                    fontFamily: "System",
-                    fontWeight: "900",
-                    fontSize: 50,
-                    letterSpacing: 3,
-                    color: "white",
-                    textAlign: "center",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  ROOTVERSE
-                </Text>
+          <View className="mt-0 items-center">
+                              <Text style={{
+                                  fontFamily: 'System',
+                                  fontWeight: '900',
+                                  fontSize: 50,
+                                  letterSpacing: 3,
+                                  color: 'white',
+                                  textAlign: 'center',
+                                  textTransform: 'uppercase'
+                              }}>ROOTVERSE</Text>
 
-                <Text
-                  style={{
-                    fontFamily: "System",
-                    fontWeight: "800",
-                    fontSize: 18,
-                    letterSpacing: 3,
-                    color: "#0ea5e9",
-                    textAlign: "center",
-                    marginTop: 4,
-                  }}
-                >
-                  BLUE ECONOMY
-                </Text>
-
-                <Text
-                  style={{
-                    fontFamily: "System",
-                    fontWeight: "800",
-                    fontSize: 18,
-                    letterSpacing: 3,
-                    color: "#0ea5e9",
-                    textAlign: "center",
-                    marginTop: 4,
-                  }}
-                >
-                  TRACEABILITY SYSTEM
-                </Text>
+                              <Text style={{
+                                  fontFamily: 'System',
+                                  fontWeight: '800', // Extra bold
+                                  fontSize: 18,
+                                  letterSpacing: 3,
+                                  color: '#0ea5e9', // sky-300 equivalent
+                                  textAlign: 'center',
+                                  marginTop: 4
+                              }}>BLUE ECONOMY</Text>
+                              
+                              <Text style={{
+                                  fontFamily: 'System',
+                                  fontWeight: '800', // Extra bold
+                                  fontSize: 18,
+                                  letterSpacing: 3,
+                                  color: '#0ea5e9', // sky-300 equivalent
+                                  textAlign: 'center',
+                                  marginTop: 4
+                              }}>TRACEABILITY SYSTEM</Text>
               </View>
             </View>
           </Animated.View>
         </View>
 
-        {/* Dim overlay */}
+      {/* Full-screen dim overlay (below card) */}
         <Animated.View
           pointerEvents="none"
-          style={[
-            { position: "absolute", inset: 0, backgroundColor: "black", zIndex: 5 },
-            dimOverlayAnim,
-          ]}
+          style={[{ position: "absolute", inset: 0, backgroundColor: "black", zIndex: 5 }, dimOverlayAnim]}
         />
 
-        {/* Card */}
-        <View style={{ position: "absolute", left: 20, right: 20, bottom: 190, zIndex: 10 }}>
+      {/* Login card (above overlay) */}
+        <View style={{ position: "absolute", left: 20, right: 20, bottom: 120, zIndex: 10 }}>
           <Animated.View style={formAnim}>
             <BlurView intensity={22} tint="dark" style={{ borderRadius: 26, overflow: "hidden" }}>
-              <View className="bg-black/35 border border-white/10 rounded-[26px] p-5">
-                <Text className="text-slate-300 text-[14px] mb-4 text-center">
+              <View
+                style={{
+                  backgroundColor: "rgba(0,0,0,0.35)",
+                  borderWidth: 1,
+                  borderColor: "rgba(255,255,255,0.10)",
+                  borderRadius: 26,
+                  padding: 20,
+                }}
+              >
+                <Text style={{ color: "#cbd5e1", fontSize: 14, marginBottom: 16, textAlign: "center" }}>
                   Sign in to continue.
                 </Text>
 
-                {/* Mobile */}
-                <Text className="text-slate-300 text-[11px] mb-2">Mobile Number</Text>
+              {/* ID */}
+                <Text className="text-slate-300 text-[11px] mb-2">ID</Text>
                 <View className="flex-row items-center bg-white/5 border border-white/10 rounded-2xl px-4 py-3">
-                  <Ionicons name="call-outline" size={18} color="#94a3b8" />
+                  <Ionicons name="person-outline" size={18} color="#94a3b8" />
                   <TextInput
                     ref={phoneRef}
                     value={phone}
                     onChangeText={setPhone}
                     placeholder="Enter 10-digit mobile number"
                     placeholderTextColor="#64748b"
-                    keyboardType="phone-pad"
+                  autoCapitalize="none"
                     className="text-white flex-1 ml-3"
                     style={{ backgroundColor: "transparent" }}
                     onFocus={dimOn}
@@ -472,38 +415,74 @@ export default function LoginScreen() {
                     maxLength={14}
                   />
                   <View
-                    className={`h-2.5 w-2.5 rounded-full ${
-                      phone.length === 0 ? "bg-slate-700" : phoneOk ? "bg-emerald-400" : "bg-rose-400"
+                  className={`h-2.5 w-2.5 rounded-full ${
+                      userId.length === 0 ? "bg-slate-700" : idOk ? "bg-emerald-400" : "bg-rose-400"
                     }`}
                   />
                 </View>
 
-                {/* Help */}
-                <View className="flex-row items-center justify-end mt-3">
-                  <Pressable onPress={() => setHelpOpen(true)}>
-                    <Text className="text-emerald-300 text-[11px] font-semibold">
-                      Need help?
-                    </Text>
+              {/* Password */}
+                <Text className="text-slate-300 text-[11px] mt-4 mb-2">Password</Text>
+                <View className="flex-row items-center bg-white/5 border border-white/10 rounded-2xl px-4 py-3">
+                  <Ionicons name="lock-closed-outline" size={18} color="#94a3b8" />
+                  <TextInput
+                    ref={pwRef}
+                    value={pw}
+                    onChangeText={setPw}
+                    placeholder="••••••••"
+                    placeholderTextColor="#64748b"
+                    secureTextEntry={!show}
+                    className="text-white flex-1 ml-3"
+                    style={{ backgroundColor: "transparent" }}
+                    onFocus={dimOn}
+                    onBlur={dimOffIfNoFocus}
+                  />
+                  <Pressable onPress={() => setShow((p) => !p)} className="p-2 -mr-2">
+                    <Ionicons
+                      name={show ? "eye-off-outline" : "eye-outline"}
+                      size={18}
+                      color="#94a3b8"
+                    />
                   </Pressable>
                 </View>
 
-                {/* Agree */}
-                <Pressable onPress={() => setAgree((p) => !p)} className="flex-row items-center mt-4">
-                  <View className="h-5 w-5 rounded-md border border-white/20 items-center justify-center bg-white/5">
+                {/* Forgot */}
+                <View className="flex-row items-center justify-end mt-3">
+                  <Pressable onPress={() => setForgotOpen(true)}>
+                    <Text className="text-emerald-300 text-[11px] font-semibold">Forgot?</Text>
+                  </Pressable>
+                </View>
+
+                <Pressable onPress={() => setAgree((p) => !p)} style={{ flexDirection: "row", alignItems: "center", marginTop: 16 }}>
+                  <View
+                    style={{
+                      height: 20,
+                      width: 20,
+                      borderRadius: 6,
+                      borderWidth: 1,
+                      borderColor: "rgba(255,255,255,0.20)",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: "rgba(255,255,255,0.05)",
+                    }}
+                  >
                     {agree ? <Ionicons name="checkmark" size={14} color="#34d399" /> : null}
                   </View>
-                  <Text className="text-slate-300 text-[11px] ml-3">
+                  <Text style={{ color: "#cbd5e1", fontSize: 11, marginLeft: 12 }}>
                     I agree to the terms and privacy policy
                   </Text>
                 </Pressable>
 
-                {/* CTA */}
-                <View className="mt-5">
-                  <View className="absolute -inset-1 rounded-3xl bg-emerald-400/25" />
+                <View style={{ marginTop: 18 }}>
+                  <View style={{ position: "absolute", left: -4, right: -4, top: -4, bottom: -4, borderRadius: 24, backgroundColor: "rgba(52,211,153,0.25)" }} />
                   <Pressable
                     disabled={!canSubmit}
                     onPress={onSubmit}
-                    className={`rounded-3xl overflow-hidden ${!canSubmit ? "opacity-60" : "opacity-100"}`}
+                    style={{
+                      borderRadius: 24,
+                      overflow: "hidden",
+                      opacity: !canSubmit ? 0.6 : 1,
+                    }}
                   >
                     <LinearGradient
                       colors={["#34d399", "#10b981", "#06b6d4"]}
@@ -511,9 +490,7 @@ export default function LoginScreen() {
                       end={{ x: 1, y: 0.5 }}
                       style={{ paddingVertical: 15, alignItems: "center", borderRadius: 24 }}
                     >
-                      <Text className="text-black font-semibold">
-                        {loading ? "Sending..." : "Send OTP"}
-                      </Text>
+                    <Text className="text-black font-semibold">Continue</Text>
                     </LinearGradient>
                   </Pressable>
                 </View>

@@ -1,4 +1,5 @@
-import React, { useMemo, useRef, useState } from "react";
+// app/(wild)/catch-logs/create.tsx
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   Alert,
@@ -13,19 +14,166 @@ import {
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
 import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
+import { Ionicons } from "@expo/vector-icons";
+
+// ✅ FIX: use expo-camera instead of expo-barcode-scanner
+import { CameraView, useCameraPermissions } from "expo-camera";
+
 import { useTrace } from "../../../src/data/wild/trace.store";
 
-/** ---------------- Dummy reference tables (replace with API later) ---------------- */
-const SPECIES = ["Yellowfin Tuna", "Red Snapper", "Squid", "White Pomfret", "Seer Fish"];
-const METHODS = ["Hook & Line", "Longline", "Gillnet", "Trawling", "Pole & Line"];
-const FAO_ZONES = ["51", "57", "61", "71", "87"];
-const TRIPS = [
+// ✅ Dummy catchlog single-file store (you already asked for this)
+import { createCatchLog } from "../../../src/data/wild/catchLog.dummy";
+
+type TripItem = { tripId: string; port: string; vesselId: string };
+type Lang = "ta" | "en";
+
+/** -------------------- API base + endpoints -------------------- */
+const rawBase =
+  process.env.EXPO_PUBLIC_API_BASE_URL ||
+  process.env.EXPO_PUBLIC_BACKEND_URL ||
+  "https://rootverse-backend.onrender.com";
+
+const API_BASE = rawBase.endsWith("/") ? rawBase.slice(0, -1) : rawBase;
+
+// 🔧 Change these paths to match your backend
+const ENDPOINTS = {
+  trips: `${API_BASE}/api/wild/trips`,
+  species: `${API_BASE}/api/wild/species`,
+  postCatchLog: `${API_BASE}/api/wild/catch-logs`,
+};
+
+/** -------------------- Dummy fallback lists -------------------- */
+const DUMMY_SPECIES = [
+  "Yellowfin Tuna",
+  "Red Snapper",
+  "Squid",
+  "White Pomfret",
+  "Seer Fish",
+];
+
+const DUMMY_TRIPS: TripItem[] = [
   { tripId: "T250057", port: "Nagapattinam", vesselId: "RV-VES-NA026829" },
   { tripId: "T250043", port: "Chennai", vesselId: "RV-VES-NA026829" },
   { tripId: "T250021", port: "Thoothukudi", vesselId: "RV-VES-NA026829" },
 ];
 
-/** ---------------- Helpers ---------------- */
+/** -------------------- i18n -------------------- */
+const i18n = {
+  ta: {
+    title: "பிடிப்பு பதிவு",
+    sub: "3 படிகளில் முடிக்கலாம் ✅",
+    step: (n: number) => `படி ${n}/3`,
+    next: "அடுத்து",
+    back: "மீண்டும்",
+    save: "சேமி",
+    required: "அவசியம்",
+    optional: "விருப்பம்",
+    addPhoto: "📷 படம் சேர்க்க",
+    remove: "நீக்கு",
+    more: "மேலும் (விருப்பம்)",
+    less: "குறைவு",
+    langBtn: "English",
+
+    scanTitle: "📷 பொருள் ஸ்கேன் (Physical Tag)",
+    scanSub: "ஸ்டிக்கர் / பெட்டி QR ஸ்கேன் செய்யவும் (விருப்பம்).",
+    scanBtn: "ஸ்கேன் தொடங்கு",
+    stopScanBtn: "ஸ்கேன் நிறுத்து",
+    clearBtn: "அகற்று",
+    linked: "இணைக்கப்பட்டது",
+    camDenied:
+      "கேமரா அனுமதி இல்லை. Settings இல் camera permission enable செய்யுங்கள்.",
+
+    trip: "பயணம் (Trip)",
+    chooseTrip: "பயணத்தை தேர்வு செய்",
+    species: "மீன் வகை",
+    chooseSpecies: "மீன் வகை தேர்வு செய்",
+    weight: "எடை (kg)",
+    weightPH: "உதா: 120",
+    date: "தேதி",
+    time: "நேரம்",
+    pickDate: "தேதி தேர்வு செய்ய தட்டுங்கள் 📅",
+    pickTime: "நேரம் தேர்வு செய்ய தட்டுங்கள் ⏱️",
+
+    notes: "குறிப்பு (விருப்பம்)",
+    notesPH: "எதாவது சொல்ல வேண்டுமா?",
+    lat: "Latitude",
+    lon: "Longitude",
+
+    errTrip: "பயணத்தை தேர்வு செய்யவும்",
+    errSpecies: "மீன் வகையை தேர்வு செய்யவும்",
+    errWeight: "எடை போடவும்",
+    errDate: "தேதி தேர்வு செய்யவும்",
+    saved: "சேமிக்கப்பட்டது ✅",
+
+    posting: "பதிவேற்றுகிறது...",
+    apiFailFallback: "API இல்லை/தோல்வி. Dummy fallback சேமிக்கப்பட்டது.",
+    offlineUsingDummy: "Offline mode: dummy data",
+  },
+  en: {
+    title: "Catch Log",
+    sub: "Finish in 3 steps ✅",
+    step: (n: number) => `Step ${n}/3`,
+    next: "Next",
+    back: "Back",
+    save: "Save",
+    required: "Required",
+    optional: "Optional",
+    addPhoto: "📷 Add Photos",
+    remove: "Remove",
+    more: "More (Optional)",
+    less: "Less",
+    langBtn: "தமிழ்",
+
+    scanTitle: "📷 Physical Tag Scan",
+    scanSub: "Scan sticker / crate QR (optional).",
+    scanBtn: "Start Scan",
+    stopScanBtn: "Stop Scan",
+    clearBtn: "Clear",
+    linked: "Linked",
+    camDenied:
+      "Camera permission denied. Enable camera permission in Settings.",
+
+    trip: "Trip",
+    chooseTrip: "Choose trip",
+    species: "Species",
+    chooseSpecies: "Choose species",
+    weight: "Weight (kg)",
+    weightPH: "ex: 120",
+    date: "Date",
+    time: "Time",
+    pickDate: "Tap to pick date 📅",
+    pickTime: "Tap to pick time ⏱️",
+
+    notes: "Notes (Optional)",
+    notesPH: "Any notes?",
+    lat: "Latitude",
+    lon: "Longitude",
+
+    errTrip: "Please choose trip",
+    errSpecies: "Please choose species",
+    errWeight: "Please enter weight",
+    errDate: "Please choose date",
+    saved: "Saved ✅",
+
+    posting: "Posting...",
+    apiFailFallback: "API unavailable/failed. Saved in dummy fallback.",
+    offlineUsingDummy: "Offline mode: dummy data",
+  },
+};
+
+const UI = {
+  bg: "bg-[#fbf6f1]",
+  border: "border-[#ead7c8]",
+  muted: "text-[#7a6f66]",
+  text: "text-[#2b2b2b]",
+  chipBg: "bg-[#fff3e7]",
+  chipBorder: "border-[#ffd9b6]",
+  accent: "#a06b2a",
+  dangerBg: "#fee2e2",
+  dangerText: "#991b1b",
+};
+
+/** -------------------- helpers -------------------- */
 const genCatchId = () => {
   const yy = String(new Date().getFullYear()).slice(-2);
   const rnd = Math.floor(10000 + Math.random() * 90000);
@@ -52,44 +200,81 @@ const fmtTime = (d?: Date | null) => {
   return `${hh}:${mm}`;
 };
 
-const parseYMD = (s: string): Date | null => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const d = Number(m[3]);
-  const dt = new Date(y, mo - 1, d);
-  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
-  return dt;
-};
+async function safeFetchJson<T>(
+  url: string,
+  opts?: RequestInit,
+  timeoutMs = 8000
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-/** ---------------- UI bits ---------------- */
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <View className={`rounded-2xl border border-slate-200 bg-white ${className}`}>{children}</View>;
+  try {
+    const res = await fetch(url, { ...(opts || {}), signal: controller.signal });
+    const text = await res.text();
+
+    let data: any = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = text;
+    }
+
+    if (!res.ok) {
+      const msg =
+        (data && (data.message || data.error)) ||
+        `Request failed (${res.status})`;
+      throw new Error(msg);
+    }
+
+    return data as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** -------------------- UI small components -------------------- */
+function Card({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <View className={`rounded-2xl border ${UI.border} bg-white ${className}`}>
+      {children}
+    </View>
+  );
 }
 
 function FieldCard({ children }: { children: React.ReactNode }) {
-  return <View className="rounded-2xl border border-slate-200 bg-white px-4 py-3">{children}</View>;
+  return (
+    <View className={`rounded-2xl border ${UI.border} bg-white px-4 py-3`}>
+      {children}
+    </View>
+  );
 }
 
 function SelectField({
   label,
   value,
   placeholder,
+  hint,
   onPress,
 }: {
   label: string;
   value: string;
   placeholder: string;
+  hint: string;
   onPress: () => void;
 }) {
   return (
     <Pressable onPress={onPress} className="active:opacity-80">
-      <Text className="text-xs text-slate-500">{label}</Text>
-      <Text className={`mt-1 text-base ${value ? "text-slate-900" : "text-slate-400"}`}>
+      <Text className={`text-xs ${UI.muted}`}>{label}</Text>
+      <Text className={`mt-1 text-base ${value ? UI.text : "text-[#b1a59a]"}`}>
         {value || placeholder}
       </Text>
-      <Text className="mt-1 text-[11px] text-slate-400">Tap to choose ▾</Text>
+      <Text className="mt-1 text-[11px] text-[#b1a59a]">{hint}</Text>
     </Pressable>
   );
 }
@@ -98,74 +283,26 @@ function DateField({
   label,
   value,
   placeholder,
-  onPress,
   hint,
+  onPress,
 }: {
   label: string;
   value: string;
   placeholder: string;
-  onPress: () => void;
   hint: string;
+  onPress: () => void;
 }) {
   return (
     <Pressable onPress={onPress} className="active:opacity-80">
-      <Text className="text-xs text-slate-500">{label}</Text>
-      <Text className={`mt-1 text-base ${value ? "text-slate-900" : "text-slate-400"}`}>
+      <Text className={`text-xs ${UI.muted}`}>{label}</Text>
+      <Text className={`mt-1 text-base ${value ? UI.text : "text-[#b1a59a]"}`}>
         {value || placeholder}
       </Text>
-      <Text className="mt-1 text-[11px] text-slate-400">{hint}</Text>
+      <Text className="mt-1 text-[11px] text-[#b1a59a]">{hint}</Text>
     </Pressable>
   );
 }
 
-/** Web fallback modal for date (because DateTimePicker in web is inconsistent) */
-function WebDateModal({
-  open,
-  title,
-  value,
-  onClose,
-  onSave,
-}: {
-  open: boolean;
-  title: string;
-  value: string;
-  onClose: () => void;
-  onSave: (v: string) => void;
-}) {
-  const [v, setV] = useState(value);
-  if (!open) return null;
-
-  return (
-    <View className="absolute inset-0 items-center justify-center bg-black/50 px-6">
-      <View className="w-full rounded-2xl border border-slate-200 bg-white p-4">
-        <Text className="text-base font-bold text-slate-900">{title}</Text>
-        <Text className="mt-1 text-xs text-slate-500">Format: YYYY-MM-DD</Text>
-
-        <View className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-          <TextInput value={v} onChangeText={setV} placeholder="2025-12-20" className="text-base text-slate-900" />
-        </View>
-
-        <View className="mt-4 flex-row gap-3">
-          <Pressable onPress={onClose} className="flex-1 rounded-2xl border border-slate-200 p-3 active:opacity-80">
-            <Text className="text-center font-semibold text-slate-700">Cancel</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => {
-              onSave(v);
-              onClose();
-            }}
-            className="flex-1 rounded-2xl bg-slate-900 p-3 active:opacity-90"
-          >
-            <Text className="text-center font-semibold text-white">Save</Text>
-          </Pressable>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-/** ✅ Native date/time picker overlay (fix behind-form issue) */
 function PickerModal({
   open,
   title,
@@ -188,9 +325,11 @@ function PickerModal({
       <Pressable onPress={onClose} className="flex-1 bg-black/50 justify-end">
         <Pressable onPress={() => {}} className="rounded-t-3xl bg-white p-4">
           <View className="flex-row items-center justify-between">
-            <Text className="text-base font-bold text-slate-900">{title}</Text>
+            <Text className={`text-base font-bold ${UI.text}`}>{title}</Text>
             <Pressable onPress={onClose} className="px-3 py-2 active:opacity-70">
-              <Text className="text-sm font-semibold text-blue-600">Done</Text>
+              <Text style={{ color: UI.accent }} className="text-sm font-semibold">
+                Done
+              </Text>
             </Pressable>
           </View>
 
@@ -215,7 +354,6 @@ function PickerModal({
   );
 }
 
-/** ---------------- Bottom Sheet Picker ---------------- */
 function PickerSheet({
   title,
   value,
@@ -250,20 +388,33 @@ function PickerSheet({
     >
       <BottomSheetView style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
         <View className="flex-row items-center justify-between">
-          <Text className="text-base font-bold text-slate-900">{title}</Text>
-          <Pressable onPress={() => sheetRef.current?.dismiss()} className="rounded-full px-3 py-2 active:opacity-80">
-            <Text className="text-sm font-semibold text-blue-600">Done</Text>
+          <Text className={`text-base font-bold ${UI.text}`}>{title}</Text>
+          <Pressable
+            onPress={() => sheetRef.current?.dismiss()}
+            className="rounded-full px-3 py-2 active:opacity-80"
+          >
+            <Text style={{ color: UI.accent }} className="text-sm font-semibold">
+              Done
+            </Text>
           </Pressable>
         </View>
 
-        <View className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-          <TextInput value={q} onChangeText={setQ} placeholder="Search..." className="text-base text-slate-900" />
+        <View
+          className={`mt-3 rounded-2xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}
+        >
+          <TextInput
+            value={q}
+            onChangeText={setQ}
+            placeholder="Search..."
+            className={`text-base ${UI.text}`}
+          />
         </View>
 
         <ScrollView className="mt-3" keyboardShouldPersistTaps="handled">
           {filtered.map((item) => {
             const active = item === value;
             const display = renderOption ? renderOption(item) : { title: item };
+
             return (
               <Pressable
                 key={item}
@@ -272,13 +423,19 @@ function PickerSheet({
                   sheetRef.current?.dismiss();
                 }}
                 className={`mb-2 rounded-2xl border px-4 py-3 active:opacity-80 ${
-                  active ? "border-blue-200 bg-blue-50" : "border-slate-200 bg-white"
+                  active
+                    ? `bg-[#fff3e7] border-[#ffd9b6]`
+                    : `${UI.border} bg-white`
                 }`}
               >
-                <Text className={`text-sm font-semibold ${active ? "text-blue-700" : "text-slate-900"}`}>
+                <Text className={`text-sm font-semibold ${UI.text}`}>
                   {display.title}
                 </Text>
-                {display.sub ? <Text className="mt-0.5 text-xs text-slate-500">{display.sub}</Text> : null}
+                {display.sub ? (
+                  <Text className={`mt-0.5 text-xs ${UI.muted}`}>
+                    {display.sub}
+                  </Text>
+                ) : null}
               </Pressable>
             );
           })}
@@ -288,53 +445,146 @@ function PickerSheet({
   );
 }
 
-/** ---------------- Screen ---------------- */
+/** -------------------- MAIN SCREEN -------------------- */
 export default function CreateCatchLog() {
   const { crateId } = useLocalSearchParams<{ crateId?: string }>();
   const trace = useTrace();
 
-  // IDs
+  const [lang, setLang] = useState<Lang>("ta");
+  const t = i18n[lang];
+
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [showMore, setShowMore] = useState(false);
+
   const [catchId] = useState(genCatchId());
 
-  // Select fields
+  // Catalog options (API-first, dummy fallback)
+  const [tripOptions, setTripOptions] = useState<TripItem[]>(DUMMY_TRIPS);
+  const [speciesOptions, setSpeciesOptions] = useState<string[]>(DUMMY_SPECIES);
+  const [offlineMode, setOfflineMode] = useState(false);
+
+  // Required fields
   const [tripId, setTripId] = useState("");
   const [species, setSpecies] = useState("");
-  const [method, setMethod] = useState("");
-  const [faoZone, setFaoZone] = useState("");
-
-  // Numeric/text fields
   const [weightKg, setWeightKg] = useState("");
-  const [haulSetNo, setHaulSetNo] = useState("");
-  const [gearType, setGearType] = useState("");
-  const [latitude, setLatitude] = useState("");
-  const [longitude, setLongitude] = useState("");
-  const [notes, setNotes] = useState("");
-
-  // Date/Time
   const [catchDate, setCatchDate] = useState<Date | null>(null);
   const [catchTime, setCatchTime] = useState<Date | null>(new Date());
+
+  // Optional fields
+  const [notes, setNotes] = useState("");
+  const [latitude, setLatitude] = useState("");
+  const [longitude, setLongitude] = useState("");
+
+  // Picker overlays
   const [showDate, setShowDate] = useState(false);
   const [showTime, setShowTime] = useState(false);
-
-  // Web date fallback
-  const [webDateOpen, setWebDateOpen] = useState(false);
-  const [webDateStr, setWebDateStr] = useState("");
 
   // Images
   const [images, setImages] = useState<string[]>([]);
 
-  // Bottom sheet refs
+  // Bottom sheets
   const tripRef = useRef<BottomSheetModal>(null);
   const speciesRef = useRef<BottomSheetModal>(null);
-  const methodRef = useRef<BottomSheetModal>(null);
-  const faoRef = useRef<BottomSheetModal>(null);
 
-  const shownDate = Platform.OS === "web" ? webDateStr : fmtDate(catchDate);
+  // ✅ Scanner (expo-camera)
+  const [permission, requestPermission] = useCameraPermissions();
+  const [scanMode, setScanMode] = useState(false);
+  const [scannedCrateId, setScannedCrateId] = useState("");
+  const didScanRef = useRef(false);
+
+  // Posting
+  const [posting, setPosting] = useState(false);
+
+  // Prefer scanned crate id > url param
+  const finalCrateId = scannedCrateId || (crateId ? String(crateId) : "");
+
+  const shownDate = fmtDate(catchDate);
   const shownTime = fmtTime(catchTime);
+
+  /** Load trips/species from API; fallback to dummy if not available */
+  useEffect(() => {
+    let alive = true;
+
+    const loadCatalog = async () => {
+      try {
+        setOfflineMode(false);
+
+        const [tripsRes, speciesRes] = await Promise.all([
+          safeFetchJson<any>(ENDPOINTS.trips, { method: "GET" }),
+          safeFetchJson<any>(ENDPOINTS.species, { method: "GET" }),
+        ]);
+
+        const trips: TripItem[] = Array.isArray(tripsRes)
+          ? tripsRes
+          : tripsRes?.items || tripsRes?.data || [];
+
+        const species: string[] = Array.isArray(speciesRes)
+          ? speciesRes
+          : speciesRes?.items || speciesRes?.data || [];
+
+        if (!alive) return;
+
+        setTripOptions(trips.length ? trips : DUMMY_TRIPS);
+        setSpeciesOptions(species.length ? species : DUMMY_SPECIES);
+        setOfflineMode(!(trips.length && species.length));
+      } catch {
+        if (!alive) return;
+        setTripOptions(DUMMY_TRIPS);
+        setSpeciesOptions(DUMMY_SPECIES);
+        setOfflineMode(true);
+      }
+    };
+
+    loadCatalog();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const requestCamera = async () => {
+    didScanRef.current = false;
+
+    // If already granted -> start
+    if (permission?.granted) {
+      setScanMode(true);
+      return;
+    }
+
+    // Otherwise request
+    const res = await requestPermission();
+    if (res?.granted) {
+      setScanMode(true);
+    } else {
+      setScanMode(false);
+    }
+  };
+
+  const stopScan = () => {
+    setScanMode(false);
+    didScanRef.current = false;
+  };
+
+  const onScanned = ({ data }: { data: string }) => {
+    if (didScanRef.current) return;
+    didScanRef.current = true;
+
+    const raw = String(data || "").trim();
+    let id = raw;
+
+    // QR can be just crateId or a URL like .../trace/RV-CRATE-000123
+    const match = raw.match(/trace\/([A-Za-z0-9-_.]+)/);
+    if (match?.[1]) id = match[1];
+
+    setScannedCrateId(id);
+    setScanMode(false);
+    Alert.alert("Scanned", `Tag: ${id}`);
+  };
 
   const pickImages = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return Alert.alert("Permission needed", "Allow photo access to upload images.");
+    if (!perm.granted) {
+      return Alert.alert("Permission", "Allow photo access to upload images.");
+    }
 
     const result = await ImagePicker.launchImageLibraryAsync({
       allowsMultipleSelection: true,
@@ -344,76 +594,113 @@ export default function CreateCatchLog() {
     });
 
     if (result.canceled) return;
+
     const uris = result.assets.map((a) => a.uri);
     setImages((prev) => [...prev, ...uris].slice(0, 10));
   };
 
-  const removeImage = (uri: string) => setImages((prev) => prev.filter((u) => u !== uri));
+  const removeImage = (uri: string) =>
+    setImages((prev) => prev.filter((u) => u !== uri));
 
-  const save = () => {
-    if (!tripId) return Alert.alert("Missing", "Trip ID is required");
-    if (!species) return Alert.alert("Missing", "Species is required");
-    if (!method) return Alert.alert("Missing", "Fishing method is required");
-    if (!weightKg.trim()) return Alert.alert("Missing", "Weight is required");
-
-    // date validate
-    if (Platform.OS === "web") {
-      const dt = parseYMD(webDateStr);
-      if (!dt) return Alert.alert("Missing", "Catch date required (YYYY-MM-DD)");
-    } else {
-      if (!catchDate) return Alert.alert("Missing", "Catch date required");
+  const validateStep = () => {
+    if (step === 1) {
+      if (!tripId) return Alert.alert(t.required, t.errTrip), false;
+      if (!species) return Alert.alert(t.required, t.errSpecies), false;
+      return true;
     }
+    if (step === 2) {
+      if (!weightKg.trim()) return Alert.alert(t.required, t.errWeight), false;
+      if (!catchDate) return Alert.alert(t.required, t.errDate), false;
+      return true;
+    }
+    return true;
+  };
+
+  const next = () => {
+    if (!validateStep()) return;
+    setStep((s) => (s === 1 ? 2 : 3));
+  };
+
+  const back = () => setStep((s) => (s === 3 ? 2 : 1));
+
+  /** POST catch log to API; if fails -> dummy fallback + trace event */
+  const save = async () => {
+    if (!tripId) return Alert.alert(t.required, t.errTrip);
+    if (!species) return Alert.alert(t.required, t.errSpecies);
+    if (!weightKg.trim()) return Alert.alert(t.required, t.errWeight);
+    if (!catchDate) return Alert.alert(t.required, t.errDate);
 
     const payload = {
       catchId,
       tripId,
       species,
-      method,
       weightKg: toNum(weightKg),
-      faoZone: faoZone || "—",
-      catchDate: shownDate,
-      catchTime: shownTime || "—",
-      haulSetNo: haulSetNo || "—",
-      gearType: gearType || "—",
+      catchDate: fmtDate(catchDate),
+      catchTime: fmtTime(catchTime),
+      notes: notes || "—",
       latitude: latitude || "—",
       longitude: longitude || "—",
-      notes: notes || "—",
       images,
+      linkedCrateId: finalCrateId || null,
     };
 
-    // ✅ QR-Trace mode
-    if (crateId) {
+    // Always store locally too
+    createCatchLog(payload);
+
+    // If QR present, also add local trace event
+    if (finalCrateId) {
       trace.addEvent({
-        crateId: String(crateId),
+        crateId: finalCrateId,
         stage: "CATCH",
         data: payload,
         createdBy: "Owner",
       });
-
-      Alert.alert("Saved", `Catch linked to Sticker ${String(crateId)}\nCatch ID: ${catchId}`);
-      router.replace(`/(wild)/trace/${String(crateId)}` as const);
-      return;
     }
 
-    Alert.alert("Saved (demo)", `${species} · ${payload.weightKg} kg\nCatch ID: ${catchId}`);
-    router.back();
+    try {
+      setPosting(true);
+      Alert.alert(t.posting, finalCrateId ? `Crate: ${finalCrateId}` : catchId);
+
+      await safeFetchJson<any>(ENDPOINTS.postCatchLog, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      Alert.alert(t.saved, `Catch ID: ${catchId}`);
+
+      if (finalCrateId) {
+        router.replace({
+          pathname: "/trace/[crateId]",
+          params: { crateId: finalCrateId },
+        });
+      } else {
+        router.back();
+      }
+    } catch (e: any) {
+      Alert.alert(t.apiFailFallback, String(e?.message || e));
+
+      if (finalCrateId) {
+        router.replace({
+          pathname: "/trace/[crateId]",
+          params: { crateId: finalCrateId },
+        });
+      } else {
+        router.back();
+      }
+    } finally {
+      setPosting(false);
+    }
   };
 
-  return (
-    <View className="flex-1 bg-slate-50">
-      {/* Web Date Modal */}
-      <WebDateModal
-        open={webDateOpen}
-        title="Catch Date"
-        value={webDateStr}
-        onClose={() => setWebDateOpen(false)}
-        onSave={(v) => setWebDateStr(v)}
-      />
+  const cameraDenied = permission && !permission.granted;
 
-      {/* ✅ Native Date/Time overlays (FIX: never behind form) */}
+  return (
+    <View className={`flex-1 ${UI.bg}`}>
+      {/* Native pickers */}
       <PickerModal
         open={showDate && Platform.OS !== "web"}
-        title="Catch Date"
+        title={t.date}
         value={catchDate ?? new Date()}
         mode="date"
         onClose={() => setShowDate(false)}
@@ -421,204 +708,384 @@ export default function CreateCatchLog() {
       />
       <PickerModal
         open={showTime && Platform.OS !== "web"}
-        title="Catch Time"
+        title={t.time}
         value={catchTime ?? new Date()}
         mode="time"
         onClose={() => setShowTime(false)}
         onPick={(d) => setCatchTime(d)}
       />
 
-      {/* Bottom sheet pickers */}
+      {/* Bottom sheets */}
       <PickerSheet
-        title="Choose Trip ID"
+        title={t.chooseTrip}
         value={tripId}
-        options={TRIPS.map((t) => t.tripId)}
+        options={tripOptions.map((x) => x.tripId)}
         onSelect={setTripId}
         sheetRef={tripRef}
         renderOption={(id) => {
-          const t = TRIPS.find((x) => x.tripId === id);
-          return { title: id, sub: t ? `${t.port} · ${t.vesselId}` : "" };
+          const x = tripOptions.find((k) => k.tripId === id);
+          return { title: id, sub: x ? `${x.port} · ${x.vesselId}` : "" };
         }}
       />
       <PickerSheet
-        title="Choose Species"
+        title={t.chooseSpecies}
         value={species}
-        options={SPECIES}
+        options={speciesOptions}
         onSelect={setSpecies}
         sheetRef={speciesRef}
-      />
-      <PickerSheet
-        title="Choose Fishing Method"
-        value={method}
-        options={METHODS}
-        onSelect={setMethod}
-        sheetRef={methodRef}
-      />
-      <PickerSheet
-        title="Choose FAO Zone"
-        value={faoZone}
-        options={FAO_ZONES}
-        onSelect={setFaoZone}
-        sheetRef={faoRef}
       />
 
       <ScrollView contentContainerClassName="p-4 pb-10">
         {/* Header */}
         <Card className="p-4">
-          <Text className="text-lg font-bold text-slate-900">Create Catch Log</Text>
-          <Text className="mt-1 text-sm text-slate-600">
-            Record catch details linked to a trip.
-          </Text>
+          <View className="flex-row items-start justify-between">
+            <View>
+              <Text className={`text-lg font-bold ${UI.text}`}>{t.title}</Text>
+              <Text className={`mt-1 text-sm ${UI.muted}`}>{t.sub}</Text>
+            </View>
 
-          {crateId ? (
-            <View className="mt-3 rounded-xl bg-amber-100 px-3 py-2">
+            <Pressable
+              onPress={() => setLang((x) => (x === "ta" ? "en" : "ta"))}
+              className={`rounded-full border ${UI.border} bg-[#fbf6f1] px-3 py-2 active:opacity-80`}
+            >
+              <Text className={`text-xs font-semibold ${UI.text}`}>
+                {t.langBtn}
+              </Text>
+            </Pressable>
+          </View>
+
+          <View className="mt-3">
+            <Text className={`text-xs ${UI.muted}`}>Catch ID</Text>
+            <Text className={`mt-1 text-base font-bold ${UI.text}`}>{catchId}</Text>
+          </View>
+
+          <View
+            className={`mt-3 rounded-xl border ${UI.chipBorder} ${UI.chipBg} px-3 py-2`}
+          >
+            <Text className={`text-xs font-semibold ${UI.text}`}>{t.step(step)}</Text>
+          </View>
+
+          {offlineMode ? (
+            <View className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
               <Text className="text-xs font-semibold text-amber-800">
-                Linked to Sticker: {String(crateId)}
+                {t.offlineUsingDummy}
               </Text>
             </View>
           ) : null}
-
-          <View className="mt-3">
-            <Text className="text-xs text-slate-500">Catch ID</Text>
-            <Text className="mt-1 text-base font-bold text-slate-900">{catchId}</Text>
-          </View>
         </Card>
 
-        {/* Main fields */}
-        <View className="mt-4 gap-3">
-          <FieldCard>
-            <SelectField
-              label="Trip ID"
-              value={tripId}
-              placeholder="Choose trip"
-              onPress={() => tripRef.current?.present()}
-            />
-          </FieldCard>
+        {/* STEP 1 */}
+        {step === 1 ? (
+          <View className="mt-4 gap-3">
+            {/* Inline scanner */}
+            <Card className="p-4">
+              <View className="flex-row items-center gap-2">
+                <Ionicons name="qr-code-outline" size={20} color={UI.accent} />
+                <Text className={`text-sm font-extrabold ${UI.text}`}>
+                  {t.scanTitle}
+                </Text>
+              </View>
 
-          <FieldCard>
-            <SelectField
-              label="Species"
-              value={species}
-              placeholder="Choose species"
-              onPress={() => speciesRef.current?.present()}
-            />
-          </FieldCard>
+              <Text className={`mt-1 text-xs ${UI.muted}`}>{t.scanSub}</Text>
 
-          <FieldCard>
-            <SelectField
-              label="Fishing Method"
-              value={method}
-              placeholder="Choose method"
-              onPress={() => methodRef.current?.present()}
-            />
-          </FieldCard>
+              {!!finalCrateId && (
+                <View
+                  className={`mt-3 rounded-xl border ${UI.chipBorder} ${UI.chipBg} px-3 py-2`}
+                >
+                  <Text className={`text-xs font-semibold ${UI.text}`}>
+                    {t.linked}:{" "}
+                    <Text className="font-extrabold">{finalCrateId}</Text>
+                  </Text>
+                </View>
+              )}
 
-          <FieldCard>
-            <Text className="text-xs text-slate-500">Estimated Weight (kg)</Text>
-            <TextInput
-              value={weightKg}
-              onChangeText={setWeightKg}
-              keyboardType="numeric"
-              placeholder="e.g., 120"
-              className="mt-1 text-base text-slate-900"
-            />
-          </FieldCard>
+              {scanMode ? (
+                <View className="mt-3 overflow-hidden rounded-2xl border border-[#ead7c8] bg-black">
+                  <View style={{ height: 230 }}>
+                    <CameraView
+                      style={{ flex: 1 }}
+                      barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                      onBarcodeScanned={(result) =>
+                        onScanned({ data: result.data })
+                      }
+                    />
+                    <View className="absolute inset-0 items-center justify-center pointer-events-none">
+                      <View className="h-44 w-44 rounded-2xl border-2 border-white/80" />
+                      <Text className="mt-3 text-white/80 text-[11px]">
+                        Align QR inside the box
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ) : null}
 
-          <FieldCard>
-            <SelectField
-              label="FAO Zone"
-              value={faoZone}
-              placeholder="Choose FAO zone"
-              onPress={() => faoRef.current?.present()}
-            />
-          </FieldCard>
+              {cameraDenied ? (
+                <View
+                  className="mt-3 rounded-xl border px-3 py-2"
+                  style={{ backgroundColor: UI.dangerBg, borderColor: "#fecaca" }}
+                >
+                  <Text
+                    style={{ color: UI.dangerText }}
+                    className="text-xs font-semibold"
+                  >
+                    {t.camDenied}
+                  </Text>
+                </View>
+              ) : null}
 
-          <FieldCard>
-            <DateField
-              label="Catch Date"
-              value={shownDate}
-              placeholder="Choose date"
-              hint="Tap to pick date 📅"
-              onPress={() => (Platform.OS === "web" ? setWebDateOpen(true) : setShowDate(true))}
-            />
-          </FieldCard>
+              <View className="mt-3 flex-row gap-3">
+                {!scanMode ? (
+                  <Pressable
+                    onPress={requestCamera}
+                    className="flex-1 rounded-2xl px-4 py-3 active:opacity-90"
+                    style={{ backgroundColor: UI.accent }}
+                  >
+                    <Text className="text-center text-white font-semibold">
+                      {t.scanBtn}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    onPress={stopScan}
+                    className="flex-1 rounded-2xl px-4 py-3 active:opacity-90"
+                    style={{ backgroundColor: "#111827" }}
+                  >
+                    <Text className="text-center text-white font-semibold">
+                      {t.stopScanBtn}
+                    </Text>
+                  </Pressable>
+                )}
 
-          <FieldCard>
-            <DateField
-              label="Catch Time"
-              value={shownTime}
-              placeholder="Choose time"
-              hint="Tap to pick time ⏱️"
-              onPress={() => (Platform.OS === "web" ? Alert.alert("Web", "Time picker not added for web yet") : setShowTime(true))}
-            />
-          </FieldCard>
+                <Pressable
+                  onPress={() => {
+                    setScannedCrateId("");
+                    stopScan();
+                  }}
+                  className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-3 active:opacity-80`}
+                >
+                  <Text className={`text-center font-semibold ${UI.text}`}>
+                    {t.clearBtn}
+                  </Text>
+                </Pressable>
+              </View>
+            </Card>
 
-          <FieldCard>
-            <Text className="text-xs text-slate-500">Haul / Set No</Text>
-            <TextInput value={haulSetNo} onChangeText={setHaulSetNo} placeholder="e.g., 2" className="mt-1 text-base text-slate-900" />
-          </FieldCard>
+            <FieldCard>
+              <SelectField
+                label={`✅ ${t.trip} (${t.required})`}
+                value={tripId}
+                placeholder={t.chooseTrip}
+                hint="Tap ▾"
+                onPress={() => tripRef.current?.present()}
+              />
+            </FieldCard>
 
-          <FieldCard>
-            <Text className="text-xs text-slate-500">Gear Type</Text>
-            <TextInput value={gearType} onChangeText={setGearType} placeholder="e.g., Gillnet" className="mt-1 text-base text-slate-900" />
-          </FieldCard>
+            <FieldCard>
+              <SelectField
+                label={`✅ ${t.species} (${t.required})`}
+                value={species}
+                placeholder={t.chooseSpecies}
+                hint="Tap ▾"
+                onPress={() => speciesRef.current?.present()}
+              />
+            </FieldCard>
 
-          <View className="flex-row gap-3">
-            <View className="flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-              <Text className="text-xs text-slate-500">Latitude</Text>
-              <TextInput value={latitude} onChangeText={setLatitude} placeholder="10.7654" className="mt-1 text-base text-slate-900" />
-            </View>
-            <View className="flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-              <Text className="text-xs text-slate-500">Longitude</Text>
-              <TextInput value={longitude} onChangeText={setLongitude} placeholder="79.8432" className="mt-1 text-base text-slate-900" />
+            <Pressable
+              onPress={next}
+              className="mt-2 rounded-2xl px-4 py-4 active:opacity-90"
+              style={{ backgroundColor: UI.accent }}
+            >
+              <Text className="text-center text-white text-base font-extrabold">
+                {t.next}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {/* STEP 2 */}
+        {step === 2 ? (
+          <View className="mt-4 gap-3">
+            <FieldCard>
+              <Text className={`text-xs ${UI.muted}`}>
+                {`✅ ${t.weight} (${t.required})`}
+              </Text>
+              <TextInput
+                value={weightKg}
+                onChangeText={setWeightKg}
+                keyboardType="numeric"
+                placeholder={t.weightPH}
+                className={`mt-1 text-base ${UI.text}`}
+              />
+            </FieldCard>
+
+            <FieldCard>
+              <DateField
+                label={`✅ ${t.date} (${t.required})`}
+                value={shownDate}
+                placeholder="YYYY-MM-DD"
+                hint={t.pickDate}
+                onPress={() => setShowDate(true)}
+              />
+            </FieldCard>
+
+            <FieldCard>
+              <DateField
+                label={`${t.time} (${t.optional})`}
+                value={shownTime}
+                placeholder="HH:MM"
+                hint={t.pickTime}
+                onPress={() => setShowTime(true)}
+              />
+            </FieldCard>
+
+            <View className="mt-2 flex-row gap-3">
+              <Pressable
+                className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-4 active:opacity-80`}
+                onPress={back}
+              >
+                <Text className={`text-center ${UI.text} text-base font-extrabold`}>
+                  {t.back}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                className="flex-1 rounded-2xl px-4 py-4 active:opacity-90"
+                style={{ backgroundColor: UI.accent }}
+                onPress={next}
+              >
+                <Text className="text-center text-white text-base font-extrabold">
+                  {t.next}
+                </Text>
+              </Pressable>
             </View>
           </View>
+        ) : null}
 
-          <FieldCard>
-            <Text className="text-xs text-slate-500">Notes</Text>
-            <TextInput
-              value={notes}
-              onChangeText={setNotes}
-              placeholder="Optional notes..."
-              multiline
-              className="mt-1 text-base text-slate-900"
-              style={{ minHeight: 84, textAlignVertical: "top" }}
-            />
-          </FieldCard>
-        </View>
+        {/* STEP 3 */}
+        {step === 3 ? (
+          <View className="mt-4">
+            <Card className="p-4">
+              <View className="flex-row items-center gap-2">
+                <Ionicons name="camera-outline" size={20} color={UI.accent} />
+                <Text className={`text-sm font-extrabold ${UI.text}`}>
+                  {t.addPhoto}
+                </Text>
+              </View>
 
-        {/* Uploads */}
-        <View className="mt-6">
-          <Text className="mb-2 text-base font-bold text-slate-900">Uploads</Text>
-          <Card className="p-4">
-            <Text className="text-sm font-semibold text-slate-900">Upload Catch Images</Text>
-            <Text className="mt-1 text-xs text-slate-600">Add up to 10 images.</Text>
+              <Text className={`mt-1 text-xs ${UI.muted}`}>
+                {lang === "ta"
+                  ? "விருப்பம். இருந்தால் சேர்க்கவும்."
+                  : "Optional. Add if you have."}
+              </Text>
 
-            <Pressable onPress={pickImages} className="mt-3 rounded-2xl bg-slate-900 px-4 py-3 active:opacity-90">
-              <Text className="text-center text-white font-semibold">Pick Images</Text>
+              <Pressable
+                onPress={pickImages}
+                className="mt-3 rounded-2xl border px-4 py-3 active:opacity-90"
+                style={{ borderColor: UI.accent, backgroundColor: "#fff3e7" }}
+              >
+                <Text className="text-center font-semibold" style={{ color: UI.accent }}>
+                  {t.addPhoto}
+                </Text>
+              </Pressable>
+
+              {images.length > 0 ? (
+                <View className="mt-3 gap-2">
+                  {images.map((uri, idx) => (
+                    <View
+                      key={uri}
+                      className={`flex-row items-center justify-between rounded-xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}
+                    >
+                      <Text className={`flex-1 text-xs ${UI.text}`} numberOfLines={1}>
+                        Photo {idx + 1}
+                      </Text>
+                      <Pressable
+                        onPress={() => removeImage(uri)}
+                        className="ml-3 rounded-full bg-rose-100 px-3 py-1 active:opacity-80"
+                      >
+                        <Text className="text-xs font-semibold text-rose-700">
+                          {t.remove}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </Card>
+
+            <Pressable
+              onPress={() => setShowMore((s) => !s)}
+              className={`mt-3 rounded-2xl border ${UI.border} bg-white px-4 py-3 active:opacity-80`}
+            >
+              <Text className={`text-center text-sm font-semibold ${UI.text}`}>
+                {showMore ? t.less : t.more}
+              </Text>
             </Pressable>
 
-            {images.length > 0 && (
-              <View className="mt-3 gap-2">
-                {images.map((uri, idx) => (
-                  <View key={uri} className="flex-row items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <Text className="flex-1 text-xs text-slate-700" numberOfLines={1}>
-                      Image {idx + 1}: {uri}
-                    </Text>
-                    <Pressable onPress={() => removeImage(uri)} className="ml-3 rounded-full bg-rose-100 px-3 py-1 active:opacity-80">
-                      <Text className="text-xs font-semibold text-rose-700">Remove</Text>
-                    </Pressable>
-                  </View>
-                ))}
-              </View>
-            )}
-          </Card>
-        </View>
+            {showMore ? (
+              <View className="mt-3 gap-3">
+                <FieldCard>
+                  <Text className={`text-xs ${UI.muted}`}>{t.notes}</Text>
+                  <TextInput
+                    value={notes}
+                    onChangeText={setNotes}
+                    placeholder={t.notesPH}
+                    multiline
+                    className={`mt-1 text-base ${UI.text}`}
+                    style={{ minHeight: 84, textAlignVertical: "top" }}
+                  />
+                </FieldCard>
 
-        {/* Save */}
-        <Pressable onPress={save} className="mt-6 rounded-2xl bg-slate-900 p-4 active:opacity-90">
-          <Text className="text-center text-white font-semibold">Save Catch Log</Text>
-        </Pressable>
+                <View className="flex-row gap-3">
+                  <View
+                    className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-3`}
+                  >
+                    <Text className={`text-xs ${UI.muted}`}>{t.lat}</Text>
+                    <TextInput
+                      value={latitude}
+                      onChangeText={setLatitude}
+                      placeholder="10.7654"
+                      className={`mt-1 text-base ${UI.text}`}
+                    />
+                  </View>
+                  <View
+                    className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-3`}
+                  >
+                    <Text className={`text-xs ${UI.muted}`}>{t.lon}</Text>
+                    <TextInput
+                      value={longitude}
+                      onChangeText={setLongitude}
+                      placeholder="79.8432"
+                      className={`mt-1 text-base ${UI.text}`}
+                    />
+                  </View>
+                </View>
+              </View>
+            ) : null}
+
+            <View className="mt-5 flex-row gap-3">
+              <Pressable
+                className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-4 active:opacity-80`}
+                onPress={back}
+                disabled={posting}
+              >
+                <Text className={`text-center ${UI.text} text-base font-extrabold`}>
+                  {t.back}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                className="flex-1 rounded-2xl px-4 py-4 active:opacity-90"
+                style={{ backgroundColor: UI.accent, opacity: posting ? 0.7 : 1 }}
+                onPress={save}
+                disabled={posting}
+              >
+                <Text className="text-center text-white text-base font-extrabold">
+                  {posting ? (lang === "ta" ? "சேமிக்கிறது..." : "Saving...") : t.save}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
       </ScrollView>
     </View>
   );
