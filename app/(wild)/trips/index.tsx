@@ -70,7 +70,7 @@ export default function MyTrips() {
             {filtered.length === 0 ? (
               <View className="px-4 py-10 items-center">
                 <Text className="text-sm text-[#6b625a]">No trips found.</Text>
-                <Text className="mt-1 text-xs text-[#9a8f86]">Tap "New Trip" to start one!</Text>
+                <Text className="mt-1 text-xs text-[#9a8f86]">Tap &quot;New Trip&quot; to start one!</Text>
               </View>
             ) : (
               filtered.map((t, idx) => (

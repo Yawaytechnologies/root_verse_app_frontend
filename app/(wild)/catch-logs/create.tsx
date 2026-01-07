@@ -1,4 +1,3 @@
-// app/(wild)/catch-logs/create.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import {
@@ -16,31 +15,14 @@ import * as ImagePicker from "expo-image-picker";
 import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
 import { Ionicons } from "@expo/vector-icons";
 
-// ✅ FIX: use expo-camera instead of expo-barcode-scanner
-import { CameraView, useCameraPermissions } from "expo-camera";
-
 import { useTrace } from "../../../src/data/wild/trace.store";
 
-// ✅ Dummy catchlog single-file store (you already asked for this)
-import { createCatchLog } from "../../../src/data/wild/catchLog.dummy";
+// ✅ Redux
+import { useAppDispatch, useAppSelector } from "../../../src/store/hooks";
+import { submitCatchLog } from "../../../src/services/wild/catchLog.slice";
 
 type TripItem = { tripId: string; port: string; vesselId: string };
 type Lang = "ta" | "en";
-
-/** -------------------- API base + endpoints -------------------- */
-const rawBase =
-  process.env.EXPO_PUBLIC_API_BASE_URL ||
-  process.env.EXPO_PUBLIC_BACKEND_URL ||
-  "https://rootverse-backend.onrender.com";
-
-const API_BASE = rawBase.endsWith("/") ? rawBase.slice(0, -1) : rawBase;
-
-// 🔧 Change these paths to match your backend
-const ENDPOINTS = {
-  trips: `${API_BASE}/api/wild/trips`,
-  species: `${API_BASE}/api/wild/species`,
-  postCatchLog: `${API_BASE}/api/wild/catch-logs`,
-};
 
 /** -------------------- Dummy fallback lists -------------------- */
 const DUMMY_SPECIES = [
@@ -61,7 +43,7 @@ const DUMMY_TRIPS: TripItem[] = [
 const i18n = {
   ta: {
     title: "பிடிப்பு பதிவு",
-    sub: "3 படிகளில் முடிக்கலாம் ✅",
+    sub: "QR ஸ்கேன் செய்து பதிவு செய்யவும் ✅",
     step: (n: number) => `படி ${n}/3`,
     next: "அடுத்து",
     back: "மீண்டும்",
@@ -73,15 +55,6 @@ const i18n = {
     more: "மேலும் (விருப்பம்)",
     less: "குறைவு",
     langBtn: "English",
-
-    scanTitle: "📷 பொருள் ஸ்கேன் (Physical Tag)",
-    scanSub: "ஸ்டிக்கர் / பெட்டி QR ஸ்கேன் செய்யவும் (விருப்பம்).",
-    scanBtn: "ஸ்கேன் தொடங்கு",
-    stopScanBtn: "ஸ்கேன் நிறுத்து",
-    clearBtn: "அகற்று",
-    linked: "இணைக்கப்பட்டது",
-    camDenied:
-      "கேமரா அனுமதி இல்லை. Settings இல் camera permission enable செய்யுங்கள்.",
 
     trip: "பயணம் (Trip)",
     chooseTrip: "பயணத்தை தேர்வு செய்",
@@ -104,14 +77,11 @@ const i18n = {
     errWeight: "எடை போடவும்",
     errDate: "தேதி தேர்வு செய்யவும்",
     saved: "சேமிக்கப்பட்டது ✅",
-
     posting: "பதிவேற்றுகிறது...",
-    apiFailFallback: "API இல்லை/தோல்வி. Dummy fallback சேமிக்கப்பட்டது.",
-    offlineUsingDummy: "Offline mode: dummy data",
   },
   en: {
     title: "Catch Log",
-    sub: "Finish in 3 steps ✅",
+    sub: "Create catch linked to scanned QR ✅",
     step: (n: number) => `Step ${n}/3`,
     next: "Next",
     back: "Back",
@@ -123,15 +93,6 @@ const i18n = {
     more: "More (Optional)",
     less: "Less",
     langBtn: "தமிழ்",
-
-    scanTitle: "📷 Physical Tag Scan",
-    scanSub: "Scan sticker / crate QR (optional).",
-    scanBtn: "Start Scan",
-    stopScanBtn: "Stop Scan",
-    clearBtn: "Clear",
-    linked: "Linked",
-    camDenied:
-      "Camera permission denied. Enable camera permission in Settings.",
 
     trip: "Trip",
     chooseTrip: "Choose trip",
@@ -154,10 +115,7 @@ const i18n = {
     errWeight: "Please enter weight",
     errDate: "Please choose date",
     saved: "Saved ✅",
-
     posting: "Posting...",
-    apiFailFallback: "API unavailable/failed. Saved in dummy fallback.",
-    offlineUsingDummy: "Offline mode: dummy data",
   },
 };
 
@@ -169,11 +127,8 @@ const UI = {
   chipBg: "bg-[#fff3e7]",
   chipBorder: "border-[#ffd9b6]",
   accent: "#a06b2a",
-  dangerBg: "#fee2e2",
-  dangerText: "#991b1b",
 };
 
-/** -------------------- helpers -------------------- */
 const genCatchId = () => {
   const yy = String(new Date().getFullYear()).slice(-2);
   const rnd = Math.floor(10000 + Math.random() * 90000);
@@ -199,38 +154,6 @@ const fmtTime = (d?: Date | null) => {
   const mm = String(d.getMinutes()).padStart(2, "0");
   return `${hh}:${mm}`;
 };
-
-async function safeFetchJson<T>(
-  url: string,
-  opts?: RequestInit,
-  timeoutMs = 8000
-): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await fetch(url, { ...(opts || {}), signal: controller.signal });
-    const text = await res.text();
-
-    let data: any = null;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = text;
-    }
-
-    if (!res.ok) {
-      const msg =
-        (data && (data.message || data.error)) ||
-        `Request failed (${res.status})`;
-      throw new Error(msg);
-    }
-
-    return data as T;
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 /** -------------------- UI small components -------------------- */
 function Card({
@@ -366,7 +289,7 @@ function PickerSheet({
   value: string;
   options: string[];
   onSelect: (v: string) => void;
-  sheetRef: React.RefObject<BottomSheetModal>;
+  sheetRef: React.RefObject<BottomSheetModal | null>;
   renderOption?: (item: string) => { title: string; sub?: string };
 }) {
   const snapPoints = useMemo(() => ["45%", "75%"], []);
@@ -399,9 +322,7 @@ function PickerSheet({
           </Pressable>
         </View>
 
-        <View
-          className={`mt-3 rounded-2xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}
-        >
+        <View className={`mt-3 rounded-2xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}>
           <TextInput
             value={q}
             onChangeText={setQ}
@@ -447,7 +368,15 @@ function PickerSheet({
 
 /** -------------------- MAIN SCREEN -------------------- */
 export default function CreateCatchLog() {
-  const { crateId } = useLocalSearchParams<{ crateId?: string }>();
+  const { crateId } = useLocalSearchParams<{ crateId: string }>();
+  const finalCrateId = String(crateId || "").trim();
+
+  const dispatch = useAppDispatch();
+  const catchState = useAppSelector((s: any) => s.catchLog);
+const posting = !!catchState?.loading;
+const usedDummy = !!catchState?.usedDummy;
+
+
   const trace = useTrace();
 
   const [lang, setLang] = useState<Lang>("ta");
@@ -458,10 +387,9 @@ export default function CreateCatchLog() {
 
   const [catchId] = useState(genCatchId());
 
-  // Catalog options (API-first, dummy fallback)
-  const [tripOptions, setTripOptions] = useState<TripItem[]>(DUMMY_TRIPS);
-  const [speciesOptions, setSpeciesOptions] = useState<string[]>(DUMMY_SPECIES);
-  const [offlineMode, setOfflineMode] = useState(false);
+  // For now: keep dummy trip/species (you can API load later)
+  const [tripOptions] = useState<TripItem[]>(DUMMY_TRIPS);
+  const [speciesOptions] = useState<string[]>(DUMMY_SPECIES);
 
   // Required fields
   const [tripId, setTripId] = useState("");
@@ -486,99 +414,15 @@ export default function CreateCatchLog() {
   const tripRef = useRef<BottomSheetModal>(null);
   const speciesRef = useRef<BottomSheetModal>(null);
 
-  // ✅ Scanner (expo-camera)
-  const [permission, requestPermission] = useCameraPermissions();
-  const [scanMode, setScanMode] = useState(false);
-  const [scannedCrateId, setScannedCrateId] = useState("");
-  const didScanRef = useRef(false);
-
-  // Posting
-  const [posting, setPosting] = useState(false);
-
-  // Prefer scanned crate id > url param
-  const finalCrateId = scannedCrateId || (crateId ? String(crateId) : "");
-
   const shownDate = fmtDate(catchDate);
   const shownTime = fmtTime(catchTime);
 
-  /** Load trips/species from API; fallback to dummy if not available */
   useEffect(() => {
-    let alive = true;
-
-    const loadCatalog = async () => {
-      try {
-        setOfflineMode(false);
-
-        const [tripsRes, speciesRes] = await Promise.all([
-          safeFetchJson<any>(ENDPOINTS.trips, { method: "GET" }),
-          safeFetchJson<any>(ENDPOINTS.species, { method: "GET" }),
-        ]);
-
-        const trips: TripItem[] = Array.isArray(tripsRes)
-          ? tripsRes
-          : tripsRes?.items || tripsRes?.data || [];
-
-        const species: string[] = Array.isArray(speciesRes)
-          ? speciesRes
-          : speciesRes?.items || speciesRes?.data || [];
-
-        if (!alive) return;
-
-        setTripOptions(trips.length ? trips : DUMMY_TRIPS);
-        setSpeciesOptions(species.length ? species : DUMMY_SPECIES);
-        setOfflineMode(!(trips.length && species.length));
-      } catch {
-        if (!alive) return;
-        setTripOptions(DUMMY_TRIPS);
-        setSpeciesOptions(DUMMY_SPECIES);
-        setOfflineMode(true);
-      }
-    };
-
-    loadCatalog();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const requestCamera = async () => {
-    didScanRef.current = false;
-
-    // If already granted -> start
-    if (permission?.granted) {
-      setScanMode(true);
-      return;
+    if (!finalCrateId) {
+      Alert.alert("Missing QR", "No crateId provided. Please scan again.");
+      router.replace("/catch-logs");
     }
-
-    // Otherwise request
-    const res = await requestPermission();
-    if (res?.granted) {
-      setScanMode(true);
-    } else {
-      setScanMode(false);
-    }
-  };
-
-  const stopScan = () => {
-    setScanMode(false);
-    didScanRef.current = false;
-  };
-
-  const onScanned = ({ data }: { data: string }) => {
-    if (didScanRef.current) return;
-    didScanRef.current = true;
-
-    const raw = String(data || "").trim();
-    let id = raw;
-
-    // QR can be just crateId or a URL like .../trace/RV-CRATE-000123
-    const match = raw.match(/trace\/([A-Za-z0-9-_.]+)/);
-    if (match?.[1]) id = match[1];
-
-    setScannedCrateId(id);
-    setScanMode(false);
-    Alert.alert("Scanned", `Tag: ${id}`);
-  };
+  }, [finalCrateId]);
 
   const pickImages = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -623,8 +467,9 @@ export default function CreateCatchLog() {
 
   const back = () => setStep((s) => (s === 3 ? 2 : 1));
 
-  /** POST catch log to API; if fails -> dummy fallback + trace event */
   const save = async () => {
+    if (!finalCrateId) return Alert.alert("Missing QR", "crateId not found.");
+
     if (!tripId) return Alert.alert(t.required, t.errTrip);
     if (!species) return Alert.alert(t.required, t.errSpecies);
     if (!weightKg.trim()) return Alert.alert(t.required, t.errWeight);
@@ -641,59 +486,33 @@ export default function CreateCatchLog() {
       latitude: latitude || "—",
       longitude: longitude || "—",
       images,
-      linkedCrateId: finalCrateId || null,
+      linkedCrateId: finalCrateId,
     };
 
-    // Always store locally too
-    createCatchLog(payload);
-
-    // If QR present, also add local trace event
-    if (finalCrateId) {
-      trace.addEvent({
-        crateId: finalCrateId,
-        stage: "CATCH",
-        data: payload,
-        createdBy: "Owner",
-      });
-    }
+    // local trace event - optional
+    trace.addEvent({
+      crateId: finalCrateId,
+      stage: "CATCH",
+      data: payload,
+      createdBy: "Owner",
+    });
 
     try {
-      setPosting(true);
-      Alert.alert(t.posting, finalCrateId ? `Crate: ${finalCrateId}` : catchId);
+      Alert.alert(t.posting, `Crate: ${finalCrateId}`);
 
-      await safeFetchJson<any>(ENDPOINTS.postCatchLog, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      // ✅ Redux submit (API-first, dummy-fallback)
+      await dispatch(submitCatchLog(payload)).unwrap();
 
       Alert.alert(t.saved, `Catch ID: ${catchId}`);
 
-      if (finalCrateId) {
-        router.replace({
-          pathname: "/trace/[crateId]",
-          params: { crateId: finalCrateId },
-        });
-      } else {
-        router.back();
-      }
+      router.replace({
+        pathname: "/catch-logs/details",
+        params: { crateId: finalCrateId },
+      });
     } catch (e: any) {
-      Alert.alert(t.apiFailFallback, String(e?.message || e));
-
-      if (finalCrateId) {
-        router.replace({
-          pathname: "/trace/[crateId]",
-          params: { crateId: finalCrateId },
-        });
-      } else {
-        router.back();
-      }
-    } finally {
-      setPosting(false);
+      Alert.alert("Error", String(e?.message || e));
     }
   };
-
-  const cameraDenied = permission && !permission.granted;
 
   return (
     <View className={`flex-1 ${UI.bg}`}>
@@ -755,20 +574,31 @@ export default function CreateCatchLog() {
           </View>
 
           <View className="mt-3">
+            <Text className={`text-xs ${UI.muted}`}>Crate ID</Text>
+            <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>
+              {finalCrateId}
+            </Text>
+          </View>
+
+          <View className="mt-3">
             <Text className={`text-xs ${UI.muted}`}>Catch ID</Text>
-            <Text className={`mt-1 text-base font-bold ${UI.text}`}>{catchId}</Text>
+            <Text className={`mt-1 text-base font-bold ${UI.text}`}>
+              {catchId}
+            </Text>
           </View>
 
           <View
             className={`mt-3 rounded-xl border ${UI.chipBorder} ${UI.chipBg} px-3 py-2`}
           >
-            <Text className={`text-xs font-semibold ${UI.text}`}>{t.step(step)}</Text>
+            <Text className={`text-xs font-semibold ${UI.text}`}>
+              {t.step(step)}
+            </Text>
           </View>
 
-          {offlineMode ? (
+          {usedDummy ? (
             <View className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
               <Text className="text-xs font-semibold text-amber-800">
-                {t.offlineUsingDummy}
+                Offline mode: using dummy fallback
               </Text>
             </View>
           ) : null}
@@ -777,99 +607,6 @@ export default function CreateCatchLog() {
         {/* STEP 1 */}
         {step === 1 ? (
           <View className="mt-4 gap-3">
-            {/* Inline scanner */}
-            <Card className="p-4">
-              <View className="flex-row items-center gap-2">
-                <Ionicons name="qr-code-outline" size={20} color={UI.accent} />
-                <Text className={`text-sm font-extrabold ${UI.text}`}>
-                  {t.scanTitle}
-                </Text>
-              </View>
-
-              <Text className={`mt-1 text-xs ${UI.muted}`}>{t.scanSub}</Text>
-
-              {!!finalCrateId && (
-                <View
-                  className={`mt-3 rounded-xl border ${UI.chipBorder} ${UI.chipBg} px-3 py-2`}
-                >
-                  <Text className={`text-xs font-semibold ${UI.text}`}>
-                    {t.linked}:{" "}
-                    <Text className="font-extrabold">{finalCrateId}</Text>
-                  </Text>
-                </View>
-              )}
-
-              {scanMode ? (
-                <View className="mt-3 overflow-hidden rounded-2xl border border-[#ead7c8] bg-black">
-                  <View style={{ height: 230 }}>
-                    <CameraView
-                      style={{ flex: 1 }}
-                      barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-                      onBarcodeScanned={(result) =>
-                        onScanned({ data: result.data })
-                      }
-                    />
-                    <View className="absolute inset-0 items-center justify-center pointer-events-none">
-                      <View className="h-44 w-44 rounded-2xl border-2 border-white/80" />
-                      <Text className="mt-3 text-white/80 text-[11px]">
-                        Align QR inside the box
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              ) : null}
-
-              {cameraDenied ? (
-                <View
-                  className="mt-3 rounded-xl border px-3 py-2"
-                  style={{ backgroundColor: UI.dangerBg, borderColor: "#fecaca" }}
-                >
-                  <Text
-                    style={{ color: UI.dangerText }}
-                    className="text-xs font-semibold"
-                  >
-                    {t.camDenied}
-                  </Text>
-                </View>
-              ) : null}
-
-              <View className="mt-3 flex-row gap-3">
-                {!scanMode ? (
-                  <Pressable
-                    onPress={requestCamera}
-                    className="flex-1 rounded-2xl px-4 py-3 active:opacity-90"
-                    style={{ backgroundColor: UI.accent }}
-                  >
-                    <Text className="text-center text-white font-semibold">
-                      {t.scanBtn}
-                    </Text>
-                  </Pressable>
-                ) : (
-                  <Pressable
-                    onPress={stopScan}
-                    className="flex-1 rounded-2xl px-4 py-3 active:opacity-90"
-                    style={{ backgroundColor: "#111827" }}
-                  >
-                    <Text className="text-center text-white font-semibold">
-                      {t.stopScanBtn}
-                    </Text>
-                  </Pressable>
-                )}
-
-                <Pressable
-                  onPress={() => {
-                    setScannedCrateId("");
-                    stopScan();
-                  }}
-                  className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-3 active:opacity-80`}
-                >
-                  <Text className={`text-center font-semibold ${UI.text}`}>
-                    {t.clearBtn}
-                  </Text>
-                </Pressable>
-              </View>
-            </Card>
-
             <FieldCard>
               <SelectField
                 label={`✅ ${t.trip} (${t.required})`}
@@ -972,12 +709,6 @@ export default function CreateCatchLog() {
                 </Text>
               </View>
 
-              <Text className={`mt-1 text-xs ${UI.muted}`}>
-                {lang === "ta"
-                  ? "விருப்பம். இருந்தால் சேர்க்கவும்."
-                  : "Optional. Add if you have."}
-              </Text>
-
               <Pressable
                 onPress={pickImages}
                 className="mt-3 rounded-2xl border px-4 py-3 active:opacity-90"
@@ -1036,9 +767,7 @@ export default function CreateCatchLog() {
                 </FieldCard>
 
                 <View className="flex-row gap-3">
-                  <View
-                    className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-3`}
-                  >
+                  <View className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-3`}>
                     <Text className={`text-xs ${UI.muted}`}>{t.lat}</Text>
                     <TextInput
                       value={latitude}
@@ -1047,9 +776,7 @@ export default function CreateCatchLog() {
                       className={`mt-1 text-base ${UI.text}`}
                     />
                   </View>
-                  <View
-                    className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-3`}
-                  >
+                  <View className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-3`}>
                     <Text className={`text-xs ${UI.muted}`}>{t.lon}</Text>
                     <TextInput
                       value={longitude}
