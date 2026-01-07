@@ -1,94 +1,83 @@
-
+// app/_layout.tsx
+import "react-native-reanimated";
+import React, { useEffect, useState } from "react";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { Stack } from "expo-router";
-
-import "react-native-reanimated";
-
-import React, { useEffect, useState } from "react";
-import { View, useColorScheme } from "react-native";
+import { View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
-
 
 import "./global.css";
 
-import { initI18n } from "../src/components/aqua/i18n/i18n";
-import { LanguageProvider } from "../src/data/wild/lang.store";
-import { TraceProvider } from "../src/data/wild/trace.store";
-
-/** ✅ Redux */
-import { Provider } from "react-redux";
-import { store } from "../src/store/auth/store";
-
-/** ✅ Toast */
-import Toast from "react-native-toast-message";
->>>>>>> 7c3e43d21667e292253b62691e64f01ab9db60e1
-
+/** ✅ Redux Provider */
 import { Provider } from "react-redux";
 import { store } from "../src/store/store";
 
-// ✅ NEW
-import { useAppSelector } from "../src/store/hooks";
+/** ✅ Toast */
+import Toast from "react-native-toast-message";
+
+/** ✅ Providers you already use */
+import { LanguageProvider } from "../src/data/wild/lang.store";
+import { TraceProvider } from "../src/data/wild/trace.store";
+
+/** ✅ Theme helper */
+import { useIsDarkTheme } from "../src/store/useIsDarkTheme";
+
+/** ✅ IMPORTANT: i18n init (Aqua) */
+import { initI18n } from "../src/components/aqua/i18n/i18n";
 
 function InnerLayout() {
-  const systemScheme = useColorScheme();
-  const [ready, setReady] = useState(false);
+  const isDark = useIsDarkTheme();
+  const bg = isDark ? "#050B16" : "#F5F7FB";
 
-  // ✅ read theme from redux
-  const mode = useAppSelector((s) => s.theme.mode);
+  // ✅ Gate app rendering until i18n is ready
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     let alive = true;
 
-    initI18n()
-      .catch((e) => console.warn("i18n init failed:", e))
-      .finally(() => {
+    (async () => {
+      try {
+        await initI18n(); // ✅ load translations + saved language
+      } catch (e) {
+        console.warn("i18n init failed:", e);
+      } finally {
         if (alive) setReady(true);
-      });
+      }
+    })();
 
     return () => {
       alive = false;
     };
   }, []);
 
-  if (!ready) return null;
-
-  const isDark =
-    mode === "SYSTEM" ? systemScheme === "dark" : mode === "DARK";
-
-  const isDark = scheme === "dark";
->>>>>>> 7c3e43d21667e292253b62691e64f01ab9db60e1
-  const bg = isDark ? "#050B16" : "#F5F7FB";
-
+  // ✅ Prevent showing translation keys before init
   if (!ready) return null;
 
   return (
-  <Provider store={store}>
-      <GestureHandlerRootView style={{ flex: 1, backgroundColor: bg }}>
-        <SafeAreaProvider>
-          <BottomSheetModalProvider>
-            <LanguageProvider>
-              <TraceProvider>
-                <View
-                  style={{ flex: 1, backgroundColor: bg }}
-                  className={isDark ? "flex-1 dark" : "flex-1"}
-                >
-                  <Stack
-                    screenOptions={{
-                      headerShown: false,
-                      contentStyle: { backgroundColor: bg },
-                      animation: "fade",
-                    }}
-                  />
-                  <Toast />
-                </View>
-              </TraceProvider>
-            </LanguageProvider>
-          </BottomSheetModalProvider>
-        </SafeAreaProvider>
-      </GestureHandlerRootView>
-    </Provider>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: bg }}>
+      <SafeAreaProvider>
+        <BottomSheetModalProvider>
+          <LanguageProvider>
+            <TraceProvider>
+              {/* ✅ NativeWind dark mode support */}
+              <View
+                style={{ flex: 1, backgroundColor: bg }}
+                className={isDark ? "flex-1 dark" : "flex-1"}
+              >
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    contentStyle: { backgroundColor: bg },
+                  }}
+                />
+                <Toast />
+              </View>
+            </TraceProvider>
+          </LanguageProvider>
+        </BottomSheetModalProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 

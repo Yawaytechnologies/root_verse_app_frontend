@@ -221,7 +221,7 @@ export default function Dashboard() {
           sub={t("dashboard.actions.scanQrSub")}
           icon="scan-outline"
           variant="dark"
-          onPress={() => router.push("/(aqua)/qr-scanner")}
+          onPress={() => router.push("/(aqua)/tabs/qr-scanner")}
         />
 
         {/* Keep/remove this depending on whether you still use traceability */}

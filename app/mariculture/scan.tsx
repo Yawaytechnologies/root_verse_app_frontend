@@ -6,6 +6,7 @@ import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useMemo, useState } from "react";
 import { Alert, Platform, Pressable, Text, View } from "react-native";
 import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
+import { g } from "@/src/utils/gradient";
 
 const SKY = "#7dd3fc";
 const MINT = "#34d399";
@@ -14,7 +15,6 @@ export default function ScanScreen() {
   const isDark = useIsDarkTheme();
 
   const T = useMemo(() => {
-    // Keep your colors, just make text readable in light mode
     const bgTop = isDark ? "#071425" : "#f5f7fb";
     const bgMid = isDark ? "#06101E" : "#eef2f7";
     const bgBot = isDark ? "#04060D" : "#e9eff6";
@@ -37,17 +37,16 @@ export default function ScanScreen() {
 
     const btnSkyBg = isDark ? "rgba(125,211,252,0.14)" : "rgba(125,211,252,0.18)";
     const btnSkyBorder = isDark ? "rgba(125,211,252,0.22)" : "rgba(125,211,252,0.30)";
-    const btnSkyText = isDark ? "rgba(125,211,252,0.98)" : "rgba(2,132,199,0.95)"; // sky-600-ish
+    const btnSkyText = isDark ? "rgba(125,211,252,0.98)" : "rgba(2,132,199,0.95)";
 
     const camFrameBorder = isDark ? "rgba(125,211,252,0.22)" : "rgba(2,132,199,0.22)";
     const camFrameBg = isDark ? "rgba(0,0,0,0.35)" : "rgba(15,23,42,0.06)";
     const scanBoxBorder = isDark ? "rgba(125,211,252,0.55)" : "rgba(2,132,199,0.45)";
     const scanBoxBg = isDark ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.35)";
 
-    // Vignette: dark mode = darker bottom, light mode = very subtle
     const vignette = isDark
-      ? ["rgba(0,0,0,0)", "rgba(0,0,0,0.55)"]
-      : ["rgba(0,0,0,0)", "rgba(0,0,0,0.10)"];
+      ? g("rgba(0,0,0,0)", "rgba(0,0,0,0.55)")
+      : g("rgba(0,0,0,0)", "rgba(0,0,0,0.10)");
 
     return {
       bgTop,
@@ -118,7 +117,7 @@ export default function ScanScreen() {
       <StatusBar style={isDark ? "light" : "dark"} />
 
       <LinearGradient
-        colors={[T.bgTop, T.bgMid, T.bgBot]}
+        colors={g(T.bgTop, T.bgMid, T.bgBot)}
         start={{ x: 0.2, y: 0 }}
         end={{ x: 0.8, y: 1 }}
         style={{ flex: 1 }}
@@ -128,13 +127,7 @@ export default function ScanScreen() {
           colors={T.vignette}
           start={{ x: 0.5, y: 0 }}
           end={{ x: 0.5, y: 1 }}
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-          }}
+          style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0 }}
         />
 
         {/* Header */}

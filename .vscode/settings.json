@@ -3,5 +3,17 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
+  },
+
+  "typescript.tsserver.excludeDirectories": ["**/node_modules/**"],
+  "typescript.disableAutomaticTypeAcquisition": true,
+  "typescript.tsserver.experimental.enableProjectDiagnostics": false,
+
+  "search.exclude": {
+    "**/node_modules/**": true
+  },
+
+  "files.watcherExclude": {
+    "**/node_modules/**": true
   }
 }

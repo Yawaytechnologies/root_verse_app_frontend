@@ -3,6 +3,7 @@ import { Stack } from "expo-router";
 import { useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+
 export default function AquaLayout() {
   const isDark = useColorScheme() === "dark";
   const insets = useSafeAreaInsets();

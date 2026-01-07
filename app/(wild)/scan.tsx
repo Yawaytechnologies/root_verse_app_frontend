@@ -1,63 +1,93 @@
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { router } from "expo-router";
-import { default as React, default as React, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-
+ 
+type ScanResult = {
+  data?: string;
+  type?: string;
+};
+ 
 export default function ScanQR() {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
-
+ 
   useEffect(() => {
-    (async () => {
-      const { status } = await BarCodeScanner.requestPermissionsAsync();
-      setHasPermission(status === "granted");
-    })();
-  }, []);
-
-const goToTrace = (raw: string) => {
-    // QR can be just crateId or full URL containing crateId
-    let crateId = raw.trim();
-
-    // If QR contains URL like .../trace/RV-CRATE-000123
-    const match = crateId.match(/trace\/([A-Za-z0-9-_.]+)/);
-    if (match?.[1]) crateId = match[1];
-
-    if (!crateId) return;
-
-    router.replace(`/(wild)/trace/${crateId}` as const);
-  };
-
-if (hasPermission === null) {
+    if (!permission) return;
+ 
+    // ✅ Ask only when possible; avoids infinite prompts
+    if (!permission.granted && permission.canAskAgain) {
+      requestPermission();
+    }
+  }, [permission, requestPermission]);
+ 
+  const onBarcodeScanned = useCallback(
+    (result: ScanResult) => {
+      if (scanned) return;
+      setScanned(true);
+ 
+      const data = String(result?.data ?? "").trim();
+ 
+      if (!data) {
+        setScanned(false);
+        return;
+      }
+ 
+      // ✅ Your navigation (enable when ready)
+      // router.push(`/(wild)/trace/${data}` as const);
+ 
+      router.back();
+    },
+    [scanned]
+  );
+ 
+  if (!permission) {
     return (
-    <View className="flex-1 bg-slate-50 items-center justify-center p-4">
-        <Text className="text-slate-700">Requesting camera permission…</Text>
+      <View className="flex-1 items-center justify-center bg-[#fbf6f1]">
+        <Text>Loading camera permission...</Text>
       </View>
     );
   }
-
+ 
   if (!permission.granted) {
     return (
-    <View className="flex-1 bg-slate-50 items-center justify-center p-4">
-        <Text className="text-slate-900 font-bold">Camera permission denied</Text>
-        <Text className="mt-2 text-slate-600 text-center">
-          Enable camera permission to scan QR stickers.
+      <View className="flex-1 items-center justify-center bg-[#fbf6f1] px-5">
+        <Text className="text-base font-semibold text-[#2b2b2b] text-center">
+          Camera permission is required to scan QR.
         </Text>
-    </View>
+ 
+        <Pressable
+          onPress={requestPermission}
+          className="mt-4 rounded-2xl bg-[#a06b2a] px-5 py-3"
+        >
+          <Text className="text-white font-semibold">Allow Camera</Text>
+        </Pressable>
+ 
+        <Pressable onPress={() => router.back()} className="mt-3">
+          <Text className="text-sky-600 font-semibold">Back</Text>
+        </Pressable>
+      </View>
     );
   }
-
+ 
   return (
     <View className="flex-1 bg-black">
       <CameraView
         style={{ flex: 1 }}
-    />
-
+        facing="back"
+        onBarcodeScanned={scanned ? undefined : onBarcodeScanned}
+        barcodeScannerSettings={{
+          barcodeTypes: ["qr"],
+        }}
+      />
+ 
       {/* Overlay */}
       <View className="absolute inset-0 items-center justify-center">
         <View className="h-56 w-56 rounded-3xl border-2 border-white/80" />
         <Text className="mt-4 text-white/90 font-semibold">
           Align QR inside the box
         </Text>
-
+ 
         {scanned && (
           <Pressable
             onPress={() => setScanned(false)}
@@ -67,7 +97,7 @@ if (hasPermission === null) {
           </Pressable>
         )}
       </View>
-
+ 
       <Pressable
         onPress={() => router.back()}
         className="absolute left-4 top-12 rounded-full bg-white/15 px-4 py-2"
@@ -77,3 +107,5 @@ if (hasPermission === null) {
     </View>
   );
 }
+ 
+ 
