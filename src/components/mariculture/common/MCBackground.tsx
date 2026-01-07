@@ -1,31 +1,31 @@
+import { useIsDarkTheme } from "@/src/store/useIsDarkTheme";
 import React from "react";
-import { View } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import { StyleSheet, View } from "react-native";
+import { MCShell } from "../dashboard/MCShell";
 
 export default function MCBackground({ children }: { children: React.ReactNode }) {
+  const isDark = useIsDarkTheme();
+
   return (
-    <View style={{ flex: 1 }}>
-      <LinearGradient
-        colors={["#071425", "#06101E", "#04060D"]}
-        start={{ x: 0.2, y: 0 }}
-        end={{ x: 0.8, y: 1 }}
-        style={{ flex: 1 }}
-      >
-        {/* vignette */}
-        <LinearGradient
-          colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.55)"]}
-          start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 1 }}
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-          }}
+    <MCShell>
+      <View style={{ flex: 1 }}>
+        {/* ✅ Contrast boost (no color change, only opacity tuning) */}
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              // dark mode: tiny white lift
+              // light mode: tiny black lift
+              backgroundColor: isDark
+                ? "rgba(255,255,255,0.04)"
+                : "rgba(0,0,0,0.05)",
+            },
+          ]}
         />
+
         {children}
-      </LinearGradient>
-    </View>
+      </View>
+    </MCShell>
   );
 }

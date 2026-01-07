@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import { Pressable, Text, View } from "react-native";
+import { useIsDarkTheme } from "../../../store/useIsDarkTheme";
 import { GlassCard } from "./MCShell";
 
 const ACTIONS = [
@@ -23,27 +24,47 @@ const ACTIONS = [
 ];
 
 export default function MCQuickActions() {
+  const isDark = useIsDarkTheme();
+
+  // ✅ theme tokens (only a few — keeps it simple)
+  const title = isDark ? "#ffffff" : "#0B1220";
+const muted = isDark ? "rgba(226,232,240,0.72)" : "rgba(15,23,42,0.72)";
+
+  const border = isDark ? "rgba(255,255,255,0.10)" : "rgba(2,6,23,0.10)";
+
+  const pillBg = isDark ? "rgba(15,23,42,0.85)" : "rgba(255,255,255,0.92)";
+  const pillBorder = isDark ? "rgba(148,163,184,0.7)" : "rgba(2,6,23,0.12)";
+  const pillText = isDark ? "#f9fafb" : "#0f172a";
+
+  const rowGrad = isDark
+    ? ["rgba(255,255,255,0.06)", "rgba(255,255,255,0.03)", "rgba(0,0,0,0.15)"]
+    : ["rgba(2,6,23,0.02)", "rgba(2,6,23,0.01)", "rgba(2,6,23,0.04)"];
+
+  const chevronBg = isDark ? "rgba(255,255,255,0.06)" : "rgba(2,6,23,0.04)";
+  const chevronBorder = isDark ? "rgba(255,255,255,0.10)" : "rgba(2,6,23,0.10)";
+  const chevronColor = isDark ? "rgba(226,232,240,0.75)" : "rgba(15,23,42,0.55)";
+
+  const divider = isDark ? "rgba(255,255,255,0.10)" : "rgba(2,6,23,0.08)";
+
+  const bottomFade = isDark
+    ? ["rgba(0,0,0,0)", "rgba(0,0,0,0.25)"]
+    : ["rgba(255,255,255,0)", "rgba(2,6,23,0.06)"];
+
   return (
     <GlassCard radius={24} pad={18}>
       {/* Header */}
-      <View className="flex-row items-end justify-between">
-        <View className="flex-1 pr-3">
-          <Text
-            className="text-white text-[17px]"
-            style={{ fontWeight: "900", letterSpacing: 0.2 }}
-          >
+      <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" }}>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <Text style={{ color: title, fontSize: 17, fontWeight: "900", letterSpacing: 0.2 }}>
             Quick Actions
           </Text>
-          <Text
-            className="text-slate-300 text-[12px] mt-1"
-            style={{ lineHeight: 16 }}
-          >
+          <Text style={{ color: muted, fontSize: 12, marginTop: 4, lineHeight: 16 }}>
             Operational shortcuts for field teams
           </Text>
         </View>
 
-        {/* Clean “See all” pill */}
-        <Pressable onPress={() => {}}>
+        {/* See all pill */}
+        <Pressable onPress={() => {}} style={({ pressed }) => ({ opacity: pressed ? 0.86 : 1 })}>
           <View
             style={{
               height: 32,
@@ -53,14 +74,14 @@ export default function MCQuickActions() {
               flexDirection: "row",
               alignItems: "center",
               justifyContent: "center",
-              backgroundColor: "rgba(15,23,42,0.85)",
+              backgroundColor: pillBg,
               borderWidth: 1,
-              borderColor: "rgba(148,163,184,0.7)",
+              borderColor: pillBorder,
             }}
           >
             <Text
               style={{
-                color: "#f9fafb",
+                color: pillText,
                 fontSize: 12,
                 fontWeight: "800",
                 letterSpacing: 0.4,
@@ -74,34 +95,31 @@ export default function MCQuickActions() {
       </View>
 
       {/* Divider */}
-      <View className="mt-4 h-[1px] bg-white/10" />
+      <View style={{ marginTop: 16, height: 1, backgroundColor: divider }} />
 
       {/* Actions */}
-      <View className="mt-4">
+      <View style={{ marginTop: 16 }}>
         {ACTIONS.map((a) => (
           <Pressable
             key={a.title}
             onPress={() => {}}
-            className="rounded-2xl overflow-hidden active:opacity-90"
-            style={{
+            style={({ pressed }) => ({
+              borderRadius: 16,
+              overflow: "hidden",
+              opacity: pressed ? 0.9 : 1,
               borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.10)",
-              marginBottom: 10, // small gap between the 3 cards
-            }}
+              borderColor: border,
+              marginBottom: 10,
+            })}
           >
-            {/* Subtle row gradient background */}
             <LinearGradient
-              colors={[
-                "rgba(255,255,255,0.06)",
-                "rgba(255,255,255,0.03)",
-                "rgba(0,0,0,0.15)",
-              ]}
+              colors={rowGrad}
               start={{ x: 0.1, y: 0 }}
               end={{ x: 0.9, y: 1 }}
               style={{ paddingHorizontal: 14, paddingVertical: 14 }}
             >
-              <View className="flex-row items-center">
-                {/* Premium icon badge */}
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                {/* Icon badge (kept same, looks good in both) */}
                 <View
                   style={{
                     height: 46,
@@ -118,17 +136,25 @@ export default function MCQuickActions() {
                 </View>
 
                 {/* Text block */}
-                <View className="flex-1" style={{ marginLeft: 12 }}>
+                <View style={{ flex: 1, marginLeft: 12 }}>
                   <Text
-                    className="text-white text-[14px]"
-                    style={{ fontWeight: "900", letterSpacing: 0.15 }}
+                    style={{
+                      color: title,
+                      fontSize: 14,
+                      fontWeight: "900",
+                      letterSpacing: 0.15,
+                    }}
                     numberOfLines={1}
                   >
                     {a.title}
                   </Text>
                   <Text
-                    className="text-slate-300 text-[12px] mt-1"
-                    style={{ lineHeight: 16 }}
+                    style={{
+                      color: muted,
+                      fontSize: 12,
+                      marginTop: 4,
+                      lineHeight: 16,
+                    }}
                     numberOfLines={1}
                     ellipsizeMode="tail"
                   >
@@ -144,16 +170,12 @@ export default function MCQuickActions() {
                     borderRadius: 999,
                     alignItems: "center",
                     justifyContent: "center",
-                    backgroundColor: "rgba(255,255,255,0.06)",
+                    backgroundColor: chevronBg,
                     borderWidth: 1,
-                    borderColor: "rgba(255,255,255,0.10)",
+                    borderColor: chevronBorder,
                   }}
                 >
-                  <Ionicons
-                    name="chevron-forward"
-                    size={16}
-                    color="rgba(226,232,240,0.75)"
-                  />
+                  <Ionicons name="chevron-forward" size={16} color={chevronColor} />
                 </View>
               </View>
             </LinearGradient>
@@ -161,10 +183,10 @@ export default function MCQuickActions() {
         ))}
       </View>
 
-      {/* Soft bottom fade to add depth */}
-      <View className="mt-4">
+      {/* Bottom fade */}
+      <View style={{ marginTop: 16 }}>
         <LinearGradient
-          colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.25)"]}
+          colors={bottomFade}
           start={{ x: 0.5, y: 0 }}
           end={{ x: 0.5, y: 1 }}
           style={{ height: 12, borderRadius: 12 }}

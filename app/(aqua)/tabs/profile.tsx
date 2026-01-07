@@ -2,26 +2,31 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-    Modal,
-    Pressable,
-    ScrollView,
-    Text,
-    useColorScheme,
-    View,
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  useColorScheme,
+  View,
 } from "react-native";
-import i18n, { setAppLanguage } from "../../../src/components/aqua/i18n/i18n";
+
+import { setAppLanguage } from "../../../src/components/aqua/i18n/i18n";
 
 export default function Profile() {
   const scheme = useColorScheme();
   const isDark = scheme === "dark";
-  const { t } = useTranslation();
+
+  // ✅ IMPORTANT: take i18n from hook, not direct import
+  const { t, i18n } = useTranslation();
 
   const [langOpen, setLangOpen] = useState(false);
 
-  // ✅ user selection (does NOT apply instantly)
-  const [pendingLang, setPendingLang] = useState<"en" | "ta">(i18n.language === "ta" ? "ta" : "en");
+  // ✅ pending selection (does NOT apply instantly)
+  const [pendingLang, setPendingLang] = useState<"en" | "ta">(
+    i18n.language === "ta" ? "ta" : "en"
+  );
 
-  // current app language label (subtitle in profile)
+  // current app language label
   const currentLangLabel = useMemo(() => {
     return i18n.language === "ta" ? "தமிழ்" : "English";
   }, [i18n.language]);
@@ -187,18 +192,18 @@ export default function Profile() {
             </Text>
           </View>
 
-          {/* ✅ Language row (opens modal, doesn't apply instantly) */}
+          {/* ✅ Language row */}
           <Row
             icon="language-outline"
             title={t("profile.language")}
             subtitle={t("profile.languageSub")}
             rightText={currentLangLabel}
             onPress={() => {
-              // ✅ when opening modal, set pending to current app language
               setPendingLang(i18n.language === "ta" ? "ta" : "en");
               setLangOpen(true);
             }}
           />
+
           <View className="h-px bg-slate-100 dark:bg-white/10" />
           <Row
             icon="help-circle-outline"
@@ -223,13 +228,12 @@ export default function Profile() {
           />
         </View>
 
-        {/* Footer */}
         <Text className="mt-4 text-center text-[11px] text-slate-400 dark:text-white/40">
           RootVerse • Aquaculture Module
         </Text>
       </ScrollView>
 
-      {/* ✅ Language Picker Modal (Select -> OK applies) */}
+      {/* ✅ Language Picker Modal */}
       <Modal
         transparent
         visible={langOpen}
@@ -291,13 +295,9 @@ export default function Profile() {
               })}
             </View>
 
-            {/* ✅ Cancel / OK */}
             <View className="mt-4 flex-row gap-3">
               <Pressable
-                onPress={() => {
-                  // cancel = close only, no change
-                  setLangOpen(false);
-                }}
+                onPress={() => setLangOpen(false)}
                 className="flex-1 rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 py-3 items-center"
               >
                 <Text className="text-slate-900 dark:text-white font-extrabold tracking-wide text-xs">
@@ -307,9 +307,13 @@ export default function Profile() {
 
               <Pressable
                 onPress={async () => {
-                  // OK = apply change
-                  await setAppLanguage(pendingLang);
-                  setLangOpen(false);
+                  try {
+                    await setAppLanguage(pendingLang);
+                  } catch (e) {
+                    console.warn("Language switch failed:", e);
+                  } finally {
+                    setLangOpen(false);
+                  }
                 }}
                 className="flex-1 rounded-2xl bg-slate-900 dark:bg-white py-3 items-center"
               >

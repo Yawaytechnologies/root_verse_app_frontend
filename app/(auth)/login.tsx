@@ -1,3 +1,4 @@
+// app/(auth)/login.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
@@ -26,9 +27,18 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+/* ✅ Redux */
+import {
+  clearAuthError,
+  loginFail,
+  loginStart,
+  loginSuccess,
+} from "../../src/features/auth/authSlice";
+import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
+
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
-/* -------------------- Forgot glass modal -------------------- */
+/* -------------------- Forgot glass modal (keep as-is) -------------------- */
 function ForgotGlassModal({
   open,
   onClose,
@@ -65,7 +75,11 @@ function ForgotGlassModal({
       >
         <Pressable
           onPress={onClose}
-          style={{ position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,1)" }}
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundColor: "rgba(0,0,0,1)",
+          }}
         />
 
         <Animated.View style={cardAnim}>
@@ -89,24 +103,17 @@ function ForgotGlassModal({
                   backgroundColor: "rgba(0,0,0,0.35)",
                 }}
               >
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                  <View style={{ flexDirection: "row", alignItems: "center" }}>
-                    <View
-                      style={{
-                        height: 36,
-                        width: 36,
-                        borderRadius: 16,
-                        alignItems: "center",
-                        justifyContent: "center",
-                        backgroundColor: "rgba(255,255,255,0.05)",
-                        borderWidth: 1,
-                        borderColor: "rgba(255,255,255,0.10)",
-                      }}
-                    >
-                      <Ionicons name="shield-checkmark-outline" size={18} color="#7dd3fc" />
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center">
+                    <View className="h-9 w-9 rounded-2xl items-center justify-center bg-white/5 border border-white/10">
+                      <Ionicons
+                        name="shield-checkmark-outline"
+                        size={18}
+                        color="#7dd3fc"
+                      />
                     </View>
-                    <Text style={{ color: "white", fontSize: 14, fontWeight: "600", marginLeft: 12 }}>
-                      Password recovery
+                    <Text className="text-white text-[14px] font-semibold ml-3">
+                      Help
                     </Text>
                   </View>
 
@@ -115,37 +122,32 @@ function ForgotGlassModal({
                   </Pressable>
                 </View>
 
-                <Text style={{ color: "#cbd5e1", fontSize: 12, marginTop: 12, lineHeight: 18 }}>
-                  For security reasons, password reset is handled by your administrator. Please contact admin to
-                  recover/reset your password.
+                <Text className="text-slate-300 text-[12px] mt-3 leading-5">
+                  OTP login is handled via your registered mobile number. If you
+                  don’t receive OTP, please contact your administrator.
                 </Text>
 
-                <View style={{ marginTop: 18, flexDirection: "row" }}>
-                  <Pressable onPress={onClose} style={{ flex: 1, borderRadius: 16, overflow: "hidden" }}>
-                    <View
-                      style={{
-                        paddingVertical: 12,
-                        alignItems: "center",
-                        borderRadius: 16,
-                        backgroundColor: "rgba(255,255,255,0.05)",
-                        borderWidth: 1,
-                        borderColor: "rgba(255,255,255,0.10)",
-                      }}
-                    >
-                      <Text style={{ color: "#e2e8f0", fontSize: 12, fontWeight: "600" }}>Got it</Text>
+                <View className="mt-5 flex-row">
+                  <Pressable onPress={onClose} className="flex-1 rounded-2xl overflow-hidden">
+                    <View className="py-3 items-center rounded-2xl bg-white/5 border border-white/10">
+                      <Text className="text-slate-200 text-[12px] font-semibold">
+                        Got it
+                      </Text>
                     </View>
                   </Pressable>
 
                   <View style={{ width: 10 }} />
 
-                  <Pressable onPress={onClose} style={{ flex: 1, borderRadius: 16, overflow: "hidden" }}>
+                  <Pressable onPress={onClose} className="flex-1 rounded-2xl overflow-hidden">
                     <LinearGradient
                       colors={["#34d399", "#10b981", "#06b6d4"]}
                       start={{ x: 0, y: 0.5 }}
                       end={{ x: 1, y: 0.5 }}
                       style={{ paddingVertical: 12, borderRadius: 16, alignItems: "center" }}
                     >
-                      <Text style={{ color: "black", fontSize: 12, fontWeight: "600" }}>Contact admin</Text>
+                      <Text className="text-black text-[12px] font-semibold">
+                        Contact admin
+                      </Text>
                     </LinearGradient>
                   </Pressable>
                 </View>
@@ -160,23 +162,44 @@ function ForgotGlassModal({
 
 /* -------------------- Screen -------------------- */
 export default function LoginScreen() {
-  const [userId, setUserId] = useState("");
-  const [pw, setPw] = useState("");
-  const [show, setShow] = useState(false);
+  const dispatch = useAppDispatch();
+
+  // ✅ SAFEST: don’t destructure from possibly-undefined object
+  const loading = useAppSelector((s) => s.auth?.loading ?? false);
+
+  // ✅ OTP login inputs
+  const [phone, setPhone] = useState("");
   const [agree, setAgree] = useState(false);
-  const [forgotOpen, setForgotOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
-  const idOk = useMemo(() => userId.trim().length >= 3, [userId]);
-  const pwOk = useMemo(() => pw.length >= 4, [pw]);
-  const canSubmit = idOk && pwOk && agree;
+  // ✅ Validation
+  const phoneDigits = useMemo(() => phone.replace(/[^\d]/g, ""), [phone]);
+  const phoneOk = useMemo(() => phoneDigits.length === 10, [phoneDigits]);
+  const canSubmit = phoneOk && agree && !loading;
 
-  const onSubmit = () => {
+  const phoneRef = useRef<TextInput>(null);
+
+  const onSubmit = async () => {
     if (!canSubmit) return;
-    router.replace("/dashboard");
-  };
 
-  const idRef = useRef<TextInput>(null);
-  const pwRef = useRef<TextInput>(null);
+    dispatch(clearAuthError());
+    dispatch(loginStart());
+
+    try {
+      // ✅ format for India (+91)
+      const e164 = `+91${phoneDigits}`;
+
+      // ✅ For now: just route to OTP screen.
+      dispatch(loginSuccess({ step: "OTP_SENT", phone: e164 } as any));
+
+      router.push({
+        pathname: "/(auth)/otp",
+        params: { phone: e164 },
+      });
+    } catch (e: any) {
+      dispatch(loginFail(e?.message || "OTP send failed"));
+    }
+  };
 
   const keyboardOpen = useSharedValue(0);
   const keyboardH = useSharedValue(0);
@@ -184,15 +207,20 @@ export default function LoginScreen() {
   const bgDim = useSharedValue(0);
 
   const dimOn = () => {
-    bgDim.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) });
+    bgDim.value = withTiming(1, {
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+    });
   };
 
   const dimOffIfNoFocus = () => {
     setTimeout(() => {
-      const idFocused = idRef.current?.isFocused?.() ?? false;
-      const pwFocused = pwRef.current?.isFocused?.() ?? false;
-      if (!idFocused && !pwFocused) {
-        bgDim.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
+      const focused = phoneRef.current?.isFocused?.() ?? false;
+      if (!focused) {
+        bgDim.value = withTiming(0, {
+          duration: 220,
+          easing: Easing.out(Easing.cubic),
+        });
       }
     }, 80);
   };
@@ -204,12 +232,19 @@ export default function LoginScreen() {
     const subShow = Keyboard.addListener(showEvt, (e: any) => {
       const h = e?.endCoordinates?.height ?? 0;
       keyboardH.value = h;
-      keyboardOpen.value = withTiming(1, { duration: 240, easing: Easing.out(Easing.cubic) });
+
+      keyboardOpen.value = withTiming(1, {
+        duration: 240,
+        easing: Easing.out(Easing.cubic),
+      });
       dimOn();
     });
 
     const subHide = Keyboard.addListener(hideEvt, () => {
-      keyboardOpen.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
+      keyboardOpen.value = withTiming(0, {
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+      });
       keyboardH.value = 0;
       dimOffIfNoFocus();
     });
@@ -226,16 +261,30 @@ export default function LoginScreen() {
   const drift = useSharedValue(0);
 
   useEffect(() => {
-    bob.value = withRepeat(withTiming(1, { duration: 2600, easing: Easing.inOut(Easing.sin) }), -1, true);
-    sway.value = withRepeat(withTiming(1, { duration: 3200, easing: Easing.inOut(Easing.sin) }), -1, true);
-    drift.value = withRepeat(withTiming(1, { duration: 5200, easing: Easing.inOut(Easing.sin) }), -1, true);
+    bob.value = withRepeat(
+      withTiming(1, { duration: 2600, easing: Easing.inOut(Easing.sin) }),
+      -1,
+      true
+    );
+    sway.value = withRepeat(
+      withTiming(1, { duration: 3200, easing: Easing.inOut(Easing.sin) }),
+      -1,
+      true
+    );
+    drift.value = withRepeat(
+      withTiming(1, { duration: 5200, easing: Easing.inOut(Easing.sin) }),
+      -1,
+      true
+    );
   }, []);
 
   const fishAnim = useAnimatedStyle(() => {
     const ty = interpolate(bob.value, [0, 1], [6, -6]);
     const rot = interpolate(sway.value, [0, 1], [-3, 3]);
     const tx = interpolate(drift.value, [0, 0.5, 1], [-5, 6, -5]);
-    return { transform: [{ translateX: tx }, { translateY: ty }, { rotateZ: `${rot}deg` }] };
+    return {
+      transform: [{ translateX: tx }, { translateY: ty }, { rotateZ: `${rot}deg` }],
+    };
   });
 
   /* Hero intro */
@@ -243,8 +292,14 @@ export default function LoginScreen() {
   const formProgress = useSharedValue(0);
 
   useEffect(() => {
-    heroProgress.value = withDelay(2000, withTiming(1, { duration: 900, easing: Easing.out(Easing.cubic) }));
-    formProgress.value = withDelay(2900, withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) }));
+    heroProgress.value = withDelay(
+      2000,
+      withTiming(1, { duration: 900, easing: Easing.out(Easing.cubic) })
+    );
+    formProgress.value = withDelay(
+      2900,
+      withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) })
+    );
   }, []);
 
   const heroAnim = useAnimatedStyle(() => {
@@ -274,15 +329,20 @@ export default function LoginScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: "black", position: "relative" }}>
       <LinearGradient
-        colors={["rgba(16,185,129,0.22)", "rgba(0,0,0,0.86)", "rgba(0,0,0,0.96)"]}
+        colors={[
+          "rgba(16,185,129,0.22)",
+          "rgba(0,0,0,0.86)",
+          "rgba(0,0,0,0.96)",
+        ]}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
         style={{ position: "absolute", inset: 0 }}
       />
 
-      <ForgotGlassModal open={forgotOpen} onClose={() => setForgotOpen(false)} />
+      <ForgotGlassModal open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        {/* Hero */}
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 20 }}>
           <Animated.View style={heroAnim}>
             <View style={{ alignItems: "center" }}>
@@ -294,46 +354,16 @@ export default function LoginScreen() {
                 />
               </Animated.View>
 
-              <View style={{ marginTop: 0, alignItems: "center" }}>
-                <Text
-                  style={{
-                    fontFamily: "System",
-                    fontWeight: "900",
-                    fontSize: 50,
-                    letterSpacing: 3,
-                    color: "white",
-                    textAlign: "center",
-                    textTransform: "uppercase",
-                  }}
-                >
+              <View className="mt-0 items-center">
+                <Text style={{ fontFamily: "System", fontWeight: "900", fontSize: 50, letterSpacing: 3, color: "white", textAlign: "center", textTransform: "uppercase" }}>
                   ROOTVERSE
                 </Text>
 
-                <Text
-                  style={{
-                    fontFamily: "System",
-                    fontWeight: "800",
-                    fontSize: 18,
-                    letterSpacing: 3,
-                    color: "#0ea5e9",
-                    textAlign: "center",
-                    marginTop: 4,
-                  }}
-                >
+                <Text style={{ fontFamily: "System", fontWeight: "800", fontSize: 18, letterSpacing: 3, color: "#0ea5e9", textAlign: "center", marginTop: 4 }}>
                   BLUE ECONOMY
                 </Text>
 
-                <Text
-                  style={{
-                    fontFamily: "System",
-                    fontWeight: "800",
-                    fontSize: 18,
-                    letterSpacing: 3,
-                    color: "#0ea5e9",
-                    textAlign: "center",
-                    marginTop: 4,
-                  }}
-                >
+                <Text style={{ fontFamily: "System", fontWeight: "800", fontSize: 18, letterSpacing: 3, color: "#0ea5e9", textAlign: "center", marginTop: 4 }}>
                   TRACEABILITY SYSTEM
                 </Text>
               </View>
@@ -341,112 +371,73 @@ export default function LoginScreen() {
           </Animated.View>
         </View>
 
+        {/* Dim overlay */}
         <Animated.View
           pointerEvents="none"
-          style={[{ position: "absolute", inset: 0, backgroundColor: "black", zIndex: 5 }, dimOverlayAnim]}
+          style={[
+            { position: "absolute", inset: 0, backgroundColor: "black", zIndex: 5 },
+            dimOverlayAnim,
+          ]}
         />
 
-        <View style={{ position: "absolute", left: 20, right: 20, bottom: 120, zIndex: 10 }}>
+        {/* Card */}
+        <View style={{ position: "absolute", left: 20, right: 20, bottom: 190, zIndex: 10 }}>
           <Animated.View style={formAnim}>
             <BlurView intensity={22} tint="dark" style={{ borderRadius: 26, overflow: "hidden" }}>
-              <View
-                style={{
-                  backgroundColor: "rgba(0,0,0,0.35)",
-                  borderWidth: 1,
-                  borderColor: "rgba(255,255,255,0.10)",
-                  borderRadius: 26,
-                  padding: 20,
-                }}
-              >
+              <View style={{ backgroundColor: "rgba(0,0,0,0.35)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", borderRadius: 26, padding: 20 }}>
                 <Text style={{ color: "#cbd5e1", fontSize: 14, marginBottom: 16, textAlign: "center" }}>
                   Sign in to continue.
                 </Text>
 
-                <Text style={{ color: "#cbd5e1", fontSize: 11, marginBottom: 8 }}>ID</Text>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    backgroundColor: "rgba(255,255,255,0.05)",
-                    borderWidth: 1,
-                    borderColor: "rgba(255,255,255,0.10)",
-                    borderRadius: 16,
-                    paddingHorizontal: 16,
-                    paddingVertical: 12,
-                  }}
-                >
-                  <Ionicons name="person-outline" size={18} color="#94a3b8" />
+                {/* Mobile */}
+                <Text className="text-slate-300 text-[11px] mb-2">Mobile Number</Text>
+                <View className="flex-row items-center bg-white/5 border border-white/10 rounded-2xl px-4 py-3">
+                  <Ionicons name="call-outline" size={18} color="#94a3b8" />
                   <TextInput
-                    ref={idRef}
-                    value={userId}
-                    onChangeText={setUserId}
-                    placeholder="Enter your ID"
+                    ref={phoneRef}
+                    value={phone}
+                    onChangeText={setPhone}
+                    placeholder="Enter 10-digit mobile number"
                     placeholderTextColor="#64748b"
-                    autoCapitalize="none"
-                    style={{ color: "white", flex: 1, marginLeft: 12, backgroundColor: "transparent" }}
+                    keyboardType="phone-pad"
+                    className="text-white flex-1 ml-3"
+                    style={{ backgroundColor: "transparent" }}
                     onFocus={dimOn}
                     onBlur={dimOffIfNoFocus}
+                    maxLength={14}
                   />
                   <View
-                    style={{
-                      height: 10,
-                      width: 10,
-                      borderRadius: 99,
-                      backgroundColor:
-                        userId.length === 0 ? "#334155" : idOk ? "#34d399" : "#fb7185",
-                    }}
+                    className={`h-2.5 w-2.5 rounded-full ${phone.length === 0 ? "bg-slate-700" : phoneOk ? "bg-emerald-400" : "bg-rose-400"
+                      }`}
                   />
                 </View>
 
-                <Text style={{ color: "#cbd5e1", fontSize: 11, marginTop: 16, marginBottom: 8 }}>Password</Text>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    backgroundColor: "rgba(255,255,255,0.05)",
-                    borderWidth: 1,
-                    borderColor: "rgba(255,255,255,0.10)",
-                    borderRadius: 16,
-                    paddingHorizontal: 16,
-                    paddingVertical: 12,
-                  }}
-                >
-                  <Ionicons name="lock-closed-outline" size={18} color="#94a3b8" />
-                  <TextInput
-                    ref={pwRef}
-                    value={pw}
-                    onChangeText={setPw}
-                    placeholder="••••••••"
-                    placeholderTextColor="#64748b"
-                    secureTextEntry={!show}
-                    style={{ color: "white", flex: 1, marginLeft: 12, backgroundColor: "transparent" }}
-                    onFocus={dimOn}
-                    onBlur={dimOffIfNoFocus}
-                  />
-                  <Pressable onPress={() => setShow((p) => !p)} style={{ padding: 8, marginRight: -8 }}>
-                    <Ionicons name={show ? "eye-off-outline" : "eye-outline"} size={18} color="#94a3b8" />
-                  </Pressable>
-                </View>
+                {/* ✅ Register (left) + Help (right) */}
+                <View className="flex-row items-center mt-3">
+                  {/* Left side: takes remaining space, wraps if needed */}
+                  <View className="flex-1 pr-3">
+                    <Text className="text-slate-300 text-[11px]" numberOfLines={2}>
+                      {"If you don't have account "}
+                      <Text
+                        className="text-emerald-300 text-[11px] font-semibold"
+                        onPress={() => router.push({ pathname: "/(auth)/register" } as any)}
+                      >
+                        Register here
+                      </Text>
+                    </Text>
+                  </View>
 
-                {/* ✅ FIXED: wraps properly on mobile */}
-                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 12 }}>
-                  <Pressable
-                    onPress={() => router.push("/(auth)/register")}
-                    style={{ flex: 1, paddingRight: 12 }}
-                    hitSlop={8}
-                  >
-                    <Text style={{ color: "#cbd5e1", fontSize: 11, flexWrap: "wrap", lineHeight: 16 }}>
-                      If you don&apos;t have an account{" "}
-                      <Text style={{ color: "#7dd3fc", fontWeight: "700" }}>create here</Text>
+                  {/* Right side: pinned */}
+                  <Pressable onPress={() => setHelpOpen(true)} hitSlop={10}>
+                    <Text className="text-emerald-300 text-[11px] font-semibold">
+                      Need help?
                     </Text>
                   </Pressable>
-
-                  <Pressable onPress={() => setForgotOpen(true)} hitSlop={8}>
-                    <Text style={{ color: "#6ee7b7", fontSize: 11, fontWeight: "700" }}>Forgot?</Text>
-                  </Pressable>
                 </View>
-
-                <Pressable onPress={() => setAgree((p) => !p)} style={{ flexDirection: "row", alignItems: "center", marginTop: 16 }}>
+                <Pressable
+                  onPress={() => setAgree((p) => !p)}
+                  style={{ flexDirection: "row", alignItems: "center", marginTop: 20 }}
+                >
                   <View
                     style={{
                       height: 20,
@@ -467,15 +458,21 @@ export default function LoginScreen() {
                 </Pressable>
 
                 <View style={{ marginTop: 18 }}>
-                  <View style={{ position: "absolute", left: -4, right: -4, top: -4, bottom: -4, borderRadius: 24, backgroundColor: "rgba(52,211,153,0.25)" }} />
+                  <View
+                    style={{
+                      position: "absolute",
+                      left: -4,
+                      right: -4,
+                      top: -4,
+                      bottom: -4,
+                      borderRadius: 24,
+                      backgroundColor: "rgba(52,211,153,0.25)",
+                    }}
+                  />
                   <Pressable
                     disabled={!canSubmit}
                     onPress={onSubmit}
-                    style={{
-                      borderRadius: 24,
-                      overflow: "hidden",
-                      opacity: !canSubmit ? 0.6 : 1,
-                    }}
+                    style={{ borderRadius: 24, overflow: "hidden", opacity: !canSubmit ? 0.6 : 1 }}
                   >
                     <LinearGradient
                       colors={["#34d399", "#10b981", "#06b6d4"]}
@@ -483,7 +480,9 @@ export default function LoginScreen() {
                       end={{ x: 1, y: 0.5 }}
                       style={{ paddingVertical: 15, alignItems: "center", borderRadius: 24 }}
                     >
-                      <Text style={{ color: "black", fontWeight: "600" }}>Continue</Text>
+                      <Text className="text-black font-semibold">
+                        {loading ? "Sending..." : "Send OTP"}
+                      </Text>
                     </LinearGradient>
                   </Pressable>
                 </View>
