@@ -1,14 +1,80 @@
+import { useIsDarkTheme } from "@/src/store/useIsDarkTheme";
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useCallback, useState } from "react";
+import { StatusBar } from "expo-status-bar";
+import React, { useCallback, useMemo, useState } from "react";
 import { Alert, Platform, Pressable, Text, View } from "react-native";
 import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
+import { g } from "@/src/utils/gradient";
 
 const SKY = "#7dd3fc";
 const MINT = "#34d399";
 
 export default function ScanScreen() {
+  const isDark = useIsDarkTheme();
+
+  const T = useMemo(() => {
+    const bgTop = isDark ? "#071425" : "#f5f7fb";
+    const bgMid = isDark ? "#06101E" : "#eef2f7";
+    const bgBot = isDark ? "#04060D" : "#e9eff6";
+
+    const titleGreen = isDark ? MINT : "#10b981";
+    const title = isDark ? "rgba(255,255,255,0.96)" : "#0f172a";
+    const sub = isDark ? "rgba(226,232,240,0.72)" : "rgba(15,23,42,0.60)";
+    const faint = isDark ? "rgba(226,232,240,0.75)" : "rgba(15,23,42,0.55)";
+
+    const cardBg = isDark ? "rgba(255,255,255,0.03)" : "#ffffff";
+    const cardBorder = isDark ? "rgba(255,255,255,0.10)" : "rgba(15,23,42,0.10)";
+
+    const chipBg = isDark ? "rgba(15,23,42,0.70)" : "rgba(15,23,42,0.10)";
+    const chipBorder = isDark ? "rgba(148,163,184,0.35)" : "rgba(15,23,42,0.12)";
+    const chipText = isDark ? "rgba(209,250,229,0.92)" : "#0f172a";
+
+    const btnSoftBg = isDark ? "rgba(255,255,255,0.05)" : "rgba(15,23,42,0.06)";
+    const btnSoftBorder = isDark ? "rgba(255,255,255,0.10)" : "rgba(15,23,42,0.10)";
+    const btnSoftText = isDark ? "rgba(226,232,240,0.78)" : "rgba(15,23,42,0.70)";
+
+    const btnSkyBg = isDark ? "rgba(125,211,252,0.14)" : "rgba(125,211,252,0.18)";
+    const btnSkyBorder = isDark ? "rgba(125,211,252,0.22)" : "rgba(125,211,252,0.30)";
+    const btnSkyText = isDark ? "rgba(125,211,252,0.98)" : "rgba(2,132,199,0.95)";
+
+    const camFrameBorder = isDark ? "rgba(125,211,252,0.22)" : "rgba(2,132,199,0.22)";
+    const camFrameBg = isDark ? "rgba(0,0,0,0.35)" : "rgba(15,23,42,0.06)";
+    const scanBoxBorder = isDark ? "rgba(125,211,252,0.55)" : "rgba(2,132,199,0.45)";
+    const scanBoxBg = isDark ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.35)";
+
+    const vignette = isDark
+      ? g("rgba(0,0,0,0)", "rgba(0,0,0,0.55)")
+      : g("rgba(0,0,0,0)", "rgba(0,0,0,0.10)");
+
+    return {
+      bgTop,
+      bgMid,
+      bgBot,
+      vignette,
+      titleGreen,
+      title,
+      sub,
+      faint,
+      cardBg,
+      cardBorder,
+      chipBg,
+      chipBorder,
+      chipText,
+      btnSoftBg,
+      btnSoftBorder,
+      btnSoftText,
+      btnSkyBg,
+      btnSkyBorder,
+      btnSkyText,
+      camFrameBorder,
+      camFrameBg,
+      scanBoxBorder,
+      scanBoxBg,
+    };
+  }, [isDark]);
+
   const [permission, requestPermission] = useCameraPermissions();
   const [locked, setLocked] = useState(false);
   const [lastCode, setLastCode] = useState<string | null>(null);
@@ -37,7 +103,6 @@ export default function ScanScreen() {
           text: "Use this",
           onPress: () => {
             // TODO: route to crate assignment form
-            // e.g. router.push({ pathname: "/mariculture/assign-crate", params: { code: data }})
           },
         },
       ]);
@@ -49,35 +114,30 @@ export default function ScanScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      {/* Background like your dashboard */}
+      <StatusBar style={isDark ? "light" : "dark"} />
+
       <LinearGradient
-        colors={["#071425", "#06101E", "#04060D"]}
+        colors={g(T.bgTop, T.bgMid, T.bgBot)}
         start={{ x: 0.2, y: 0 }}
         end={{ x: 0.8, y: 1 }}
         style={{ flex: 1 }}
       >
         {/* Vignette */}
         <LinearGradient
-          colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.55)"]}
+          colors={T.vignette}
           start={{ x: 0.5, y: 0 }}
           end={{ x: 0.5, y: 1 }}
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-          }}
+          style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0 }}
         />
 
-        {/* Header (Dashboard style: Mariculture + Scan) */}
+        {/* Header */}
         <Animated.View
           entering={FadeInDown.duration(Platform.OS === "android" ? 200 : 260)}
           style={{ paddingHorizontal: 18, paddingTop: 34 }}
         >
           <Text
             style={{
-              color: MINT,
+              color: T.titleGreen,
               fontSize: 36,
               fontWeight: "900",
               letterSpacing: 0.2,
@@ -90,7 +150,7 @@ export default function ScanScreen() {
           <Text
             style={{
               marginTop: 6,
-              color: "rgba(255,255,255,0.96)",
+              color: T.title,
               fontSize: 18,
               fontWeight: "900",
               letterSpacing: 0.2,
@@ -103,7 +163,7 @@ export default function ScanScreen() {
           <Text
             style={{
               marginTop: 8,
-              color: "rgba(226,232,240,0.72)",
+              color: T.sub,
               fontSize: 13,
               fontWeight: "700",
               lineHeight: 18,
@@ -121,16 +181,16 @@ export default function ScanScreen() {
                 height: 38,
                 paddingHorizontal: 14,
                 borderRadius: 999,
-                backgroundColor: "rgba(15,23,42,0.70)",
+                backgroundColor: T.chipBg,
                 borderWidth: 1,
-                borderColor: "rgba(148,163,184,0.35)",
+                borderColor: T.chipBorder,
               }}
             >
-              <Ionicons name="qr-code-outline" size={16} color={MINT} />
+              <Ionicons name="qr-code-outline" size={16} color={T.titleGreen} />
               <Text
                 style={{
                   marginLeft: 8,
-                  color: "rgba(209,250,229,0.92)",
+                  color: T.chipText,
                   fontSize: 13,
                   fontWeight: "900",
                   letterSpacing: 0.2,
@@ -145,7 +205,7 @@ export default function ScanScreen() {
         {/* Permission states */}
         {!permission ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-            <Text style={{ color: "rgba(226,232,240,0.75)", fontWeight: "800" }}>
+            <Text style={{ color: T.faint, fontWeight: "800" }}>
               Checking camera permission…
             </Text>
           </View>
@@ -155,8 +215,8 @@ export default function ScanScreen() {
               style={{
                 borderRadius: 22,
                 borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.10)",
-                backgroundColor: "rgba(255,255,255,0.03)",
+                borderColor: T.cardBorder,
+                backgroundColor: T.cardBg,
                 padding: 16,
               }}
             >
@@ -168,20 +228,25 @@ export default function ScanScreen() {
                     borderRadius: 18,
                     alignItems: "center",
                     justifyContent: "center",
-                    backgroundColor: "rgba(125,211,252,0.12)",
+                    backgroundColor: isDark
+                      ? "rgba(125,211,252,0.12)"
+                      : "rgba(125,211,252,0.18)",
                     borderWidth: 1,
-                    borderColor: "rgba(125,211,252,0.22)",
+                    borderColor: isDark
+                      ? "rgba(125,211,252,0.22)"
+                      : "rgba(125,211,252,0.28)",
                   }}
                 >
                   <Ionicons name="camera-outline" size={22} color={SKY} />
                 </View>
+
                 <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={{ color: "white", fontWeight: "900", fontSize: 14 }}>
+                  <Text style={{ color: T.title, fontWeight: "900", fontSize: 14 }}>
                     Camera permission needed
                   </Text>
                   <Text
                     style={{
-                      color: "rgba(226,232,240,0.68)",
+                      color: T.sub,
                       fontWeight: "700",
                       fontSize: 12,
                       marginTop: 4,
@@ -200,13 +265,13 @@ export default function ScanScreen() {
                   borderRadius: 16,
                   alignItems: "center",
                   justifyContent: "center",
-                  backgroundColor: "rgba(125,211,252,0.14)",
+                  backgroundColor: T.btnSkyBg,
                   borderWidth: 1,
-                  borderColor: "rgba(125,211,252,0.22)",
+                  borderColor: T.btnSkyBorder,
                   opacity: pressed ? 0.86 : 1,
                 })}
               >
-                <Text style={{ color: "rgba(125,211,252,0.98)", fontWeight: "900" }}>
+                <Text style={{ color: T.btnSkyText, fontWeight: "900" }}>
                   Grant permission
                 </Text>
               </Pressable>
@@ -225,8 +290,8 @@ export default function ScanScreen() {
                   borderRadius: 26,
                   overflow: "hidden",
                   borderWidth: 1,
-                  borderColor: "rgba(125,211,252,0.22)",
-                  backgroundColor: "rgba(0,0,0,0.35)",
+                  borderColor: T.camFrameBorder,
+                  backgroundColor: T.camFrameBg,
                 }}
               >
                 <CameraView
@@ -255,14 +320,14 @@ export default function ScanScreen() {
                       aspectRatio: 1,
                       borderRadius: 22,
                       borderWidth: 2,
-                      borderColor: "rgba(125,211,252,0.55)",
-                      backgroundColor: "rgba(0,0,0,0.15)",
+                      borderColor: T.scanBoxBorder,
+                      backgroundColor: T.scanBoxBg,
                     }}
                   />
                   <Text
                     style={{
                       marginTop: 14,
-                      color: "rgba(226,232,240,0.78)",
+                      color: T.sub,
                       fontSize: 12,
                       fontWeight: "800",
                     }}
@@ -279,14 +344,14 @@ export default function ScanScreen() {
                 style={{
                   borderRadius: 20,
                   borderWidth: 1,
-                  borderColor: "rgba(255,255,255,0.10)",
-                  backgroundColor: "rgba(255,255,255,0.03)",
+                  borderColor: T.cardBorder,
+                  backgroundColor: T.cardBg,
                   padding: 14,
                 }}
               >
                 <View style={{ flexDirection: "row", alignItems: "center" }}>
                   <Ionicons name="qr-code-outline" size={18} color={SKY} />
-                  <Text style={{ marginLeft: 8, color: "white", fontWeight: "900" }}>
+                  <Text style={{ marginLeft: 8, color: T.title, fontWeight: "900" }}>
                     Scan status
                   </Text>
                 </View>
@@ -294,7 +359,7 @@ export default function ScanScreen() {
                 <Text
                   style={{
                     marginTop: 8,
-                    color: "rgba(226,232,240,0.68)",
+                    color: T.sub,
                     fontSize: 12,
                     fontWeight: "700",
                   }}
@@ -315,13 +380,13 @@ export default function ScanScreen() {
                       borderRadius: 16,
                       alignItems: "center",
                       justifyContent: "center",
-                      backgroundColor: "rgba(255,255,255,0.05)",
+                      backgroundColor: T.btnSoftBg,
                       borderWidth: 1,
-                      borderColor: "rgba(255,255,255,0.10)",
+                      borderColor: T.btnSoftBorder,
                       opacity: pressed ? 0.86 : 1,
                     })}
                   >
-                    <Text style={{ color: "rgba(226,232,240,0.78)", fontWeight: "900" }}>
+                    <Text style={{ color: T.btnSoftText, fontWeight: "900" }}>
                       Scan again
                     </Text>
                   </Pressable>
@@ -333,7 +398,6 @@ export default function ScanScreen() {
                         return;
                       }
                       Alert.alert("Use this code", lastCode);
-                      // TODO: route to assign screen
                     }}
                     style={({ pressed }) => ({
                       flex: 1,
@@ -341,13 +405,13 @@ export default function ScanScreen() {
                       borderRadius: 16,
                       alignItems: "center",
                       justifyContent: "center",
-                      backgroundColor: "rgba(125,211,252,0.14)",
+                      backgroundColor: T.btnSkyBg,
                       borderWidth: 1,
-                      borderColor: "rgba(125,211,252,0.22)",
+                      borderColor: T.btnSkyBorder,
                       opacity: pressed ? 0.86 : 1,
                     })}
                   >
-                    <Text style={{ color: "rgba(125,211,252,0.98)", fontWeight: "900" }}>
+                    <Text style={{ color: T.btnSkyText, fontWeight: "900" }}>
                       Use code
                     </Text>
                   </Pressable>

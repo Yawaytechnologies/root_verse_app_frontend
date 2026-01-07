@@ -1,37 +1,38 @@
 import type { AppModule } from "../../features/auth/authSlice";
 
-export type LoginPayload = {
-  userId: string;
-  password: string;
-};
+export type LoginPayload = { userId: string; password: string };
+export type LoginResponse = { token: string; userId: string; module: AppModule };
 
-export type LoginResponse = {
-  token: string;
-  userId: string;
-  module: AppModule;
-};
-
-// Simple rule-based module decision (edit anytime)
-function decideModuleFromId(userId: string): AppModule {
+function decideModuleFromId(userId: string): AppModule | null {
   const id = userId.trim().toUpperCase();
 
-  if (id.startsWith("MC") || id.includes("MARI")) return "MARICULTURE";
-  if (id.startsWith("AQ") || id.includes("AQUA")) return "AQUACULTURE";
-  return "WILDCAPTURE";
+  if (id.startsWith("MC")) return "MARICULTURE";
+  if (id.startsWith("AQ")) return "AQUACULTURE";
+  if (id.startsWith("WC") || id.startsWith("WL") || id.startsWith("WILD"))
+    return "WILDCAPTURE";
+
+  return null; // ✅ invalid
 }
 
 export async function loginApi(payload: LoginPayload): Promise<LoginResponse> {
-  // simulate a real network call
-  await new Promise((r) => setTimeout(r, 450));
+  await new Promise((r) => setTimeout(r, 300));
 
-  if (!payload.userId?.trim() || !payload.password?.trim()) {
-    throw new Error("User ID and password are required");
+  const userId = payload.userId?.trim();
+  const password = payload.password?.trim();
+
+  if (!userId || !password) throw new Error("Enter ID and password");
+
+  const module = decideModuleFromId(userId);
+  if (!module) {
+    throw new Error("Invalid ID. Use AQ..., WC..., or MC... (demo)");
   }
 
-  // you can add more checks if you want (like wrong password demo)
+  // Optional: enforce demo password
+  // if (password !== "1234") throw new Error("Wrong password (demo: use 1234)");
+
   return {
-    token: `mock_${Date.now()}`,
-    userId: payload.userId.trim(),
-    module: decideModuleFromId(payload.userId),
+    token: `demo_${Date.now()}`,
+    userId,
+    module,
   };
 }

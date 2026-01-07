@@ -9,6 +9,7 @@ import Animated, {
   withTiming,
   ZoomInEasyUp,
 } from "react-native-reanimated";
+import { useIsDarkTheme } from "../../../store/useIsDarkTheme";
 
 const SKY = "#7dd3fc";
 const SKY_BG = "rgba(125,211,252,0.14)";
@@ -27,6 +28,7 @@ function KpiTile({
   hint: string;
   index: number;
 }) {
+  const isDark = useIsDarkTheme();
   const s = useSharedValue(1);
 
   const aStyle = useAnimatedStyle(() => ({
@@ -47,6 +49,20 @@ function KpiTile({
     });
   };
 
+  // ✅ theme tokens
+  const tileBorder = isDark ? "rgba(255,255,255,0.10)" : "rgba(2,6,23,0.10)";
+  const tileBg = isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.92)";
+
+  const grad = isDark
+    ? ["rgba(255,255,255,0.07)", "rgba(255,255,255,0.03)", "rgba(0,0,0,0.25)"]
+    : ["rgba(2,6,23,0.02)", "rgba(2,6,23,0.01)", "rgba(2,6,23,0.05)"];
+
+const labelColor = isDark ? "rgba(255,255,255,0.92)" : "rgba(15,23,42,0.86)";
+  const valueColor = isDark ? "#FFFFFF" : "#0f172a";
+  const hintColor  = isDark ? "rgba(226,232,240,0.80)" : "rgba(15,23,42,0.72)";
+
+  const shadowOpacity = isDark ? 0.3 : 0.12;
+
   return (
     <Pressable onPressIn={onPressIn} onPressOut={onPressOut}>
       <Animated.View
@@ -58,10 +74,10 @@ function KpiTile({
             borderRadius: 22,
             overflow: "hidden",
             borderWidth: 1,
-            borderColor: "rgba(255,255,255,0.10)",
-            backgroundColor: "rgba(255,255,255,0.03)",
+            borderColor: tileBorder,
+            backgroundColor: tileBg,
             shadowColor: "#000",
-            shadowOpacity: 0.3,
+            shadowOpacity,
             shadowRadius: 14,
             shadowOffset: { width: 0, height: 8 },
             elevation: 8,
@@ -70,11 +86,7 @@ function KpiTile({
         ]}
       >
         <LinearGradient
-          colors={[
-            "rgba(255,255,255,0.07)",
-            "rgba(255,255,255,0.03)",
-            "rgba(0,0,0,0.25)",
-          ]}
+          colors={grad}
           start={{ x: 0.15, y: 0 }}
           end={{ x: 0.9, y: 1 }}
           style={{ padding: 12, minHeight: 92 }}
@@ -82,7 +94,7 @@ function KpiTile({
           <Text
             numberOfLines={1}
             style={{
-              color: "rgba(255,255,255,0.92)",
+              color: labelColor,
               fontSize: 11,
               fontWeight: "900",
               letterSpacing: 0.2,
@@ -91,13 +103,7 @@ function KpiTile({
             {label}
           </Text>
 
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              marginTop: 10,
-            }}
-          >
+          <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10 }}>
             <View
               style={{
                 height: 44,
@@ -117,13 +123,13 @@ function KpiTile({
               <Text
                 allowFontScaling={false}
                 style={{
-                  color: "#FFFFFF",
+                  color: valueColor,
                   fontSize: 26,
                   fontWeight: "900",
                   letterSpacing: 0.35,
-                  textShadowColor: "rgba(0,0,0,0.35)",
+                  textShadowColor: isDark ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.08)",
                   textShadowOffset: { width: 0, height: 2 },
-                  textShadowRadius: 8,
+                  textShadowRadius: isDark ? 8 : 4,
                 }}
               >
                 {value}
@@ -145,7 +151,7 @@ function KpiTile({
             numberOfLines={1}
             style={{
               marginTop: 10,
-              color: "rgba(226,232,240,0.80)",
+              color: hintColor,
               fontSize: 10.5,
               fontWeight: "800",
               letterSpacing: 0.12,
@@ -180,7 +186,7 @@ export default function MCKpiGrid({
   }, [width]);
 
   const sectionOpacity = useSharedValue(0);
-  const sectionTranslate = useSharedValue(10); // ✅ a bit more lift-in
+  const sectionTranslate = useSharedValue(10);
 
   useEffect(() => {
     sectionOpacity.value = withTiming(1, {
@@ -200,7 +206,6 @@ export default function MCKpiGrid({
 
   return (
     <Animated.View style={[sectionStyle, { marginTop: 20 }]}>
-      {/* ✅ moved down for premium spacing */}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap }}>
         <View style={{ width: tileW }}>
           <KpiTile

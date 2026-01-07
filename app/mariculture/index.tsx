@@ -1,11 +1,10 @@
-import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import {
-    Dimensions,
-    RefreshControl,
-    ScrollView,
-    StatusBar,
-    View,
+  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -15,32 +14,27 @@ import MCKpiGrid from "@/src/components/mariculture/dashboard/MCKpiGrid";
 import MCQuickActions from "@/src/components/mariculture/dashboard/MCQuickActions";
 import MCUnitsList from "@/src/components/mariculture/dashboard/MCUitsList";
 
+// ✅ use theme-aware shell
+import { MCShell } from "@/src/components/mariculture/dashboard/MCShell";
+import { useIsDarkTheme } from "@/src/store/useIsDarkTheme";
+
 const { width: SCREEN_W } = Dimensions.get("window");
 
-// A simple “content frame” so nothing ever clips horizontally.
-// On phones: full width. On larger screens: capped width + centered.
+// Frame
 const CONTENT_MAX_W = 520;
 const H_PADDING = 18;
 
 type TabKey = "dashboard" | "units" | "scan" | "profile";
 
 export default function MaricultureIndex() {
+  const isDark = useIsDarkTheme();
+
   const [refreshing, setRefreshing] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<TabKey>("dashboard");
+
   const onRefresh = async () => {
     setRefreshing(true);
     setTimeout(() => setRefreshing(false), 700);
-  };
-
-  const farm = {
-    marineFarmId: "RV-MF-RA-000312",
-    farmCode: "MF-RA-0312",
-    groupName: "Coastal Seaweed SHG",
-    leaderName: "Ravi Kumar",
-    mobile: "+91 98765 43210",
-    villageOrLanding: "Rameswaram Landing Centre",
-    gpsPolygons: "Polygon saved",
-    species: "Kappaphycus alvarezii",
   };
 
   const units = [
@@ -67,24 +61,12 @@ export default function MaricultureIndex() {
     alerts: 0,
   };
 
-  // keep things inside safe bounds always
   const frameW = Math.min(SCREEN_W - H_PADDING * 2, CONTENT_MAX_W);
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#000", overflow: "hidden" }}>
-      <StatusBar barStyle="light-content" />
-
-      {/* Background */}
-      <LinearGradient
-        colors={[
-          "rgba(14,165,233,0.26)",
-          "rgba(0,0,0,0.92)",
-          "rgba(0,0,0,0.98)",
-        ]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-      />
+    <MCShell>
+      {/* ✅ status bar follows theme */}
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
       <SafeAreaView style={{ flex: 1 }} edges={["top", "left", "right"]}>
         <ScrollView
@@ -92,15 +74,15 @@ export default function MaricultureIndex() {
           showsVerticalScrollIndicator={false}
           alwaysBounceVertical
           contentContainerStyle={{
-            alignItems: "center", // ✅ centers the frame
-            paddingTop: 28, // ✅ pushes content a bit down (premium breathing space)
-            paddingBottom: 140, // ✅ space for bottom bar
+            alignItems: "center",
+            paddingTop: 28,
+            paddingBottom: 140,
           }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
         >
-          {/* CONTENT FRAME: prevents right-side clipping */}
+          {/* CONTENT FRAME */}
           <View style={{ width: frameW }}>
             {/* Header */}
             <MCHeader
@@ -118,17 +100,11 @@ export default function MaricultureIndex() {
               <MCQuickActions />
             </View>
 
-            {/* Farm card */}
-            {/* <View style={{ marginTop: 18 }}>
-              <MCFarmCard farm={farm} />
-            </View> */}
-
             {/* Units list */}
             <View style={{ marginTop: 18 }}>
               <MCUnitsList units={units} />
             </View>
 
-            {/* extra breathing room */}
             <View style={{ height: 16 }} />
           </View>
         </ScrollView>
@@ -137,10 +113,10 @@ export default function MaricultureIndex() {
           active={activeTab}
           onTab={(k) => {
             setActiveTab(k);
-            // later: router.push("/mariculture/units") etc.
+            // later: router.push(...)
           }}
         />
       </SafeAreaView>
-    </View>
+    </MCShell>
   );
 }
