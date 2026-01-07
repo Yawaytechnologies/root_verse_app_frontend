@@ -1,6 +1,8 @@
+// src/features/trip/tripSlice.ts
+
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit";
 import type { RootState } from "../../store/store";
-import { createTripApi, fetchTripsApi, Trip, TripCreatePayload } from "../../services/wild/tripApi";
+import { tripApi, Trip, TripCreatePayload } from "../../services/wild/tripApi";
 
 type TripsState = {
   items: Trip[];
@@ -16,22 +18,24 @@ const initialState: TripsState = {
   error: null,
 };
 
-export const fetchTrips = createAsyncThunk<Trip[]>(
+export const fetchTrips = createAsyncThunk<Trip[], void, { state: RootState }>(
   "trips/fetchTrips",
   async (_, thunkApi) => {
     try {
-      return await fetchTripsApi();
+      const token = (thunkApi.getState() as any)?.auth?.token;
+      return await tripApi.fetchTrips(token);
     } catch (e: any) {
       return thunkApi.rejectWithValue(e?.message || "Failed to fetch trips") as any;
     }
   }
 );
 
-export const createTrip = createAsyncThunk<Trip, TripCreatePayload>(
+export const createTrip = createAsyncThunk<Trip, TripCreatePayload, { state: RootState }>(
   "trips/createTrip",
   async (payload, thunkApi) => {
     try {
-      return await createTripApi(payload);
+      const token = (thunkApi.getState() as any)?.auth?.token;
+      return await tripApi.createTrip(payload, token);
     } catch (e: any) {
       return thunkApi.rejectWithValue(e?.message || "Failed to create trip") as any;
     }
@@ -45,14 +49,12 @@ const tripsSlice = createSlice({
     clearTripsError(state) {
       state.error = null;
     },
-    // optional: allow local insert if you want
     addTripLocal(state, action: PayloadAction<Trip>) {
       state.items.unshift(action.payload);
     },
   },
   extraReducers: (builder) => {
     builder
-      // fetch
       .addCase(fetchTrips.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -66,7 +68,6 @@ const tripsSlice = createSlice({
         state.error = action.payload || "Failed to fetch trips";
       })
 
-      // create
       .addCase(createTrip.pending, (state) => {
         state.creating = true;
         state.error = null;

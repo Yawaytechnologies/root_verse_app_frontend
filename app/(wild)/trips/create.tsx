@@ -59,7 +59,6 @@ const i18n = {
     errMethod: "Select fishing method",
     errLanding: "Select nearest station",
     errPlanned: "Select planned trip date & time",
-    posting: "Creating trip...",
     sent: "Trip request sent ✅",
     status: "Status",
 
@@ -104,7 +103,6 @@ const i18n = {
     errMethod: "மீன்பிடி முறையை தேர்வு செய்யவும்",
     errLanding: "அருகிலுள்ள நிலையத்தை தேர்வு செய்யவும்",
     errPlanned: "பயண தேதி & நேரம் தேர்வு செய்யவும்",
-    posting: "பயணம் உருவாக்கப்படுகிறது...",
     sent: "பயண கோரிக்கை அனுப்பப்பட்டது ✅",
     status: "நிலை",
 
@@ -115,11 +113,9 @@ const i18n = {
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <View className={`rounded-2xl border border-[#ead7c8] bg-white ${className}`}>{children}</View>;
 }
-
 function Label({ children }: { children: React.ReactNode }) {
   return <Text className="text-xs text-[#7a6f66]">{children}</Text>;
 }
-
 function FieldBox({ children }: { children: React.ReactNode }) {
   return <View className="mt-2 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">{children}</View>;
 }
@@ -193,14 +189,11 @@ function PickerSheet({
 function toISO(dt: Date) {
   return dt.toISOString();
 }
-
 function toISOArrival(dateOnly: Date) {
-  // set fixed arrival time = 18:00 local (safe)
   const d = new Date(dateOnly);
   d.setHours(18, 0, 0, 0);
   return d.toISOString();
 }
-
 function formatDateTime(dt: Date) {
   const yyyy = dt.getFullYear();
   const mm = String(dt.getMonth() + 1).padStart(2, "0");
@@ -231,7 +224,6 @@ function toNum(v: string) {
 function money(n: number) {
   return `₹${n.toFixed(2)}`;
 }
-
 function mapMethodToApi(label: string) {
   const l = label.toLowerCase();
   if (l.includes("pole")) return "pole&line";
@@ -249,6 +241,7 @@ export default function NewTripRequest() {
 
   const ownerName = "Sriharan";
   const registrationNo = "TN02F5678";
+  const ownerCode = "OWN-0009";
 
   const [tripName] = useState(() => {
     const d = new Date();
@@ -271,7 +264,6 @@ export default function NewTripRequest() {
   const [showReturnPicker, setShowReturnPicker] = useState(false);
 
   const [crewCount, setCrewCount] = useState(0);
-
   const [qrCount, setQrCount] = useState("");
 
   const [dieselLiters, setDieselLiters] = useState("");
@@ -279,6 +271,7 @@ export default function NewTripRequest() {
   const [iceKg, setIceKg] = useState("");
   const [iceRate, setIceRate] = useState("15");
 
+  // UI calculations
   const dieselCost = useMemo(() => toNum(dieselLiters) * toNum(dieselRate), [dieselLiters, dieselRate]);
   const iceCost = useMemo(() => toNum(iceKg) * toNum(iceRate), [iceKg, iceRate]);
   const totalCost = useMemo(() => dieselCost + iceCost, [dieselCost, iceCost]);
@@ -288,64 +281,65 @@ export default function NewTripRequest() {
 
   const [posting, setPosting] = useState(false);
 
-  const methodRef = useRef<BottomSheetModal>(null);
-  const stationRef = useRef<BottomSheetModal>(null);
+  const methodRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
+  const stationRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
 
   const submit = async () => {
     if (!method) return Alert.alert(t.title, t.errMethod);
     if (!nearStation) return Alert.alert(t.title, t.errLanding);
     if (!plannedDT) return Alert.alert(t.title, t.errPlanned);
 
+    // ✅ BACKEND EXACT PAYLOAD
     const apiPayload = {
       fishing_method: mapMethodToApi(method),
       near_station: nearStation,
       planned_at: toISO(plannedDT),
       arrival_at: expectedReturn ? toISOArrival(expectedReturn) : null,
 
-      // backend output shows diesel/ice/total as string decimals → send costs
-      diesel: dieselCost.toFixed(2),
-      ice: iceCost.toFixed(2),
+      // ✅ numbers
+      diesel: Number(dieselCost.toFixed(2)),
+      ice: Number(iceCost.toFixed(2)),
+      total: Number(totalCost.toFixed(2)),
+
       qr_count: Number(qrCount || 0),
-      total: totalCost.toFixed(2),
+      owner_code: ownerCode,
+      count: crewCount, // ✅ use crewCount as count (change if needed)
     };
-
-    // always save dummy too (offline-friendly)
-    createTripDummy({
-      tripId: tripName,
-      tripName,
-      ownerName,
-      registrationNo,
-      method,
-      landingCenter: nearStation,
-      locationCode: "",
-
-      plannedTripDateTime: plannedStr,
-      expectedReturnDate: returnStr || null,
-      crewCount,
-      qrCount: Number(qrCount || 0),
-
-      dieselLiters: toNum(dieselLiters),
-      dieselRate: toNum(dieselRate),
-      dieselCost,
-
-      iceKg: toNum(iceKg),
-      iceRate: toNum(iceRate),
-      iceCost,
-
-      totalCost,
-      status: "pending",
-    } as any);
 
     try {
       setPosting(true);
-      Alert.alert(t.posting);
 
-      const created = await dispatch(createTripThunk(apiPayload)).unwrap();
+      const created = await dispatch(createTripThunk(apiPayload as any)).unwrap();
 
       router.replace("/(wild)/trips" as const);
       Alert.alert(t.sent, `${t.status}: ${created.approval_status}\n${t.totalCost}: ${money(totalCost)}`);
     } catch (e: any) {
-      // API failed -> dummy already saved
+      createTripDummy({
+        tripId: tripName,
+        tripName,
+        ownerName,
+        ownerCode,
+        registrationNo,
+        method,
+        landingCenter: nearStation,
+        locationCode: "",
+        plannedTripDateTime: plannedStr,
+        expectedReturnDate: returnStr || null,
+        crewCount,
+        qrCount: Number(qrCount || 0),
+        dieselLiters: toNum(dieselLiters),
+        dieselRate: toNum(dieselRate),
+        dieselCost,
+        iceKg: toNum(iceKg),
+        iceRate: toNum(iceRate),
+        iceCost,
+        totalCost,
+        status: "pending",
+
+        // ✅ add backend field equivalent too
+        count: crewCount,
+      } as any);
+
       router.replace("/(wild)/trips" as const);
       Alert.alert(t.apiFailDummy, String(e?.message || e));
     } finally {
@@ -355,20 +349,8 @@ export default function NewTripRequest() {
 
   return (
     <View className="flex-1 bg-[#fbf6f1]">
-      <PickerSheet
-        title={t.fishingMethod}
-        value={method}
-        options={FISHING_METHODS}
-        onSelect={setMethod}
-        sheetRef={methodRef}
-      />
-      <PickerSheet
-        title={t.landingCenter}
-        value={nearStation}
-        options={LANDING_CENTERS}
-        onSelect={setNearStation}
-        sheetRef={stationRef}
-      />
+      <PickerSheet title={t.fishingMethod} value={method} options={FISHING_METHODS} onSelect={setMethod} sheetRef={methodRef} />
+      <PickerSheet title={t.landingCenter} value={nearStation} options={LANDING_CENTERS} onSelect={setNearStation} sheetRef={stationRef} />
 
       <ScrollView contentContainerClassName="p-4 pb-10">
         {/* Header */}
@@ -394,6 +376,7 @@ export default function NewTripRequest() {
             <View>
               <Label>{t.ownerName}:</Label>
               <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">{ownerName}</Text>
+              <Text className="mt-1 text-[11px] text-[#7a6f66]">Owner Code: {ownerCode}</Text>
             </View>
             <View>
               <Label>{t.regNo}:</Label>
@@ -486,7 +469,7 @@ export default function NewTripRequest() {
           </Card>
         </View>
 
-        {/* Crew Details (Tamil safe layout) */}
+        {/* Crew Details */}
         <View className="mt-4">
           <Text className="text-base font-bold text-[#2b2b2b]">{t.crewDetails}</Text>
 

@@ -14,7 +14,8 @@ import { TraceProvider } from "../src/data/wild/trace.store";
 
 /** ✅ Redux */
 import { Provider } from "react-redux";
-import { store } from "../src/store/auth/store";
+import { store } from "../src/store/store";
+
 
 /** ✅ Toast */
 import Toast from "react-native-toast-message";
