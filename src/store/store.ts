@@ -1,12 +1,7 @@
-// src/store/store.ts
-
 import { configureStore } from "@reduxjs/toolkit";
 
-/** ✅ These paths must match your folders */
-import registrationReducer from "./auth/registration.slice";
 import locationReducer from "./auth/location.slice";
-
-/** ✅ Auth slice used by login.tsx */
+import registrationReducer from "./auth/registration.slice";
 import authReducer from "../features/auth/authSlice";
 import filledQrReducer from "../services/wild/filledQr.slice";
 import tripsReducer from "../features/trip/tripSlice";
@@ -17,7 +12,6 @@ import themeReducer from "./theme.slice"; // ✅ ADD
 export const store = configureStore({
   reducer: {
     auth: authReducer,
-
     trips: tripsReducer,
     catchLog: catchLogReducer,
     filledQr: filledQrReducer,
@@ -25,7 +19,10 @@ export const store = configureStore({
     location: locationReducer,
     theme: themeReducer, // ✅ ADD
   },
+  middleware: (getDefault) =>
+    getDefault({
+      serializableCheck: false,
+    }),
 });
-
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;

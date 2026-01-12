@@ -1,9 +1,11 @@
+// app/(auth)/otp.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Dimensions,
   Keyboard,
   KeyboardAvoidingView,
@@ -22,22 +24,33 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+// ✅ Redux
+import { useDispatch, useSelector } from "react-redux";
+import { loginWithPhone } from "../../src/store/auth/login.slice";
+import type { AppDispatch, RootState } from "../../src/store/store";
+
+const { height: SCREEN_H } = Dimensions.get("window");
 
 export default function OtpScreen() {
-  const { phone } = useLocalSearchParams<{ phone?: string }>();
+  // ✅ phone_no can be string | string[] | undefined
+  const params = useLocalSearchParams<{ phone_no?: string | string[] }>();
+  const phone_no = Array.isArray(params.phone_no) ? params.phone_no[0] : params.phone_no;
+
+  const dispatch = useDispatch<AppDispatch>();
+ const login = useSelector((s: RootState) => (s as any).login ?? (s as any).auth);
 
   const [otp, setOtp] = useState("");
-  const [sec, setSec] = useState(30); // resend timer
-  const [agree, setAgree] = useState(true); // optional: you can remove this
+  const [sec, setSec] = useState(30);
+  const [agree, setAgree] = useState(true);
   const [loading, setLoading] = useState(false);
 
-  const otpOk = useMemo(() => /^\d{4,6}$/.test(otp), [otp]);
+  // ✅ demo OTP: any 6 digits
+  const otpOk = useMemo(() => /^\d{6}$/.test(otp), [otp]);
   const canVerify = otpOk && agree && !loading;
 
   const otpRef = useRef<TextInput>(null);
 
-  // Dim + keyboard animations (same vibe as login)
+  // keyboard/dim animations
   const keyboardOpen = useSharedValue(0);
   const keyboardH = useSharedValue(0);
   const bgDim = useSharedValue(0);
@@ -68,10 +81,13 @@ export default function OtpScreen() {
     };
   }, []);
 
-  // Card intro
+  // card intro
   const formProgress = useSharedValue(0);
   useEffect(() => {
-    formProgress.value = withDelay(250, withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) }));
+    formProgress.value = withDelay(
+      250,
+      withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) })
+    );
   }, []);
 
   const formAnim = useAnimatedStyle(() => {
@@ -85,29 +101,70 @@ export default function OtpScreen() {
     };
   });
 
-  // Resend timer
+  // resend timer
   useEffect(() => {
     if (sec <= 0) return;
     const t = setInterval(() => setSec((s) => (s > 0 ? s - 1 : 0)), 1000);
     return () => clearInterval(t);
   }, [sec]);
 
+  const routeByStatus = (status: any, rootType: any) => {
+    if (status === "PENDING_APPROVAL") return router.replace("/(auth)/pending");
+    if (status === "REJECTED") return router.replace("/(auth)/rejected");
+
+    // APPROVED
+    if (rootType === "WILD_CAPTURE") return router.replace("/(wild)/dashboard" as any);
+    if (rootType === "AQUACULTURE") return router.replace("/(aqua)/dashboard" as any);
+    if (rootType === "MARICULTURE") return router.replace("/(mari)/dashboard" as any);
+
+    // fallback
+    return router.replace("/(wild)/dashboard" as any);
+  };
+
   const onVerify = async () => {
     if (!canVerify) return;
 
+    if (!phone_no || phone_no.length !== 10) {
+      Alert.alert("Error", "Phone number missing / invalid");
+      return;
+    }
+
     setLoading(true);
     try {
-      /**
-       * ✅ For now (demo): route directly
-       * Later: call backend verify API -> get module -> route accordingly
-       *
-       * Example after backend:
-       * const res = await verifyOtpApi({ phone, otp })
-       * router.replace(ROUTE_BY_MODULE[res.module])
-       */
+      const res = await dispatch(loginWithPhone(phone_no));
 
-      // Demo route: go to mariculture
-      router.replace("/(wild)/dashboard" as any);
+      // ✅ rejected
+      if (loginWithPhone.rejected.match(res)) {
+  const msg = (res.payload as string) || "Login blocked";
+  const m = msg.toLowerCase();
+
+  // ✅ pending / not approved -> pending screen
+  if (m.includes("pending") || m.includes("approval") || m.includes("not approved")) {
+    // toast optional
+    Alert.alert("Waiting for approval", "Admin has not approved your account yet.");
+    return router.replace("/(auth)/pending");
+  }
+
+  // ✅ rejected -> rejected screen
+  if (m.includes("reject")) return router.replace("/(auth)/rejected");
+
+  // ✅ only truly new user -> register
+  if (m.includes("not found") || m.includes("no user")) {
+    Alert.alert("Not registered", "Please register first.");
+    return router.replace("/(auth)/register");
+  }
+
+  Alert.alert("Login blocked", msg);
+  return;
+}
+
+
+      // ✅ fulfilled: route using payload FIRST (no stale redux read)
+      const payload: any = (res as any).payload || {};
+      const status = payload.status ?? payload.user?.status ?? login.status;
+      const rootType = payload.rootverse_type ?? payload.user?.rootverse_type ?? login.rootverse_type;
+
+      routeByStatus(status, rootType);
     } finally {
       setLoading(false);
     }
@@ -115,13 +172,11 @@ export default function OtpScreen() {
 
   const onResend = async () => {
     if (sec > 0) return;
-    // Later: call backend resend OTP API
-    setSec(30);
+    setSec(30); // demo
   };
 
   return (
     <View className="flex-1 bg-black" style={{ position: "relative" }}>
-      {/* Gradient BG */}
       <LinearGradient
         colors={["rgba(16,185,129,0.22)", "rgba(0,0,0,0.86)", "rgba(0,0,0,0.96)"]}
         start={{ x: 0.5, y: 0 }}
@@ -130,7 +185,6 @@ export default function OtpScreen() {
       />
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        {/* Top header */}
         <View style={{ paddingTop: 70, paddingHorizontal: 20 }}>
           <Pressable onPress={() => router.back()} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <Ionicons name="chevron-back" size={20} color="#cbd5e1" />
@@ -141,29 +195,21 @@ export default function OtpScreen() {
             Verify OTP
           </Text>
           <Text style={{ marginTop: 8, color: "#94a3b8" }}>
-            Sent to {phone || "your number"}
+            Sent to {phone_no || "your number"}
           </Text>
         </View>
 
-        {/* Dim overlay */}
         <Animated.View
           pointerEvents="none"
-          style={[
-            { position: "absolute", inset: 0, backgroundColor: "black", zIndex: 5 },
-            dimOverlayAnim,
-          ]}
+          style={[{ position: "absolute", inset: 0, backgroundColor: "black", zIndex: 5 }, dimOverlayAnim]}
         />
 
-        {/* Card */}
         <View style={{ position: "absolute", left: 20, right: 20, bottom: 190, zIndex: 10 }}>
           <Animated.View style={formAnim}>
             <BlurView intensity={22} tint="dark" style={{ borderRadius: 26, overflow: "hidden" }}>
               <View className="bg-black/35 border border-white/10 rounded-[26px] p-5">
-                <Text className="text-slate-300 text-[14px] mb-4 text-center">
-                  Enter the OTP to continue.
-                </Text>
+                
 
-                {/* OTP */}
                 <Text className="text-slate-300 text-[11px] mb-2">OTP</Text>
                 <View className="flex-row items-center bg-white/5 border border-white/10 rounded-2xl px-4 py-3">
                   <Ionicons name="key-outline" size={18} color="#94a3b8" />
@@ -184,40 +230,31 @@ export default function OtpScreen() {
                   />
                 </View>
 
-                {/* Resend */}
                 <View className="flex-row items-center justify-between mt-3">
                   <Text className="text-slate-400 text-[11px]">
                     {sec > 0 ? `Resend OTP in ${sec}s` : "Didn’t get OTP?"}
                   </Text>
 
                   <Pressable onPress={onResend} disabled={sec > 0}>
-                    <Text
-                      className={`text-[11px] font-semibold ${
-                        sec > 0 ? "text-slate-500" : "text-emerald-300"
-                      }`}
-                    >
+                    <Text className={`text-[11px] font-semibold ${sec > 0 ? "text-slate-500" : "text-emerald-300"}`}>
                       Resend
                     </Text>
                   </Pressable>
                 </View>
 
-                {/* Agree (optional, remove if not needed) */}
                 <Pressable onPress={() => setAgree((p) => !p)} className="flex-row items-center mt-4">
                   <View className="h-5 w-5 rounded-md border border-white/20 items-center justify-center bg-white/5">
                     {agree ? <Ionicons name="checkmark" size={14} color="#34d399" /> : null}
                   </View>
-                  <Text className="text-slate-300 text-[11px] ml-3">
-                    I confirm this OTP is mine
-                  </Text>
+                  <Text className="text-slate-300 text-[11px] ml-3">I confirm this OTP is mine</Text>
                 </Pressable>
 
-                {/* Verify CTA */}
                 <View className="mt-5">
                   <View className="absolute -inset-1 rounded-3xl bg-emerald-400/25" />
                   <Pressable
-                    disabled={!canVerify}  
+                  disabled={!canVerify}
                     onPress={onVerify}
-                    className={`rounded-3xl overflow-hidden ${!canVerify ? "opacity-60" : "opacity-100"}`}
+                    className={`rounded-3xl overflow-hidden ${!canVerify || login.loading ? "opacity-60" : "opacity-100"}`}
                   >
                     <LinearGradient
                       colors={["#34d399", "#10b981", "#06b6d4"]}
@@ -226,7 +263,7 @@ export default function OtpScreen() {
                       style={{ paddingVertical: 15, alignItems: "center", borderRadius: 24 }}
                     >
                       <Text className="text-black font-semibold">
-                        {loading ? "Verifying..." : "Verify & Continue"}
+                        {loading || login.loading ? "Checking..." : "Verify & Continue"}
                       </Text>
                     </LinearGradient>
                   </Pressable>
