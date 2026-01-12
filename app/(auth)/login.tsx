@@ -27,15 +27,6 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-/* ✅ Redux */
-import {
-  clearAuthError,
-  loginFail,
-  loginStart,
-  loginSuccess,
-} from "../../src/features/auth/authSlice";
-import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
-
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
 /* -------------------- Forgot glass modal (keep as-is) -------------------- */
@@ -106,11 +97,7 @@ function ForgotGlassModal({
                 <View className="flex-row items-center justify-between">
                   <View className="flex-row items-center">
                     <View className="h-9 w-9 rounded-2xl items-center justify-center bg-white/5 border border-white/10">
-                      <Ionicons
-                        name="shield-checkmark-outline"
-                        size={18}
-                        color="#7dd3fc"
-                      />
+                      <Ionicons name="shield-checkmark-outline" size={18} color="#7dd3fc" />
                     </View>
                     <Text className="text-white text-[14px] font-semibold ml-3">
                       Help
@@ -162,65 +149,47 @@ function ForgotGlassModal({
 
 /* -------------------- Screen -------------------- */
 export default function LoginScreen() {
-  const dispatch = useAppDispatch();
-
-  // ✅ SAFEST: don’t destructure from possibly-undefined object
-  const loading = useAppSelector((s) => s.auth?.loading ?? false);
-
   // ✅ OTP login inputs
   const [phone, setPhone] = useState("");
   const [agree, setAgree] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [sending, setSending] = useState(false);
 
   // ✅ Validation
   const phoneDigits = useMemo(() => phone.replace(/[^\d]/g, ""), [phone]);
   const phoneOk = useMemo(() => phoneDigits.length === 10, [phoneDigits]);
-  const canSubmit = phoneOk && agree && !loading;
+  const canSubmit = phoneOk && agree && !sending;
 
   const phoneRef = useRef<TextInput>(null);
 
   const onSubmit = async () => {
     if (!canSubmit) return;
 
-    dispatch(clearAuthError());
-    dispatch(loginStart());
-
+    setSending(true);
     try {
-      // ✅ format for India (+91)
-      const e164 = `+91${phoneDigits}`;
-
-      // ✅ For now: just route to OTP screen.
-      dispatch(loginSuccess({ step: "OTP_SENT", phone: e164 } as any));
-
+      // ✅ For demo: we are NOT calling backend here. Just go to OTP screen.
       router.push({
         pathname: "/(auth)/otp",
-        params: { phone: e164 },
+        params: { phone_no: phoneDigits }, // ✅ IMPORTANT: pass as phone_no
       });
-    } catch (e: any) {
-      dispatch(loginFail(e?.message || "OTP send failed"));
+    } finally {
+      setSending(false);
     }
   };
 
   const keyboardOpen = useSharedValue(0);
   const keyboardH = useSharedValue(0);
-
   const bgDim = useSharedValue(0);
 
   const dimOn = () => {
-    bgDim.value = withTiming(1, {
-      duration: 220,
-      easing: Easing.out(Easing.cubic),
-    });
+    bgDim.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) });
   };
 
   const dimOffIfNoFocus = () => {
     setTimeout(() => {
       const focused = phoneRef.current?.isFocused?.() ?? false;
       if (!focused) {
-        bgDim.value = withTiming(0, {
-          duration: 220,
-          easing: Easing.out(Easing.cubic),
-        });
+        bgDim.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
       }
     }, 80);
   };
@@ -230,21 +199,13 @@ export default function LoginScreen() {
     const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
     const subShow = Keyboard.addListener(showEvt, (e: any) => {
-      const h = e?.endCoordinates?.height ?? 0;
-      keyboardH.value = h;
-
-      keyboardOpen.value = withTiming(1, {
-        duration: 240,
-        easing: Easing.out(Easing.cubic),
-      });
+      keyboardH.value = e?.endCoordinates?.height ?? 0;
+      keyboardOpen.value = withTiming(1, { duration: 240, easing: Easing.out(Easing.cubic) });
       dimOn();
     });
 
     const subHide = Keyboard.addListener(hideEvt, () => {
-      keyboardOpen.value = withTiming(0, {
-        duration: 220,
-        easing: Easing.out(Easing.cubic),
-      });
+      keyboardOpen.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
       keyboardH.value = 0;
       dimOffIfNoFocus();
     });
@@ -261,30 +222,16 @@ export default function LoginScreen() {
   const drift = useSharedValue(0);
 
   useEffect(() => {
-    bob.value = withRepeat(
-      withTiming(1, { duration: 2600, easing: Easing.inOut(Easing.sin) }),
-      -1,
-      true
-    );
-    sway.value = withRepeat(
-      withTiming(1, { duration: 3200, easing: Easing.inOut(Easing.sin) }),
-      -1,
-      true
-    );
-    drift.value = withRepeat(
-      withTiming(1, { duration: 5200, easing: Easing.inOut(Easing.sin) }),
-      -1,
-      true
-    );
+    bob.value = withRepeat(withTiming(1, { duration: 2600, easing: Easing.inOut(Easing.sin) }), -1, true);
+    sway.value = withRepeat(withTiming(1, { duration: 3200, easing: Easing.inOut(Easing.sin) }), -1, true);
+    drift.value = withRepeat(withTiming(1, { duration: 5200, easing: Easing.inOut(Easing.sin) }), -1, true);
   }, []);
 
   const fishAnim = useAnimatedStyle(() => {
     const ty = interpolate(bob.value, [0, 1], [6, -6]);
     const rot = interpolate(sway.value, [0, 1], [-3, 3]);
     const tx = interpolate(drift.value, [0, 0.5, 1], [-5, 6, -5]);
-    return {
-      transform: [{ translateX: tx }, { translateY: ty }, { rotateZ: `${rot}deg` }],
-    };
+    return { transform: [{ translateX: tx }, { translateY: ty }, { rotateZ: `${rot}deg` }] };
   });
 
   /* Hero intro */
@@ -292,14 +239,8 @@ export default function LoginScreen() {
   const formProgress = useSharedValue(0);
 
   useEffect(() => {
-    heroProgress.value = withDelay(
-      2000,
-      withTiming(1, { duration: 900, easing: Easing.out(Easing.cubic) })
-    );
-    formProgress.value = withDelay(
-      2900,
-      withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) })
-    );
+    heroProgress.value = withDelay(2000, withTiming(1, { duration: 900, easing: Easing.out(Easing.cubic) }));
+    formProgress.value = withDelay(2900, withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) }));
   }, []);
 
   const heroAnim = useAnimatedStyle(() => {
@@ -317,10 +258,7 @@ export default function LoginScreen() {
     const lift = -Math.min(keyboardH.value * 0.55, SCREEN_H * 0.28);
     const kbLiftY = interpolate(keyboardOpen.value, [0, 1], [0, lift]);
 
-    return {
-      opacity: formProgress.value,
-      transform: [{ translateY: appearY + kbLiftY }],
-    };
+    return { opacity: formProgress.value, transform: [{ translateY: appearY + kbLiftY }] };
   });
 
   const heroFishWidth = SCREEN_W * 0.62;
@@ -329,11 +267,7 @@ export default function LoginScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: "black", position: "relative" }}>
       <LinearGradient
-        colors={[
-          "rgba(16,185,129,0.22)",
-          "rgba(0,0,0,0.86)",
-          "rgba(0,0,0,0.96)",
-        ]}
+        colors={["rgba(16,185,129,0.22)", "rgba(0,0,0,0.86)", "rgba(0,0,0,0.96)"]}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
         style={{ position: "absolute", inset: 0 }}
@@ -374,10 +308,7 @@ export default function LoginScreen() {
         {/* Dim overlay */}
         <Animated.View
           pointerEvents="none"
-          style={[
-            { position: "absolute", inset: 0, backgroundColor: "black", zIndex: 5 },
-            dimOverlayAnim,
-          ]}
+          style={[{ position: "absolute", inset: 0, backgroundColor: "black", zIndex: 5 }, dimOverlayAnim]}
         />
 
         {/* Card */}
@@ -407,14 +338,12 @@ export default function LoginScreen() {
                     maxLength={14}
                   />
                   <View
-                    className={`h-2.5 w-2.5 rounded-full ${phone.length === 0 ? "bg-slate-700" : phoneOk ? "bg-emerald-400" : "bg-rose-400"
-                      }`}
+                    className={`h-2.5 w-2.5 rounded-full ${phone.length === 0 ? "bg-slate-700" : phoneOk ? "bg-emerald-400" : "bg-rose-400"}`}
                   />
                 </View>
 
-                {/* ✅ Register (left) + Help (right) */}
+                {/* Register + Help */}
                 <View className="flex-row items-center mt-3">
-                  {/* Left side: takes remaining space, wraps if needed */}
                   <View className="flex-1 pr-3">
                     <Text className="text-slate-300 text-[11px]" numberOfLines={2}>
                       {"If you don't have account "}
@@ -427,13 +356,12 @@ export default function LoginScreen() {
                     </Text>
                   </View>
 
-                  {/* Right side: pinned */}
                   <Pressable onPress={() => setHelpOpen(true)} hitSlop={10}>
-                    <Text className="text-emerald-300 text-[11px] font-semibold">
-                      Need help?
-                    </Text>
+                    <Text className="text-emerald-300 text-[11px] font-semibold">Need help?</Text>
                   </Pressable>
                 </View>
+
+                {/* Agree */}
                 <Pressable
                   onPress={() => setAgree((p) => !p)}
                   style={{ flexDirection: "row", alignItems: "center", marginTop: 20 }}
@@ -457,6 +385,7 @@ export default function LoginScreen() {
                   </Text>
                 </Pressable>
 
+                {/* Send OTP */}
                 <View style={{ marginTop: 18 }}>
                   <View
                     style={{
@@ -480,9 +409,7 @@ export default function LoginScreen() {
                       end={{ x: 1, y: 0.5 }}
                       style={{ paddingVertical: 15, alignItems: "center", borderRadius: 24 }}
                     >
-                      <Text className="text-black font-semibold">
-                        {loading ? "Sending..." : "Send OTP"}
-                      </Text>
+                      <Text className="text-black font-semibold">{sending ? "Sending..." : "Send OTP"}</Text>
                     </LinearGradient>
                   </Pressable>
                 </View>

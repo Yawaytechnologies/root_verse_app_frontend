@@ -1,11 +1,14 @@
 import { configureStore } from "@reduxjs/toolkit";
-import registrationReducer from "./registration.slice";
 import locationReducer from "./location.slice";
+import loginReducer from "./login.slice";
+import registrationReducer from "./registration.slice";
+
 
 export const store = configureStore({
   reducer: {
     registration: registrationReducer,
     location: locationReducer,
+    login: loginReducer,
   },
 });
 
