@@ -10,36 +10,38 @@ import {
   TextInput,
   View,
 } from "react-native";
+
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
 import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
 import { Ionicons } from "@expo/vector-icons";
 
-import { useTrace } from "../../../src/data/wild/trace.store";
-
 // ✅ Redux
 import { useAppDispatch, useAppSelector } from "../../../src/store/hooks";
 import { submitCatchLog } from "../../../src/services/wild/catchLog.slice";
 
+/* ---------------- TYPES ---------------- */
 type TripItem = { tripId: string; port: string; vesselId: string };
 type Lang = "ta" | "en";
 
-/** -------------------- Dummy fallback lists -------------------- */
-const DUMMY_SPECIES = [
-  "Yellowfin Tuna",
-  "Red Snapper",
-  "Squid",
-  "White Pomfret",
-  "Seer Fish",
-];
+type FishType = {
+  id: number;
+  fish_name: string;
+  created_at?: string;
+  updated_at?: string;
+};
 
+type PickerItem = { key: string; label: string };
+type FishOption = { key: string; label: string; id: number };
+
+/* ---------------- DUMMY TRIPS ---------------- */
 const DUMMY_TRIPS: TripItem[] = [
   { tripId: "T250057", port: "Nagapattinam", vesselId: "RV-VES-NA026829" },
   { tripId: "T250043", port: "Chennai", vesselId: "RV-VES-NA026829" },
   { tripId: "T250021", port: "Thoothukudi", vesselId: "RV-VES-NA026829" },
 ];
 
-/** -------------------- i18n -------------------- */
+/* ---------------- i18n ---------------- */
 const i18n = {
   ta: {
     title: "பிடிப்பு பதிவு",
@@ -52,8 +54,6 @@ const i18n = {
     optional: "விருப்பம்",
     addPhoto: "📷 படம் சேர்க்க",
     remove: "நீக்கு",
-    more: "மேலும் (விருப்பம்)",
-    less: "குறைவு",
     langBtn: "English",
 
     trip: "பயணம் (Trip)",
@@ -67,17 +67,15 @@ const i18n = {
     pickDate: "தேதி தேர்வு செய்ய தட்டுங்கள் 📅",
     pickTime: "நேரம் தேர்வு செய்ய தட்டுங்கள் ⏱️",
 
-    notes: "குறிப்பு (விருப்பம்)",
-    notesPH: "எதாவது சொல்ல வேண்டுமா?",
-    lat: "Latitude",
-    lon: "Longitude",
-
     errTrip: "பயணத்தை தேர்வு செய்யவும்",
     errSpecies: "மீன் வகையை தேர்வு செய்யவும்",
     errWeight: "எடை போடவும்",
     errDate: "தேதி தேர்வு செய்யவும்",
     saved: "சேமிக்கப்பட்டது ✅",
     posting: "பதிவேற்றுகிறது...",
+
+    fishLoading: "மீன் வகைகள் ஏற்றுகிறது...",
+    fishFailed: "மீன் வகைகள் பெற முடியவில்லை",
   },
   en: {
     title: "Catch Log",
@@ -90,8 +88,6 @@ const i18n = {
     optional: "Optional",
     addPhoto: "📷 Add Photos",
     remove: "Remove",
-    more: "More (Optional)",
-    less: "Less",
     langBtn: "தமிழ்",
 
     trip: "Trip",
@@ -105,17 +101,15 @@ const i18n = {
     pickDate: "Tap to pick date 📅",
     pickTime: "Tap to pick time ⏱️",
 
-    notes: "Notes (Optional)",
-    notesPH: "Any notes?",
-    lat: "Latitude",
-    lon: "Longitude",
-
     errTrip: "Please choose trip",
     errSpecies: "Please choose species",
     errWeight: "Please enter weight",
     errDate: "Please choose date",
     saved: "Saved ✅",
     posting: "Posting...",
+
+    fishLoading: "Loading fish types...",
+    fishFailed: "Failed to load fish types",
   },
 };
 
@@ -129,12 +123,7 @@ const UI = {
   accent: "#a06b2a",
 };
 
-const genCatchId = () => {
-  const yy = String(new Date().getFullYear()).slice(-2);
-  const rnd = Math.floor(10000 + Math.random() * 90000);
-  return `C${yy}${rnd}`;
-};
-
+/* ---------------- HELPERS ---------------- */
 const toNum = (v: string) => {
   const n = Number(String(v).replace(/[^0-9.]/g, ""));
   return Number.isFinite(n) ? n : 0;
@@ -152,10 +141,12 @@ const fmtTime = (d?: Date | null) => {
   if (!d) return "";
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
+  return `${hh}:${mm}:00`;
 };
 
-/** -------------------- UI small components -------------------- */
+const fishNameOf = (f: FishType) => String(f.fish_name || "").trim();
+
+/* ---------------- UI COMPONENTS ---------------- */
 function Card({
   children,
   className = "",
@@ -277,20 +268,20 @@ function PickerModal({
   );
 }
 
-function PickerSheet({
+function PickerSheetObj<T extends PickerItem>({
   title,
-  value,
+  valueKey,
   options,
   onSelect,
   sheetRef,
-  renderOption,
+  searchPlaceholder = "Search...",
 }: {
   title: string;
-  value: string;
-  options: string[];
-  onSelect: (v: string) => void;
+  valueKey: string;
+  options: T[];
+  onSelect: (item: T) => void;
   sheetRef: React.RefObject<BottomSheetModal | null>;
-  renderOption?: (item: string) => { title: string; sub?: string };
+  searchPlaceholder?: string;
 }) {
   const snapPoints = useMemo(() => ["45%", "75%"], []);
   const [q, setQ] = useState("");
@@ -298,7 +289,7 @@ function PickerSheet({
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
     if (!t) return options;
-    return options.filter((x) => x.toLowerCase().includes(t));
+    return options.filter((x) => x.label.toLowerCase().includes(t));
   }, [q, options]);
 
   return (
@@ -326,37 +317,26 @@ function PickerSheet({
           <TextInput
             value={q}
             onChangeText={setQ}
-            placeholder="Search..."
+            placeholder={searchPlaceholder}
             className={`text-base ${UI.text}`}
           />
         </View>
 
         <ScrollView className="mt-3" keyboardShouldPersistTaps="handled">
           {filtered.map((item) => {
-            const active = item === value;
-            const display = renderOption ? renderOption(item) : { title: item };
-
+            const active = item.key === valueKey;
             return (
               <Pressable
-                key={item}
+                key={item.key}
                 onPress={() => {
                   onSelect(item);
                   sheetRef.current?.dismiss();
                 }}
                 className={`mb-2 rounded-2xl border px-4 py-3 active:opacity-80 ${
-                  active
-                    ? `bg-[#fff3e7] border-[#ffd9b6]`
-                    : `${UI.border} bg-white`
+                  active ? `bg-[#fff3e7] border-[#ffd9b6]` : `${UI.border} bg-white`
                 }`}
               >
-                <Text className={`text-sm font-semibold ${UI.text}`}>
-                  {display.title}
-                </Text>
-                {display.sub ? (
-                  <Text className={`mt-0.5 text-xs ${UI.muted}`}>
-                    {display.sub}
-                  </Text>
-                ) : null}
+                <Text className={`text-sm font-semibold ${UI.text}`}>{item.label}</Text>
               </Pressable>
             );
           })}
@@ -366,56 +346,84 @@ function PickerSheet({
   );
 }
 
-/** -------------------- MAIN SCREEN -------------------- */
+/* ---------------- MAIN SCREEN ---------------- */
 export default function CreateCatchLog() {
   const { crateId } = useLocalSearchParams<{ crateId: string }>();
   const finalCrateId = String(crateId || "").trim();
 
   const dispatch = useAppDispatch();
   const catchState = useAppSelector((s: any) => s.catchLog);
-const posting = !!catchState?.loading;
-const usedDummy = !!catchState?.usedDummy;
-
-
-  const trace = useTrace();
+  const posting = !!catchState?.loading;
 
   const [lang, setLang] = useState<Lang>("ta");
   const t = i18n[lang];
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [showMore, setShowMore] = useState(false);
 
-  const [catchId] = useState(genCatchId());
-
-  // For now: keep dummy trip/species (you can API load later)
+  // Trips
   const [tripOptions] = useState<TripItem[]>(DUMMY_TRIPS);
-  const [speciesOptions] = useState<string[]>(DUMMY_SPECIES);
 
-  // Required fields
+  // Fish types
+  const [fishTypes, setFishTypes] = useState<FishType[]>([]);
+  const [fishLoading, setFishLoading] = useState(false);
+  const [fishError, setFishError] = useState<string | null>(null);
+
+  // Required
   const [tripId, setTripId] = useState("");
-  const [species, setSpecies] = useState("");
+
+  // ✅ select by ID, show name
+  const [fishId, setFishId] = useState<number | null>(null);
+  const [fishName, setFishName] = useState("");
+
   const [weightKg, setWeightKg] = useState("");
   const [catchDate, setCatchDate] = useState<Date | null>(null);
   const [catchTime, setCatchTime] = useState<Date | null>(new Date());
 
-  // Optional fields
-  const [notes, setNotes] = useState("");
-  const [latitude, setLatitude] = useState("");
-  const [longitude, setLongitude] = useState("");
-
-  // Picker overlays
   const [showDate, setShowDate] = useState(false);
   const [showTime, setShowTime] = useState(false);
 
-  // Images
   const [images, setImages] = useState<string[]>([]);
 
-  // Bottom sheets
   const tripRef = useRef<BottomSheetModal>(null);
-  const speciesRef = useRef<BottomSheetModal>(null);
+  const fishRef = useRef<BottomSheetModal>(null);
 
   const shownDate = fmtDate(catchDate);
   const shownTime = fmtTime(catchTime);
+
+  // Fetch fish types
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      try {
+        setFishLoading(true);
+        setFishError(null);
+
+        const res = await fetch("https://rootverse-backend.onrender.com/api/fish-types");
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(`${res.status} ${txt || "Fish types request failed"}`);
+        }
+
+        const json = await res.json();
+        const list: FishType[] = Array.isArray(json)
+          ? json
+          : Array.isArray(json?.data)
+          ? json.data
+          : [];
+
+        if (alive) setFishTypes(list);
+      } catch (e: any) {
+        if (alive) setFishError(e?.message || t.fishFailed);
+      } finally {
+        if (alive) setFishLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [t.fishFailed]);
 
   useEffect(() => {
     if (!finalCrateId) {
@@ -423,6 +431,16 @@ const usedDummy = !!catchState?.usedDummy;
       router.replace("/catch-logs");
     }
   }, [finalCrateId]);
+
+  const fishPickerOptions: FishOption[] = useMemo(() => {
+    return fishTypes
+      .filter((f) => f?.id && fishNameOf(f))
+      .map((f) => ({
+        key: String(f.id),
+        label: fishNameOf(f),
+        id: f.id,
+      }));
+  }, [fishTypes]);
 
   const pickImages = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -443,13 +461,12 @@ const usedDummy = !!catchState?.usedDummy;
     setImages((prev) => [...prev, ...uris].slice(0, 10));
   };
 
-  const removeImage = (uri: string) =>
-    setImages((prev) => prev.filter((u) => u !== uri));
+  const removeImage = (uri: string) => setImages((prev) => prev.filter((u) => u !== uri));
 
   const validateStep = () => {
     if (step === 1) {
       if (!tripId) return Alert.alert(t.required, t.errTrip), false;
-      if (!species) return Alert.alert(t.required, t.errSpecies), false;
+      if (!fishId) return Alert.alert(t.required, t.errSpecies), false;
       return true;
     }
     if (step === 2) {
@@ -469,46 +486,34 @@ const usedDummy = !!catchState?.usedDummy;
 
   const save = async () => {
     if (!finalCrateId) return Alert.alert("Missing QR", "crateId not found.");
-
     if (!tripId) return Alert.alert(t.required, t.errTrip);
-    if (!species) return Alert.alert(t.required, t.errSpecies);
+    if (!fishId) return Alert.alert(t.required, t.errSpecies);
     if (!weightKg.trim()) return Alert.alert(t.required, t.errWeight);
     if (!catchDate) return Alert.alert(t.required, t.errDate);
 
-    const payload = {
-      catchId,
-      tripId,
-      species,
-      weightKg: toNum(weightKg),
-      catchDate: fmtDate(catchDate),
-      catchTime: fmtTime(catchTime),
-      notes: notes || "—",
-      latitude: latitude || "—",
-      longitude: longitude || "—",
-      images,
-      linkedCrateId: finalCrateId,
-    };
-
-    // local trace event - optional
-    trace.addEvent({
-      crateId: finalCrateId,
-      stage: "CATCH",
-      data: payload,
-      createdBy: "Owner",
-    });
+    // dummy
+    const DEFAULT_RV_VESSEL_ID = 2;
+    const DEFAULT_OWNER_ID = 9;
 
     try {
-      Alert.alert(t.posting, `Crate: ${finalCrateId}`);
+      console.log("SENDING fishId:", fishId, "fishName:", fishName);
 
-      // ✅ Redux submit (API-first, dummy-fallback)
-      await dispatch(submitCatchLog(payload)).unwrap();
+      await dispatch(
+        submitCatchLog({
+          linkedCrateId: finalCrateId,
+          tripId,
+          fishId: fishId, // ✅ ID only
+          rvVesselId: DEFAULT_RV_VESSEL_ID,
+          ownerId: DEFAULT_OWNER_ID,
+          weightKg: toNum(weightKg),
+          catchDate: fmtDate(catchDate),
+          catchTime: fmtTime(catchTime),
+          images,
+        } as any)
+      ).unwrap();
 
-      Alert.alert(t.saved, `Catch ID: ${catchId}`);
-
-      router.replace({
-        pathname: "/catch-logs/details",
-        params: { crateId: finalCrateId },
-      });
+      Alert.alert(t.saved, `Updated: ${finalCrateId}`);
+      router.replace("/catch-logs");
     } catch (e: any) {
       Alert.alert("Error", String(e?.message || e));
     }
@@ -534,24 +539,61 @@ const usedDummy = !!catchState?.usedDummy;
         onPick={(d) => setCatchTime(d)}
       />
 
-      {/* Bottom sheets */}
-      <PickerSheet
-        title={t.chooseTrip}
-        value={tripId}
-        options={tripOptions.map((x) => x.tripId)}
-        onSelect={setTripId}
-        sheetRef={tripRef}
-        renderOption={(id) => {
-          const x = tripOptions.find((k) => k.tripId === id);
-          return { title: id, sub: x ? `${x.port} · ${x.vesselId}` : "" };
-        }}
-      />
-      <PickerSheet
+      {/* Trip sheet (simple) */}
+      <BottomSheetModal
+        ref={tripRef}
+        snapPoints={["45%", "75%"]}
+        enablePanDownToClose
+        backgroundStyle={{ borderRadius: 24 }}
+        handleIndicatorStyle={{ opacity: 0.35 }}
+      >
+        <BottomSheetView style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
+          <View className="flex-row items-center justify-between">
+            <Text className={`text-base font-bold ${UI.text}`}>{t.chooseTrip}</Text>
+            <Pressable
+              onPress={() => tripRef.current?.dismiss()}
+              className="rounded-full px-3 py-2 active:opacity-80"
+            >
+              <Text style={{ color: UI.accent }} className="text-sm font-semibold">
+                Done
+              </Text>
+            </Pressable>
+          </View>
+
+          <ScrollView className="mt-3" keyboardShouldPersistTaps="handled">
+            {tripOptions.map((x) => {
+              const active = x.tripId === tripId;
+              return (
+                <Pressable
+                  key={x.tripId}
+                  onPress={() => {
+                    setTripId(x.tripId);
+                    tripRef.current?.dismiss();
+                  }}
+                  className={`mb-2 rounded-2xl border px-4 py-3 active:opacity-80 ${
+                    active ? `bg-[#fff3e7] border-[#ffd9b6]` : `${UI.border} bg-white`
+                  }`}
+                >
+                  <Text className={`text-sm font-semibold ${UI.text}`}>{x.tripId}</Text>
+                  <Text className={`mt-1 text-xs ${UI.muted}`}>{x.port}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </BottomSheetView>
+      </BottomSheetModal>
+
+      {/* ✅ Fish picker: select by id, show name */}
+      <PickerSheetObj<FishOption>
         title={t.chooseSpecies}
-        value={species}
-        options={speciesOptions}
-        onSelect={setSpecies}
-        sheetRef={speciesRef}
+        valueKey={fishId ? String(fishId) : ""}
+        options={fishPickerOptions}
+        onSelect={(item) => {
+          setFishId(item.id);       // ✅ store id
+          setFishName(item.label);  // ✅ show name
+        }}
+        sheetRef={fishRef}
+        searchPlaceholder="Search fish..."
       />
 
       <ScrollView contentContainerClassName="p-4 pb-10">
@@ -567,38 +609,27 @@ const usedDummy = !!catchState?.usedDummy;
               onPress={() => setLang((x) => (x === "ta" ? "en" : "ta"))}
               className={`rounded-full border ${UI.border} bg-[#fbf6f1] px-3 py-2 active:opacity-80`}
             >
-              <Text className={`text-xs font-semibold ${UI.text}`}>
-                {t.langBtn}
-              </Text>
+              <Text className={`text-xs font-semibold ${UI.text}`}>{t.langBtn}</Text>
             </Pressable>
           </View>
 
           <View className="mt-3">
-            <Text className={`text-xs ${UI.muted}`}>Crate ID</Text>
-            <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>
-              {finalCrateId}
-            </Text>
+            <Text className={`text-xs ${UI.muted}`}>QR Code</Text>
+            <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>{finalCrateId}</Text>
           </View>
 
-          <View className="mt-3">
-            <Text className={`text-xs ${UI.muted}`}>Catch ID</Text>
-            <Text className={`mt-1 text-base font-bold ${UI.text}`}>
-              {catchId}
-            </Text>
+          <View className={`mt-3 rounded-xl border ${UI.chipBorder} ${UI.chipBg} px-3 py-2`}>
+            <Text className={`text-xs font-semibold ${UI.text}`}>{t.step(step)}</Text>
           </View>
 
-          <View
-            className={`mt-3 rounded-xl border ${UI.chipBorder} ${UI.chipBg} px-3 py-2`}
-          >
-            <Text className={`text-xs font-semibold ${UI.text}`}>
-              {t.step(step)}
-            </Text>
-          </View>
-
-          {usedDummy ? (
-            <View className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
-              <Text className="text-xs font-semibold text-amber-800">
-                Offline mode: using dummy fallback
+          {fishLoading ? (
+            <View className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2">
+              <Text className="text-xs font-semibold text-blue-800">{t.fishLoading}</Text>
+            </View>
+          ) : fishError ? (
+            <View className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+              <Text className="text-xs font-semibold text-rose-800">
+                {t.fishFailed}: {fishError}
               </Text>
             </View>
           ) : null}
@@ -620,21 +651,23 @@ const usedDummy = !!catchState?.usedDummy;
             <FieldCard>
               <SelectField
                 label={`✅ ${t.species} (${t.required})`}
-                value={species}
+                value={fishName}
                 placeholder={t.chooseSpecies}
-                hint="Tap ▾"
-                onPress={() => speciesRef.current?.present()}
+                hint={fishLoading ? t.fishLoading : "Tap ▾"}
+                onPress={() => {
+                  // ✅ opens sheet only
+                  if (!fishLoading) fishRef.current?.present();
+                }}
               />
             </FieldCard>
 
             <Pressable
               onPress={next}
               className="mt-2 rounded-2xl px-4 py-4 active:opacity-90"
-              style={{ backgroundColor: UI.accent }}
+              style={{ backgroundColor: UI.accent, opacity: fishLoading ? 0.7 : 1 }}
+              disabled={fishLoading}
             >
-              <Text className="text-center text-white text-base font-extrabold">
-                {t.next}
-              </Text>
+              <Text className="text-center text-white text-base font-extrabold">{t.next}</Text>
             </Pressable>
           </View>
         ) : null}
@@ -643,9 +676,7 @@ const usedDummy = !!catchState?.usedDummy;
         {step === 2 ? (
           <View className="mt-4 gap-3">
             <FieldCard>
-              <Text className={`text-xs ${UI.muted}`}>
-                {`✅ ${t.weight} (${t.required})`}
-              </Text>
+              <Text className={`text-xs ${UI.muted}`}>{`✅ ${t.weight} (${t.required})`}</Text>
               <TextInput
                 value={weightKg}
                 onChangeText={setWeightKg}
@@ -669,7 +700,7 @@ const usedDummy = !!catchState?.usedDummy;
               <DateField
                 label={`${t.time} (${t.optional})`}
                 value={shownTime}
-                placeholder="HH:MM"
+                placeholder="HH:MM:SS"
                 hint={t.pickTime}
                 onPress={() => setShowTime(true)}
               />
@@ -680,9 +711,7 @@ const usedDummy = !!catchState?.usedDummy;
                 className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-4 active:opacity-80`}
                 onPress={back}
               >
-                <Text className={`text-center ${UI.text} text-base font-extrabold`}>
-                  {t.back}
-                </Text>
+                <Text className={`text-center ${UI.text} text-base font-extrabold`}>{t.back}</Text>
               </Pressable>
 
               <Pressable
@@ -690,9 +719,7 @@ const usedDummy = !!catchState?.usedDummy;
                 style={{ backgroundColor: UI.accent }}
                 onPress={next}
               >
-                <Text className="text-center text-white text-base font-extrabold">
-                  {t.next}
-                </Text>
+                <Text className="text-center text-white text-base font-extrabold">{t.next}</Text>
               </Pressable>
             </View>
           </View>
@@ -704,9 +731,7 @@ const usedDummy = !!catchState?.usedDummy;
             <Card className="p-4">
               <View className="flex-row items-center gap-2">
                 <Ionicons name="camera-outline" size={20} color={UI.accent} />
-                <Text className={`text-sm font-extrabold ${UI.text}`}>
-                  {t.addPhoto}
-                </Text>
+                <Text className={`text-sm font-extrabold ${UI.text}`}>{t.addPhoto}</Text>
               </View>
 
               <Pressable
@@ -733,9 +758,7 @@ const usedDummy = !!catchState?.usedDummy;
                         onPress={() => removeImage(uri)}
                         className="ml-3 rounded-full bg-rose-100 px-3 py-1 active:opacity-80"
                       >
-                        <Text className="text-xs font-semibold text-rose-700">
-                          {t.remove}
-                        </Text>
+                        <Text className="text-xs font-semibold text-rose-700">{t.remove}</Text>
                       </Pressable>
                     </View>
                   ))}
@@ -743,61 +766,13 @@ const usedDummy = !!catchState?.usedDummy;
               ) : null}
             </Card>
 
-            <Pressable
-              onPress={() => setShowMore((s) => !s)}
-              className={`mt-3 rounded-2xl border ${UI.border} bg-white px-4 py-3 active:opacity-80`}
-            >
-              <Text className={`text-center text-sm font-semibold ${UI.text}`}>
-                {showMore ? t.less : t.more}
-              </Text>
-            </Pressable>
-
-            {showMore ? (
-              <View className="mt-3 gap-3">
-                <FieldCard>
-                  <Text className={`text-xs ${UI.muted}`}>{t.notes}</Text>
-                  <TextInput
-                    value={notes}
-                    onChangeText={setNotes}
-                    placeholder={t.notesPH}
-                    multiline
-                    className={`mt-1 text-base ${UI.text}`}
-                    style={{ minHeight: 84, textAlignVertical: "top" }}
-                  />
-                </FieldCard>
-
-                <View className="flex-row gap-3">
-                  <View className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-3`}>
-                    <Text className={`text-xs ${UI.muted}`}>{t.lat}</Text>
-                    <TextInput
-                      value={latitude}
-                      onChangeText={setLatitude}
-                      placeholder="10.7654"
-                      className={`mt-1 text-base ${UI.text}`}
-                    />
-                  </View>
-                  <View className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-3`}>
-                    <Text className={`text-xs ${UI.muted}`}>{t.lon}</Text>
-                    <TextInput
-                      value={longitude}
-                      onChangeText={setLongitude}
-                      placeholder="79.8432"
-                      className={`mt-1 text-base ${UI.text}`}
-                    />
-                  </View>
-                </View>
-              </View>
-            ) : null}
-
             <View className="mt-5 flex-row gap-3">
               <Pressable
                 className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-4 active:opacity-80`}
                 onPress={back}
                 disabled={posting}
               >
-                <Text className={`text-center ${UI.text} text-base font-extrabold`}>
-                  {t.back}
-                </Text>
+                <Text className={`text-center ${UI.text} text-base font-extrabold`}>{t.back}</Text>
               </Pressable>
 
               <Pressable
