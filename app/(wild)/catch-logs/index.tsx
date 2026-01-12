@@ -37,7 +37,7 @@ export default function CatchLogsIndex() {
         return;
       }
 
-      router.replace({ pathname: "/catch-logs/filled", params: { crateId: statusRes.crateId } });
+      router.replace({ pathname: "/catch-logs/details", params: { crateId: statusRes.crateId } });
     } catch (e: any) {
       Alert.alert("Error", String(e?.message || e));
       didScanRef.current = false;
