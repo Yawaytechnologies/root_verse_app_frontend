@@ -215,7 +215,7 @@ export default function OtpScreen() {
                 <View className="mt-5">
                   <View className="absolute -inset-1 rounded-3xl bg-emerald-400/25" />
                   <Pressable
-                    disabled={!canVerify}
+                    disabled={!canVerify}  
                     onPress={onVerify}
                     className={`rounded-3xl overflow-hidden ${!canVerify ? "opacity-60" : "opacity-100"}`}
                   >

@@ -8,13 +8,11 @@ import locationReducer from "./auth/location.slice";
 
 /** ✅ Auth slice used by login.tsx */
 import authReducer from "../features/auth/authSlice";
-
+import filledQrReducer from "../services/wild/filledQr.slice";
 import tripsReducer from "../features/trip/tripSlice";
-import catchLogReducer from "../services/wild/catchLog.slice"; 
+import catchLogReducer from "../services/wild/catchLog.slice";
 
 import themeReducer from "./theme.slice"; // ✅ ADD
-
-
 
 export const store = configureStore({
   reducer: {
@@ -22,12 +20,10 @@ export const store = configureStore({
 
     trips: tripsReducer,
     catchLog: catchLogReducer,
-
+    filledQr: filledQrReducer,
     registration: registrationReducer,
     location: locationReducer,
     theme: themeReducer, // ✅ ADD
-
-
   },
 });
 

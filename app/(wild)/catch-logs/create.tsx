@@ -506,7 +506,7 @@ const usedDummy = !!catchState?.usedDummy;
       Alert.alert(t.saved, `Catch ID: ${catchId}`);
 
       router.replace({
-        pathname: "/catch-logs/details",
+        pathname: "/(wild)/catch-logs/details",
         params: { crateId: finalCrateId },
       });
     } catch (e: any) {
