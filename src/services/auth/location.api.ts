@@ -1,3 +1,4 @@
+// src/services/auth/location.api.ts
 import { getJson } from "./api";
 
 export type StateItem = { id: number; name: string };
@@ -43,16 +44,8 @@ export async function fetchStatesApi(): Promise<StateItem[]> {
     .filter((x) => Number.isFinite(x.id) && x.id > 0 && !!x.name);
 }
 
-/**
- * ✅ Tries both:
- *  - /api/states/:id/districts
- *  - /api/states/:id/district
- */
 export async function fetchDistrictsByStateApi(stateId: number): Promise<DistrictItem[]> {
-  const paths = [
-    `/api/states/${stateId}/districts`,
-    `/api/states/${stateId}/district`,
-  ];
+  const paths = [`/api/states/${stateId}/districts`, `/api/states/${stateId}/district`];
 
   let lastErr: any = null;
 

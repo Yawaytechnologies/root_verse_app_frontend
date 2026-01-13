@@ -1,3 +1,4 @@
+// src/store/auth/registration.slice.ts
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit";
 import { postFormData } from "../../services/auth/api";
 
@@ -8,10 +9,7 @@ export type RegistrationResponse = {
   username: string;
   phone_no: string;
   address: string;
-
-  // ✅ backend enum
   rootverse_type: RootverseType;
-
   verification_status: "PENDING" | "VERIFIED" | string;
 
   profile_picture_url: string;
@@ -20,9 +18,11 @@ export type RegistrationResponse = {
   created_at: string;
   updated_at: string;
 
-  // optional if backend returns them
-  state_id?: number;
-  district_id?: number;
+  owner_id?: string;
+  state?: { id: number; name: string };
+  district?: { id: number; name: string };
+  state_name?: string;
+  district_name?: string;
 };
 
 type RegistrationState = {
@@ -37,6 +37,25 @@ const initialState: RegistrationState = {
   lastCreated: null,
 };
 
+const REGISTER_PATH = "/api/owner";
+
+// ✅ must match your Postman screenshot
+const FILE_FIELD = "profileImage";
+
+function getFilename(uri: string) {
+  const last = uri.split("/").pop() || `profile_${Date.now()}.jpg`;
+  return last.includes(".") ? last : `${last}.jpg`;
+}
+
+function getMime(filename: string) {
+  const ext = (filename.split(".").pop() || "jpg").toLowerCase();
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "heic") return "image/heic";
+  if (ext === "jpeg") return "image/jpeg";
+  return "image/jpeg";
+}
+
 export const registerUser = createAsyncThunk<
   RegistrationResponse,
   {
@@ -45,44 +64,41 @@ export const registerUser = createAsyncThunk<
     address: string;
     rootverse_type: RootverseType;
     profile_image_uri: string;
-
-    // ✅ new fields
     state_id: number;
     district_id: number;
   },
   { rejectValue: string }
 >("registration/registerUser", async (payload, thunkAPI) => {
   try {
+    const username = payload.username.trim();
+    const phone_no = payload.phone_no.trim();
+    const address = payload.address.trim();
+
+    if (!username || username.length < 2) return thunkAPI.rejectWithValue("Username too short");
+    if (!/^\d{10}$/.test(phone_no)) return thunkAPI.rejectWithValue("Phone must be 10 digits");
+    if (!address) return thunkAPI.rejectWithValue("Address required");
+    if (!payload.state_id) return thunkAPI.rejectWithValue("State required");
+    if (!payload.district_id) return thunkAPI.rejectWithValue("District required");
+    if (!payload.profile_image_uri) return thunkAPI.rejectWithValue("Profile image required");
+
     const form = new FormData();
-
-    form.append("username", payload.username.trim());
-    form.append("phone_no", payload.phone_no);
-    form.append("address", payload.address.trim());
+    form.append("username", username);
+    form.append("phone_no", phone_no);
+    form.append("address", address);
     form.append("rootverse_type", payload.rootverse_type);
-
-    // ✅ IMPORTANT: send state & district
     form.append("state_id", String(payload.state_id));
     form.append("district_id", String(payload.district_id));
 
-    // ✅ image
+    // ✅ ImagePicker uri is fine (no base64)
     const uri = payload.profile_image_uri;
-    const filename = uri.split("/").pop() || `profile_${Date.now()}.jpg`;
-    const ext = (filename.split(".").pop() || "jpg").toLowerCase();
+    const name = getFilename(uri);
+    const type = getMime(name);
 
-    const mime =
-      ext === "png"
-        ? "image/png"
-        : ext === "heic"
-        ? "image/heic"
-        : ext === "jpeg"
-        ? "image/jpeg"
-        : "image/jpeg";
+    form.append(FILE_FIELD, { uri, name, type } as any);
 
-    form.append("profile_image", { uri, name: filename, type: mime } as any);
+    const data = await postFormData<RegistrationResponse>(REGISTER_PATH, form);
 
-    // ✅ real endpoint
-    const data = await postFormData<RegistrationResponse>("/api/owner", form);
-
+    if (!data?.id) return thunkAPI.rejectWithValue("Invalid server response (missing id)");
     return data;
   } catch (e: any) {
     return thunkAPI.rejectWithValue(e?.message ?? "Registration failed");
@@ -106,19 +122,14 @@ const registrationSlice = createSlice({
         state.loading = true;
         state.error = null;
       })
-      .addCase(
-        registerUser.fulfilled,
-        (state, action: PayloadAction<RegistrationResponse>) => {
-          state.loading = false;
-          state.lastCreated = action.payload;
-        }
-      )
+      .addCase(registerUser.fulfilled, (state, action: PayloadAction<RegistrationResponse>) => {
+        state.loading = false;
+        state.lastCreated = action.payload;
+      })
       .addCase(registerUser.rejected, (state, action) => {
         state.loading = false;
         state.error =
-          (action.payload as string) ||
-          action.error.message ||
-          "Registration failed";
+          (action.payload as string) || action.error.message || "Registration failed";
       });
   },
 });
