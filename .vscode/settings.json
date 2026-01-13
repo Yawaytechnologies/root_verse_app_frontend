@@ -5,45 +5,15 @@
     "source.sortMembers": "explicit"
   },
 
-  // ✅ Stop TS server from analyzing node_modules
-  "typescript.tsserver.excludeDirectories": [
-    "**/node_modules/**",
-    "**/.yarn/**",
-    "**/.pnpm/**",
-    "**/dist/**",
-    "**/build/**"
-  ],
-
-  // ✅ Don’t auto-download typings that can create noise
+  "typescript.tsserver.excludeDirectories": ["**/node_modules/**"],
   "typescript.disableAutomaticTypeAcquisition": true,
-
-  // ✅ Reduce TS project-wide diagnostics spam
   "typescript.tsserver.experimental.enableProjectDiagnostics": false,
 
-  // ✅ Hide node_modules from search + watcher + explorer
   "search.exclude": {
-    "**/node_modules/**": true,
-    "**/.yarn/**": true,
-    "**/.pnpm/**": true,
-    "**/build/**": true,
-    "**/dist/**": true
-  },
-  "files.watcherExclude": {
-    "**/node_modules/**": true,
-    "**/.yarn/**": true,
-    "**/.pnpm/**": true,
-    "**/build/**": true,
-    "**/dist/**": true
-  },
-  "files.exclude": {
     "**/node_modules/**": true
   },
 
-  // ✅ Make TS ignore library checking (this is the big one)
-  // NOTE: This needs to be in tsconfig too, but adding here helps with VSCode behavior.
-  "typescript.preferences.includePackageJsonAutoImports": "off",
-  "typescript.suggest.autoImports": false,
-
-  // ✅ Optional: reduce noisy problems from dependencies
-  "eslint.workingDirectories": [{ "mode": "auto" }]
+  "files.watcherExclude": {
+    "**/node_modules/**": true
+  }
 }

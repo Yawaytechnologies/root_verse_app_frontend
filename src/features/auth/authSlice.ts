@@ -1,3 +1,4 @@
+// src/features/auth/authSlice.ts
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 
 export type AppModule = "MARICULTURE" | "AQUACULTURE" | "WILDCAPTURE";
