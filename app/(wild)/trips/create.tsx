@@ -241,7 +241,7 @@ export default function NewTripRequest() {
 
   const ownerName = "Sriharan";
   const registrationNo = "TN02F5678";
-  const ownerCode = "OWN-0009";
+  const ownerCode = "OWN-0001";
 
   const [tripName] = useState(() => {
     const d = new Date();
