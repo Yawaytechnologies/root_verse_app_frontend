@@ -498,7 +498,7 @@ export default function CreateCatchLog() {
     try {
       console.log("SENDING fishId:", fishId, "fishName:", fishName);
 
-      await dispatch(
+      const result = await dispatch(
         submitCatchLog({
           linkedCrateId: finalCrateId,
           tripId,
@@ -512,8 +512,13 @@ export default function CreateCatchLog() {
         } as any)
       ).unwrap();
 
-      Alert.alert(t.saved, `Updated: ${finalCrateId}`);
-      router.replace("/catch-logs");
+    const catchId = result?.id || result?.catchId || "Success";
+      Alert.alert(t.saved, `Catch ID: ${catchId}`);
+
+      router.replace({
+        pathname: "/catch-logs/details",
+        params: { crateId: finalCrateId },
+      });
     } catch (e: any) {
       Alert.alert("Error", String(e?.message || e));
     }

@@ -109,8 +109,8 @@ export default function OtpScreen() {
   }, [sec]);
 
   const routeByStatus = (status: any, rootType: any) => {
-    if (status === "PENDING_APPROVAL") return router.replace("/(auth)/pending");
-    if (status === "REJECTED") return router.replace("/(auth)/rejected");
+    if (status === "PENDING_APPROVAL") return router.replace("/(auth)/pending" as any);
+    if (status === "REJECTED") return router.replace("/(auth)/rejected" as any);
 
     // APPROVED
     if (rootType === "WILD_CAPTURE") return router.replace("/(wild)/dashboard" as any);
@@ -142,16 +142,16 @@ export default function OtpScreen() {
   if (m.includes("pending") || m.includes("approval") || m.includes("not approved")) {
     // toast optional
     Alert.alert("Waiting for approval", "Admin has not approved your account yet.");
-    return router.replace("/(auth)/pending");
+    return router.replace("/(auth)/pending" as any);
   }
 
   // ✅ rejected -> rejected screen
-  if (m.includes("reject")) return router.replace("/(auth)/rejected");
+  if (m.includes("reject")) return router.replace("/(auth)/rejected" as any);
 
   // ✅ only truly new user -> register
   if (m.includes("not found") || m.includes("no user")) {
     Alert.alert("Not registered", "Please register first.");
-    return router.replace("/(auth)/register");
+    return router.replace("/(auth)/register" as any);
   }
 
   Alert.alert("Login blocked", msg);
@@ -252,7 +252,7 @@ export default function OtpScreen() {
                 <View className="mt-5">
                   <View className="absolute -inset-1 rounded-3xl bg-emerald-400/25" />
                   <Pressable
-                    disabled={!canVerify || login.loading}
+                    disabled={!canVerify}
                     onPress={onVerify}
                     className={`rounded-3xl overflow-hidden ${!canVerify || login.loading ? "opacity-60" : "opacity-100"}`}
                   >

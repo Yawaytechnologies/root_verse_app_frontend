@@ -3,19 +3,21 @@ import { configureStore } from "@reduxjs/toolkit";
 import locationReducer from "./auth/location.slice";
 import registrationReducer from "./auth/registration.slice";
 import authReducer from "../features/auth/authSlice";
+import filledQrReducer from "../services/wild/filledQr.slice";
 import tripsReducer from "../features/trip/tripSlice";
 import catchLogReducer from "../services/wild/catchLog.slice";
 
-import themeReducer from "./theme.slice";
+import themeReducer from "./theme.slice"; // ✅ ADD
 
 export const store = configureStore({
   reducer: {
     auth: authReducer,
     trips: tripsReducer,
     catchLog: catchLogReducer,
+    filledQr: filledQrReducer,
     registration: registrationReducer,
     location: locationReducer,
-    theme: themeReducer,
+    theme: themeReducer, // ✅ ADD
   },
   middleware: (getDefault) =>
     getDefault({

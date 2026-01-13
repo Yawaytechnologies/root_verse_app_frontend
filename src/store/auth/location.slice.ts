@@ -1,3 +1,4 @@
+// src/store/auth/location.slice.ts
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import {
   fetchDistrictsByStateApi,

@@ -1,21 +1,5 @@
 import React from "react";
 import { Stack } from "expo-router";
-import { Pressable, Text } from "react-native";
-import { useLanguage } from "../../src/data/wild/lang.store";
-
-function LangButton() {
-  const { lang, toggleLang } = useLanguage();
-  return (
-    <Pressable
-      onPress={toggleLang}
-      className="mr-3 rounded-xl border border-slate-200 bg-white px-3 py-1.5 active:opacity-80"
-    >
-      <Text className="text-xs font-semibold text-slate-900">
-        {lang === "en" ? "EN" : "TA"}
-      </Text>
-    </Pressable>
-  );
-}
 
 export default function WildLayout() {
   return (
@@ -24,10 +8,14 @@ export default function WildLayout() {
         headerShown: true,
         headerTitleAlign: "left",
         headerShadowVisible: false,
-        headerRight: () => <LangButton />,
+
+        // ✅ REMOVE header language toggle
+        headerRight: undefined,
       }}
     >
-      <Stack.Screen name="dashboard" options={{ title: "Wild Capture" }} />
+      {/* ✅ Correct name for app/(wild)/index.tsx */}
+      <Stack.Screen name="index" options={{ title: "Wild Capture" }} />
+
       <Stack.Screen name="scan" options={{ title: "Scan QR" }} />
 
       <Stack.Screen name="vessels/index" options={{ title: "Vessels" }} />
@@ -41,6 +29,14 @@ export default function WildLayout() {
       <Stack.Screen name="catch-logs/index" options={{ title: "Catch Logs" }} />
       <Stack.Screen name="catch-logs/create" options={{ title: "Create Catch Log" }} />
       <Stack.Screen name="catch-logs/[catchId]" options={{ title: "Catch Log Details" }} />
+
+      {/* ✅ FIX: disable stack header ONLY for this screen so your custom header shows */}
+      <Stack.Screen
+        name="catch-logs/details"
+        options={{
+          headerShown: false, // 🔥 IMPORTANT
+        }}
+      />
 
       <Stack.Screen name="crates/assign" options={{ title: "Assign Crate" }} />
       <Stack.Screen name="trace/[crateId]" options={{ title: "Traceability" }} />
