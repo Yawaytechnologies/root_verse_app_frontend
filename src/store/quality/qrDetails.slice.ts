@@ -1,6 +1,7 @@
+// src/store/quality/qrDetails.slice.ts
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
-import type { RootState } from "../store";
 import { httpJson } from "../../services/http";
+import type { RootState } from "../auth/store";
 
 export type CatchLogDetails = {
   code: string;
@@ -19,7 +20,7 @@ export type CatchLogDetails = {
 };
 
 type ApiAnyResponse = {
-  success: boolean;
+  success?: boolean;
   qr?: any;
   data?: any;
 };
@@ -38,54 +39,51 @@ const initialState: State = {
 
 function mapToCatchLog(q: any): CatchLogDetails {
   return {
-    code: q.code,
-    type: q.type,
-    status: q.status,
+    code: String(q?.code ?? ""),
+    type: String(q?.type ?? ""),
+    status: String(q?.status ?? ""),
 
-    vessel_name: q.vessel_name ?? q.vessel?.vessel_name ?? null,
-    fish_name: q.fish_name ?? q.fish?.fish_name ?? null,
-    weight: q.weight ?? null,
-    date: q.date ?? null,
-    time: q.time ?? null,
-    image_url: q.image_url ?? null,
+    vessel_name: q?.vessel_name ?? q?.vessel?.vessel_name ?? null,
+    fish_name: q?.fish_name ?? q?.fish?.fish_name ?? null,
+    weight: q?.weight ?? null,
+    date: q?.date ?? null,
+    time: q?.time ?? null,
+    image_url: q?.image_url ?? null,
 
-    rv_vessel_id: q.rv_vessel_id ?? null,
-    fish_id: q.fish_id ?? null,
+    rv_vessel_id: q?.rv_vessel_id ?? null,
+    fish_id: q?.fish_id ?? null,
   };
 }
 
 // ✅ IMPORTANT: Scanner must fetch details even when NOT "FILLED"
-export const fetchCatchLogByQr = createAsyncThunk<
-  CatchLogDetails,
-  string,
-  { rejectValue: string }
->("quality/fetchCatchLogByQr", async (qrCode, { rejectWithValue }) => {
-  const code = encodeURIComponent(qrCode);
+export const fetchCatchLogByQr = createAsyncThunk<CatchLogDetails, string, { rejectValue: string }>(
+  "qrDetails/fetchCatchLogByQr",
+  async (qrCode, { rejectWithValue }) => {
+    const code = encodeURIComponent(String(qrCode || "").trim());
 
-  const tryFetch = async (url: string) => {
-    const res = await httpJson<ApiAnyResponse>(url);
-    const q = res?.qr ?? res?.data ?? null;
-    return q;
-  };
+    const tryFetch = async (url: string) => {
+      const res = await httpJson<ApiAnyResponse>(url);
+      return res?.qr ?? res?.data ?? null;
+    };
 
-  try {
-    // ✅ 1) NEW backend endpoint (preferred)
-    // Change this to the REAL endpoint backend gave you
-    let q = await tryFetch(`/api/qr-details/${code}`).catch(() => null);
+    try {
+      // ✅ 1) NEW backend endpoint (preferred)
+      let q = await tryFetch(`/api/qr-details/${code}`).catch(() => null);
 
-    // ✅ 2) fallback: common QR endpoint
-    if (!q) q = await tryFetch(`/api/qrs/${code}`).catch(() => null);
+      // ✅ 2) fallback: common QR endpoint
+      if (!q) q = await tryFetch(`/api/qrs/${code}`).catch(() => null);
 
-    // ✅ 3) fallback: old filled endpoint (only works after QC submit)
-    if (!q) q = await tryFetch(`/api/filled/${code}`).catch(() => null);
+      // ✅ 3) fallback: old filled endpoint (only works after QC submit)
+      if (!q) q = await tryFetch(`/api/filled/${code}`).catch(() => null);
 
-    if (!q) return rejectWithValue("QR not found");
+      if (!q) return rejectWithValue("QR not found");
 
-    return mapToCatchLog(q);
-  } catch (e: any) {
-    return rejectWithValue(e?.message || "Failed to fetch QR details");
+      return mapToCatchLog(q);
+    } catch (e: any) {
+      return rejectWithValue(e?.message || "Failed to fetch QR details");
+    }
   }
-});
+);
 
 const slice = createSlice({
   name: "qrDetails",
@@ -116,6 +114,10 @@ const slice = createSlice({
 export const { clearCatchLog } = slice.actions;
 export default slice.reducer;
 
-export const selectCatchLog = (state: RootState) => state.qrDetails.data;
-export const selectCatchLogLoading = (state: RootState) => state.qrDetails.loading;
-export const selectCatchLogError = (state: RootState) => state.qrDetails.error;
+// ✅ SAFE selectors (won't crash if reducer key missing by mistake)
+export const selectQrDetailsState = (state: RootState): State =>
+  ((state as any).qrDetails as State) ?? initialState;
+
+export const selectCatchLog = (state: RootState) => selectQrDetailsState(state).data;
+export const selectCatchLogLoading = (state: RootState) => selectQrDetailsState(state).loading;
+export const selectCatchLogError = (state: RootState) => selectQrDetailsState(state).error;

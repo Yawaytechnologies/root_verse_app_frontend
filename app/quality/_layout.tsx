@@ -1,41 +1,30 @@
+// app/quality/_layout.tsx
 import React, { useEffect } from "react";
 import { Stack } from "expo-router";
-
+ 
 import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
 import {
   fetchInspectorByCode,
   selectCheckerCode,
   setCheckerCode,
 } from "../../src/store/qualityAuth/qualityAuth.slice";
-
+ 
 export default function QualityLayout() {
   const dispatch = useAppDispatch();
   const checkerCode = useAppSelector(selectCheckerCode);
-
-  // ✅ TEMP: guard dispatch to catch undefined action
-  const safeDispatch = (action: any, label: string) => {
-    if (!action) {
-      console.error(`❌ dispatch got undefined action: ${label}`);
-      return;
-    }
-    // if it's a normal action object, it must have type
-    if (typeof action === "object" && !action.type) {
-      console.error(`❌ dispatch got object without type: ${label}`, action);
-      return;
-    }
-    dispatch(action);
-  };
-
+ 
+  // ✅ DEV ONLY: allow testing without OTP team
   useEffect(() => {
-    if (!checkerCode) {
-      safeDispatch(setCheckerCode("QC-000003"), "setCheckerCode('QC-000003')");
+    if (__DEV__ && !checkerCode) {
+      dispatch(setCheckerCode("QC-000003"));
     }
-  }, [checkerCode]);
-
+  }, [checkerCode, dispatch]);
+ 
+  // ✅ REAL: fetch inspector when code exists (from OTP flow later)
   useEffect(() => {
     if (!checkerCode) return;
-    safeDispatch(fetchInspectorByCode(checkerCode), "fetchInspectorByCode(checkerCode)");
-  }, [checkerCode]);
-
+    dispatch(fetchInspectorByCode(checkerCode));
+  }, [checkerCode, dispatch]);
+ 
   return <Stack screenOptions={{ headerShown: false }} />;
 }
