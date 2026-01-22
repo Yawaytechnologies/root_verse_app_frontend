@@ -24,33 +24,31 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-// ✅ Redux
-import { useDispatch, useSelector } from "react-redux";
 import { loginWithPhone } from "../../src/store/auth/login.slice";
-import type { AppDispatch, RootState } from "../../src/store/store";
+import { fetchMe } from "../../src/store/auth/me.slice";
+import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
 
 const { height: SCREEN_H } = Dimensions.get("window");
 
+const pickFirst = (...vals: any[]) => vals.find((v) => v !== undefined && v !== null && String(v).trim() !== "");
+
 export default function OtpScreen() {
-  // ✅ phone_no can be string | string[] | undefined
   const params = useLocalSearchParams<{ phone_no?: string | string[] }>();
   const phone_no = Array.isArray(params.phone_no) ? params.phone_no[0] : params.phone_no;
 
-  const dispatch = useDispatch<AppDispatch>();
- const login = useSelector((s: RootState) => (s as any).login ?? (s as any).auth);
+  const dispatch = useAppDispatch();
+  const login = useAppSelector((s) => (s as any).login); // keep if your reducer key is login
 
   const [otp, setOtp] = useState("");
   const [sec, setSec] = useState(30);
   const [agree, setAgree] = useState(true);
   const [loading, setLoading] = useState(false);
 
-  // ✅ demo OTP: any 6 digits
   const otpOk = useMemo(() => /^\d{6}$/.test(otp), [otp]);
   const canVerify = otpOk && agree && !loading;
 
   const otpRef = useRef<TextInput>(null);
 
-  // keyboard/dim animations
   const keyboardOpen = useSharedValue(0);
   const keyboardH = useSharedValue(0);
   const bgDim = useSharedValue(0);
@@ -81,13 +79,9 @@ export default function OtpScreen() {
     };
   }, []);
 
-  // card intro
   const formProgress = useSharedValue(0);
   useEffect(() => {
-    formProgress.value = withDelay(
-      250,
-      withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) })
-    );
+    formProgress.value = withDelay(250, withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) }));
   }, []);
 
   const formAnim = useAnimatedStyle(() => {
@@ -101,24 +95,28 @@ export default function OtpScreen() {
     };
   });
 
-  // resend timer
   useEffect(() => {
     if (sec <= 0) return;
     const t = setInterval(() => setSec((s) => (s > 0 ? s - 1 : 0)), 1000);
     return () => clearInterval(t);
   }, [sec]);
 
-  const routeByStatus = (status: any, rootType: any) => {
+  const routeByStatus = (statusRaw: any, rootRaw: any) => {
+    const status = String(statusRaw || "").trim().toUpperCase();
+    const rootType = String(rootRaw || "").trim().toUpperCase();
+
     if (status === "PENDING_APPROVAL") return router.replace("/(auth)/pending" as any);
     if (status === "REJECTED") return router.replace("/(auth)/rejected" as any);
 
-    // APPROVED
-    if (rootType === "WILD_CAPTURE") return router.replace("/(wild)/dashboard" as any);
-    if (rootType === "AQUACULTURE") return router.replace("/(aqua)/dashboard" as any);
-    if (rootType === "MARICULTURE") return router.replace("/(mari)/dashboard" as any);
+    if (rootType.includes("WILD_CAPTURE")) return router.replace("/(wild)/dashboard" as any);
+    if (rootType.includes("AQUACULTURE")) return router.replace("/(aqua)/dashboard" as any);
 
-    // fallback
-    return router.replace("/(wild)/dashboard" as any);
+    // ✅ mariculture dashboard is app/mariculture/index.tsx
+    if (rootType.includes("MARICULTURE")) return router.replace("/mariculture" as any);
+
+    // if unknown, don't silently send to wild
+    Alert.alert("Routing error", `Unknown rootverse_type: ${rootType || "EMPTY"}`);
+    return;
   };
 
   const onVerify = async () => {
@@ -131,40 +129,53 @@ export default function OtpScreen() {
 
     setLoading(true);
     try {
-      const res = await dispatch(loginWithPhone(phone_no));
+      // ✅ unwrap gives actual returned JSON (not action object)
+      const raw: any = await dispatch(loginWithPhone(phone_no)).unwrap();
 
-      // ✅ rejected
-      if (loginWithPhone.rejected.match(res)) {
-  const msg = (res.payload as string) || "Login blocked";
-  const m = msg.toLowerCase();
+      // handle wrapped responses
+      const p = raw?.data ?? raw;
+      const u = p?.user ?? p?.data?.user ?? p?.data ?? p;
 
-  // ✅ pending / not approved -> pending screen
-  if (m.includes("pending") || m.includes("approval") || m.includes("not approved")) {
-    // toast optional
-    Alert.alert("Waiting for approval", "Admin has not approved your account yet.");
-    return router.replace("/(auth)/pending" as any);
-  }
+      const status = pickFirst(p?.status, u?.status, p?.verification_status, u?.verification_status, login?.status);
 
-  // ✅ rejected -> rejected screen
-  if (m.includes("reject")) return router.replace("/(auth)/rejected" as any);
+      // ✅ THIS is where your bug is: rootverse_type is nested differently in your API
+      let rootType = pickFirst(
+        p?.rootverse_type,
+        u?.rootverse_type,
+        p?.rootverseType,
+        u?.rootverseType,
+        login?.rootverse_type
+      );
 
-  // ✅ only truly new user -> register
-  if (m.includes("not found") || m.includes("no user")) {
-    Alert.alert("Not registered", "Please register first.");
-    return router.replace("/(auth)/register" as any);
-  }
+      // ✅ if login response doesn't give it, fetch /me (your reliable source)
+      if (!rootType) {
+        const me: any = await dispatch(fetchMe()).unwrap();
+        rootType = pickFirst(me?.rootverse_type, me?.rootverseType);
+      }
 
-  Alert.alert("Login blocked", msg);
-  return;
-}
-
-
-      // ✅ fulfilled: route using payload FIRST (no stale redux read)
-      const payload: any = (res as any).payload || {};
-      const status = payload.status ?? payload.user?.status ?? login.status;
-      const rootType = payload.rootverse_type ?? payload.user?.rootverse_type ?? login.rootverse_type;
+      // if still missing, backend is not sending it
+      if (!rootType) {
+        Alert.alert("Error", "rootverse_type missing in login + /me response");
+        return;
+      }
 
       routeByStatus(status, rootType);
+    } catch (e: any) {
+      const msg = String(e?.message || e || "Login blocked");
+      const m = msg.toLowerCase();
+
+      if (m.includes("pending") || m.includes("approval") || m.includes("not approved")) {
+        Alert.alert("Waiting for approval", "Admin has not approved your account yet.");
+        return router.replace("/(auth)/pending" as any);
+      }
+      if (m.includes("reject")) return router.replace("/(auth)/rejected" as any);
+
+      if (m.includes("not found") || m.includes("no user")) {
+        Alert.alert("Not registered", "Please register first.");
+        return router.replace("/(auth)/register" as any);
+      }
+
+      Alert.alert("Login blocked", msg);
     } finally {
       setLoading(false);
     }
@@ -172,7 +183,7 @@ export default function OtpScreen() {
 
   const onResend = async () => {
     if (sec > 0) return;
-    setSec(30); // demo
+    setSec(30);
   };
 
   return (
@@ -191,12 +202,8 @@ export default function OtpScreen() {
             <Text style={{ color: "#cbd5e1", fontWeight: "700" }}>Back</Text>
           </Pressable>
 
-          <Text style={{ marginTop: 20, color: "white", fontSize: 28, fontWeight: "900" }}>
-            Verify OTP
-          </Text>
-          <Text style={{ marginTop: 8, color: "#94a3b8" }}>
-            Sent to {phone_no || "your number"}
-          </Text>
+          <Text style={{ marginTop: 20, color: "white", fontSize: 28, fontWeight: "900" }}>Verify OTP</Text>
+          <Text style={{ marginTop: 8, color: "#94a3b8" }}>Sent to {phone_no || "your number"}</Text>
         </View>
 
         <Animated.View
@@ -208,9 +215,8 @@ export default function OtpScreen() {
           <Animated.View style={formAnim}>
             <BlurView intensity={22} tint="dark" style={{ borderRadius: 26, overflow: "hidden" }}>
               <View className="bg-black/35 border border-white/10 rounded-[26px] p-5">
-                
-
                 <Text className="text-slate-300 text-[11px] mb-2">OTP</Text>
+
                 <View className="flex-row items-center bg-white/5 border border-white/10 rounded-2xl px-4 py-3">
                   <Ionicons name="key-outline" size={18} color="#94a3b8" />
                   <TextInput
@@ -254,7 +260,7 @@ export default function OtpScreen() {
                   <Pressable
                     disabled={!canVerify}
                     onPress={onVerify}
-                    className={`rounded-3xl overflow-hidden ${!canVerify || login.loading ? "opacity-60" : "opacity-100"}`}
+                    className={`rounded-3xl overflow-hidden ${!canVerify || loading ? "opacity-60" : "opacity-100"}`}
                   >
                     <LinearGradient
                       colors={["#34d399", "#10b981", "#06b6d4"]}
@@ -262,9 +268,7 @@ export default function OtpScreen() {
                       end={{ x: 1, y: 0.5 }}
                       style={{ paddingVertical: 15, alignItems: "center", borderRadius: 24 }}
                     >
-                      <Text className="text-black font-semibold">
-                        {loading || login.loading ? "Checking..." : "Verify & Continue"}
-                      </Text>
+                      <Text className="text-black font-semibold">{loading ? "Checking..." : "Verify & Continue"}</Text>
                     </LinearGradient>
                   </Pressable>
                 </View>

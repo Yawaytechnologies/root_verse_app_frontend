@@ -1,8 +1,12 @@
-
 import { router, Slot, usePathname } from "expo-router";
-import React from "react";
+import React, { useEffect } from "react";
 import { View } from "react-native";
+
 import MCBottomBar from "../../src/components/mariculture/dashboard/MCBottomBar";
+
+// ✅ redux
+import { fetchMe } from "../../src/store/auth/me.slice";
+import { useAppDispatch } from "../../src/store/hooks";
 
 type TabKey = "dashboard" | "units" | "scan" | "profile";
 
@@ -17,12 +21,19 @@ export default function MaricultureLayout() {
   const pathname = usePathname();
   const active = getActiveTab(pathname);
 
+  const dispatch = useAppDispatch();
+
+  // ✅ fetch profile once when this sector loads
+  useEffect(() => {
+    dispatch(fetchMe());
+  }, [dispatch]);
+
   return (
     <View style={{ flex: 1 }}>
       {/* shows current page (index/units/scan/profile) */}
       <Slot />
 
-      {/* bottom header stays always */}
+      {/* bottom bar stays always */}
       <MCBottomBar
         active={active}
         onTab={(key) => {
