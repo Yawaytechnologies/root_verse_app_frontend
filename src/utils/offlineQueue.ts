@@ -9,6 +9,8 @@ export type CatchLogPayload = {
   catchDate: string; // yyyy-mm-dd
   catchTime: string; // hh:mm:ss
   images: string[]; // local URIs
+   latitude?: number;
+  longitude?: number;
 };
 
 type QueueItem = {
