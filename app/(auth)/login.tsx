@@ -4,6 +4,7 @@ import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+
 import {
   Dimensions,
   Image,
@@ -26,6 +27,16 @@ import Animated, {
   withRepeat,
   withTiming,
 } from "react-native-reanimated";
+
+// ✅ Redux
+import { useAppDispatch } from "../../src/store/hooks";
+
+// ✅ correct: login thunk comes from login.slice.ts
+import { loginWithPhone } from "../../src/store/auth/login.slice";
+
+// ✅ correct: profile thunk comes from me.slice.ts
+import { fetchMe } from "../../src/store/auth/me.slice";
+
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -99,9 +110,7 @@ function ForgotGlassModal({
                     <View className="h-9 w-9 rounded-2xl items-center justify-center bg-white/5 border border-white/10">
                       <Ionicons name="shield-checkmark-outline" size={18} color="#7dd3fc" />
                     </View>
-                    <Text className="text-white text-[14px] font-semibold ml-3">
-                      Help
-                    </Text>
+                    <Text className="text-white text-[14px] font-semibold ml-3">Help</Text>
                   </View>
 
                   <Pressable onPress={onClose} style={{ padding: 8, marginRight: -8 }}>
@@ -117,9 +126,7 @@ function ForgotGlassModal({
                 <View className="mt-5 flex-row">
                   <Pressable onPress={onClose} className="flex-1 rounded-2xl overflow-hidden">
                     <View className="py-3 items-center rounded-2xl bg-white/5 border border-white/10">
-                      <Text className="text-slate-200 text-[12px] font-semibold">
-                        Got it
-                      </Text>
+                      <Text className="text-slate-200 text-[12px] font-semibold">Got it</Text>
                     </View>
                   </Pressable>
 
@@ -132,9 +139,7 @@ function ForgotGlassModal({
                       end={{ x: 1, y: 0.5 }}
                       style={{ paddingVertical: 12, borderRadius: 16, alignItems: "center" }}
                     >
-                      <Text className="text-black text-[12px] font-semibold">
-                        Contact admin
-                      </Text>
+                      <Text className="text-black text-[12px] font-semibold">Contact admin</Text>
                     </LinearGradient>
                   </Pressable>
                 </View>
@@ -155,6 +160,9 @@ export default function LoginScreen() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [sending, setSending] = useState(false);
 
+  // ✅ Redux
+  const dispatch = useAppDispatch();
+
   // ✅ Validation
   const phoneDigits = useMemo(() => phone.replace(/[^\d]/g, ""), [phone]);
   const phoneOk = useMemo(() => phoneDigits.length === 10, [phoneDigits]);
@@ -162,20 +170,47 @@ export default function LoginScreen() {
 
   const phoneRef = useRef<TextInput>(null);
 
-  const onSubmit = async () => {
-    if (!canSubmit) return;
+const goSector = (t: "WILD_CAPTURE" | "AQUACULTURE" | "MARICULTURE") => {
+  if (t === "WILD_CAPTURE") {
+    router.replace("/(wild)/dashboard" as any);
+  } else if (t === "AQUACULTURE") {
+    router.replace("/(aqua)/tabs" as any);   // ✅ FIXED
+  } else if (t === "MARICULTURE") {
+    router.replace("/mariculture/index" as any); // ✅ see note below
+  } else {
+    router.replace("/(auth)/login" as any);
+  }
+};
 
-    setSending(true);
-    try {
-      // ✅ For demo: we are NOT calling backend here. Just go to OTP screen.
-      router.push({
-        pathname: "/(auth)/otp",
-        params: { phone_no: phoneDigits }, // ✅ IMPORTANT: pass as phone_no
-      });
-    } finally {
-      setSending(false);
+
+
+ const onSubmit = async () => {
+  if (!canSubmit) return;
+
+  setSending(true);
+  try {
+    // ✅ 1. Call login API (just to validate user exists)
+    const loginRes = await dispatch(loginWithPhone(phoneDigits)).unwrap();
+
+    // OPTIONAL safety check
+    if (!(loginRes as any)?.token) {
+      throw new Error("TOKEN_NOT_RECEIVED");
     }
-  };
+
+    // ✅ 2. NAVIGATE TO OTP (NO sector routing here)
+    router.push({
+      pathname: "/(auth)/otp",
+      params: { phone_no: phoneDigits },
+    } as any);
+
+  } catch (e: any) {
+    console.log("LOGIN_ERROR", e);
+    alert(typeof e === "string" ? e : e?.message || "Login failed");
+  } finally {
+    setSending(false);
+  }
+};
+
 
   const keyboardOpen = useSharedValue(0);
   const keyboardH = useSharedValue(0);
@@ -289,15 +324,45 @@ export default function LoginScreen() {
               </Animated.View>
 
               <View className="mt-0 items-center">
-                <Text style={{ fontFamily: "System", fontWeight: "900", fontSize: 50, letterSpacing: 3, color: "white", textAlign: "center", textTransform: "uppercase" }}>
+                <Text
+                  style={{
+                    fontFamily: "System",
+                    fontWeight: "900",
+                    fontSize: 50,
+                    letterSpacing: 3,
+                    color: "white",
+                    textAlign: "center",
+                    textTransform: "uppercase",
+                  }}
+                >
                   ROOTVERSE
                 </Text>
 
-                <Text style={{ fontFamily: "System", fontWeight: "800", fontSize: 18, letterSpacing: 3, color: "#0ea5e9", textAlign: "center", marginTop: 4 }}>
+                <Text
+                  style={{
+                    fontFamily: "System",
+                    fontWeight: "800",
+                    fontSize: 18,
+                    letterSpacing: 3,
+                    color: "#0ea5e9",
+                    textAlign: "center",
+                    marginTop: 4,
+                  }}
+                >
                   BLUE ECONOMY
                 </Text>
 
-                <Text style={{ fontFamily: "System", fontWeight: "800", fontSize: 18, letterSpacing: 3, color: "#0ea5e9", textAlign: "center", marginTop: 4 }}>
+                <Text
+                  style={{
+                    fontFamily: "System",
+                    fontWeight: "800",
+                    fontSize: 18,
+                    letterSpacing: 3,
+                    color: "#0ea5e9",
+                    textAlign: "center",
+                    marginTop: 4,
+                  }}
+                >
                   TRACEABILITY SYSTEM
                 </Text>
               </View>
@@ -315,7 +380,15 @@ export default function LoginScreen() {
         <View style={{ position: "absolute", left: 20, right: 20, bottom: 190, zIndex: 10 }}>
           <Animated.View style={formAnim}>
             <BlurView intensity={22} tint="dark" style={{ borderRadius: 26, overflow: "hidden" }}>
-              <View style={{ backgroundColor: "rgba(0,0,0,0.35)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", borderRadius: 26, padding: 20 }}>
+              <View
+                style={{
+                  backgroundColor: "rgba(0,0,0,0.35)",
+                  borderWidth: 1,
+                  borderColor: "rgba(255,255,255,0.10)",
+                  borderRadius: 26,
+                  padding: 20,
+                }}
+              >
                 <Text style={{ color: "#cbd5e1", fontSize: 14, marginBottom: 16, textAlign: "center" }}>
                   Sign in to continue.
                 </Text>
@@ -338,7 +411,9 @@ export default function LoginScreen() {
                     maxLength={14}
                   />
                   <View
-                    className={`h-2.5 w-2.5 rounded-full ${phone.length === 0 ? "bg-slate-700" : phoneOk ? "bg-emerald-400" : "bg-rose-400"}`}
+                    className={`h-2.5 w-2.5 rounded-full ${
+                      phone.length === 0 ? "bg-slate-700" : phoneOk ? "bg-emerald-400" : "bg-rose-400"
+                    }`}
                   />
                 </View>
 
@@ -385,7 +460,7 @@ export default function LoginScreen() {
                   </Text>
                 </Pressable>
 
-                {/* Send OTP */}
+                {/* Send OTP (actually login/continue) */}
                 <View style={{ marginTop: 18 }}>
                   <View
                     style={{
@@ -409,7 +484,7 @@ export default function LoginScreen() {
                       end={{ x: 1, y: 0.5 }}
                       style={{ paddingVertical: 15, alignItems: "center", borderRadius: 24 }}
                     >
-                      <Text className="text-black font-semibold">{sending ? "Sending..." : "Send OTP"}</Text>
+                      <Text className="text-black font-semibold">{sending ? "Please wait..." : "Continue"}</Text>
                     </LinearGradient>
                   </Pressable>
                 </View>
