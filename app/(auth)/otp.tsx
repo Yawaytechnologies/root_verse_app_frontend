@@ -24,13 +24,32 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
 import { loginWithPhone } from "../../src/store/auth/login.slice";
 import { fetchMe } from "../../src/store/auth/me.slice";
 import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
 
+// ✅ Quality demo (sets code so quality/_layout.tsx can fetch inspector)
+import { setCheckerCode } from "../../src/store/qualityAuth/qualityAuth.slice";
+
 const { height: SCREEN_H } = Dimensions.get("window");
 
-const pickFirst = (...vals: any[]) => vals.find((v) => v !== undefined && v !== null && String(v).trim() !== "");
+// ✅ DEMO INSPECTOR (tomorrow remove this block and use backend payload)
+const DEMO_QC_PHONE = "9876543288";
+const DEMO_QC_CODE = "QC-000003";
+const DEMO_QC_PROFILE = {
+  checker_name: "sam",
+  checker_email: "sam.qc@gmail.com",
+  checker_phone: "9876543288",
+  state_id: 1,
+  district_id: 4,
+  is_active: true,
+  rootverse_type: "QUALITY_CHECKER",
+};
+
+const pickFirst = (...vals: any[]) =>
+  vals.find((v) => v !== undefined && v !== null && String(v).trim() !== "");
 
 export default function OtpScreen() {
   const params = useLocalSearchParams<{ phone_no?: string | string[] }>();
@@ -108,13 +127,14 @@ export default function OtpScreen() {
     if (status === "PENDING_APPROVAL") return router.replace("/(auth)/pending" as any);
     if (status === "REJECTED") return router.replace("/(auth)/rejected" as any);
 
+    // ✅ INSPECTOR (hub)
+    if (rootType.includes("QUALITY_CHECKER")) return router.replace("/quality" as any);
+
+    // ✅ Owners
     if (rootType.includes("WILD_CAPTURE")) return router.replace("/(wild)/dashboard" as any);
     if (rootType.includes("AQUACULTURE")) return router.replace("/(aqua)/dashboard" as any);
-
-    // ✅ mariculture dashboard is app/mariculture/index.tsx
     if (rootType.includes("MARICULTURE")) return router.replace("/mariculture" as any);
 
-    // if unknown, don't silently send to wild
     Alert.alert("Routing error", `Unknown rootverse_type: ${rootType || "EMPTY"}`);
     return;
   };
@@ -125,6 +145,19 @@ export default function OtpScreen() {
     if (!phone_no || phone_no.length !== 10) {
       Alert.alert("Error", "Phone number missing / invalid");
       return;
+    }
+
+    // ✅ DEMO: Inspector login hardcoded (backend not ready)
+    // Tomorrow: remove this block and rely on backend payload rootverse_type="QUALITY_CHECKER"
+    if (phone_no === DEMO_QC_PHONE) {
+      setLoading(true);
+      try {
+        await AsyncStorage.setItem("demo_qc_profile", JSON.stringify(DEMO_QC_PROFILE));
+        dispatch(setCheckerCode(DEMO_QC_CODE));
+        return router.replace("/quality" as any); // ✅ lands on hub screen (3 big buttons)
+      } finally {
+        setLoading(false);
+      }
     }
 
     setLoading(true);
@@ -138,7 +171,6 @@ export default function OtpScreen() {
 
       const status = pickFirst(p?.status, u?.status, p?.verification_status, u?.verification_status, login?.status);
 
-      // ✅ THIS is where your bug is: rootverse_type is nested differently in your API
       let rootType = pickFirst(
         p?.rootverse_type,
         u?.rootverse_type,
@@ -147,17 +179,23 @@ export default function OtpScreen() {
         login?.rootverse_type
       );
 
-      // ✅ if login response doesn't give it, fetch /me (your reliable source)
+      // ✅ if login response doesn't give it, fetch /me
       if (!rootType) {
         const me: any = await dispatch(fetchMe()).unwrap();
         rootType = pickFirst(me?.rootverse_type, me?.rootverseType);
       }
 
-      // if still missing, backend is not sending it
       if (!rootType) {
         Alert.alert("Error", "rootverse_type missing in login + /me response");
         return;
       }
+
+      // ✅ if backend later returns QUALITY_CHECKER, route to /quality
+      // (optional: setCheckerCode if backend returns code)
+      // if (String(rootType).toUpperCase().includes("QUALITY_CHECKER")) {
+      //   const code = pickFirst(p?.checker_code, u?.checker_code);
+      //   if (code) dispatch(setCheckerCode(String(code)));
+      // }
 
       routeByStatus(status, rootType);
     } catch (e: any) {
