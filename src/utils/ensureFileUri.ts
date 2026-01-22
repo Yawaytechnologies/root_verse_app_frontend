@@ -16,7 +16,7 @@ export async function ensureFileUri(uri: string): Promise<string> {
 
     const baseDir = FileSystem.cacheDirectory;
     if (typeof baseDir !== "string") {
-      throw new Error("FileSystem.cacheDirectory is not available");
+      throw new Error("FileSystem.documentDirectory is not available");
     }
 
     const dest = `${baseDir}${filename}`;
