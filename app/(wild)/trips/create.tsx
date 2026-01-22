@@ -1,8 +1,11 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { router } from "expo-router";
 import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
+
+import NetInfo from "@react-native-community/netinfo";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { createTrip as createTripDummy } from "../../../src/data/wild/trips.dummy";
 import { useAppDispatch } from "../../../src/store/hooks";
@@ -23,6 +26,7 @@ const i18n = {
   en: {
     title: "New Trip Request",
     online: "Online",
+    offline: "Offline",
     ownerName: "Owner Name",
     regNo: "Registration No",
     tripDetails: "Trip Details",
@@ -62,11 +66,16 @@ const i18n = {
     sent: "Trip request sent ✅",
     status: "Status",
 
+    savedOffline: "No internet. Saved locally. Will auto-sync when network returns.",
+    syncing: "Syncing pending...",
+    pending: "Pending sync",
     apiFailDummy: "API failed — saved locally (dummy).",
+    synced: "Synced ✅",
   },
   ta: {
     title: "புதிய பயணம் கோரிக்கை",
     online: "இணையத்தில்",
+    offline: "இணையமில்லை",
     ownerName: "உரிமையாளர் பெயர்",
     regNo: "பதிவு எண்",
     tripDetails: "பயண விவரங்கள்",
@@ -106,7 +115,11 @@ const i18n = {
     sent: "பயண கோரிக்கை அனுப்பப்பட்டது ✅",
     status: "நிலை",
 
+    savedOffline: "இணையம் இல்லை. Local-ல் save பண்ணிட்டோம். Net வந்தவுடன் auto sync ஆகும்.",
+    syncing: "Syncing pending...",
+    pending: "Pending sync",
     apiFailDummy: "API தோல்வி — உள்ளூரில் சேமிக்கப்பட்டது (dummy).",
+    synced: "Sync ஆனது ✅",
   },
 };
 
@@ -233,6 +246,80 @@ function mapMethodToApi(label: string) {
   return "trawling";
 }
 
+/* ---------------- OFFLINE QUEUE (Trips) - FIXED ---------------- */
+const TRIP_QUEUE_KEY = "RV_TRIP_QUEUE_V1";
+
+type TripApiPayload = {
+  fishing_method: string;
+  near_station: string;
+  planned_at: string;
+  arrival_at: string | null;
+  diesel: number;
+  ice: number;
+  total: number;
+  qr_count: number;
+  owner_code: string;
+  count: number;
+};
+
+type TripQueuedItem = {
+  id: string;
+  createdAt: string;
+  payload: TripApiPayload;
+};
+
+async function loadTripQueue(): Promise<TripQueuedItem[]> {
+  const raw = await AsyncStorage.getItem(TRIP_QUEUE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as TripQueuedItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveTripQueue(items: TripQueuedItem[]) {
+  await AsyncStorage.setItem(TRIP_QUEUE_KEY, JSON.stringify(items));
+}
+
+async function enqueueTrip(payload: TripApiPayload) {
+  const items = await loadTripQueue();
+  items.push({
+    id: `trip_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    createdAt: new Date().toISOString(),
+    payload,
+  });
+  await saveTripQueue(items);
+}
+
+async function getTripQueueCount() {
+  const items = await loadTripQueue();
+  return items.length;
+}
+
+async function flushTripQueue(send: (payload: TripApiPayload) => Promise<any>) {
+  const items = await loadTripQueue();
+  if (!items.length) return { sent: 0, left: 0 };
+
+  let sent = 0;
+
+  for (let i = 0; i < items.length; i++) {
+    try {
+      await send(items[i].payload);
+      sent++;
+    } catch (error) {
+      const remaining = items.slice(i);
+      await saveTripQueue(remaining);
+      return { sent, left: remaining.length, error };
+    }
+  }
+
+  await saveTripQueue([]);
+  return { sent, left: 0 };
+}
+/* ------------------------------------------------------------ */
+
 export default function NewTripRequest() {
   const dispatch = useAppDispatch();
 
@@ -271,7 +358,6 @@ export default function NewTripRequest() {
   const [iceKg, setIceKg] = useState("");
   const [iceRate, setIceRate] = useState("15");
 
-  // UI calculations
   const dieselCost = useMemo(() => toNum(dieselLiters) * toNum(dieselRate), [dieselLiters, dieselRate]);
   const iceCost = useMemo(() => toNum(iceKg) * toNum(iceRate), [iceKg, iceRate]);
   const totalCost = useMemo(() => dieselCost + iceCost, [dieselCost, iceCost]);
@@ -281,39 +367,87 @@ export default function NewTripRequest() {
 
   const [posting, setPosting] = useState(false);
 
+  // ✅ Network + pending
+  const [isOnline, setIsOnline] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+
   const methodRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
   const stationRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
+
+  // ✅ auto flush: on mount + on network change
+  useEffect(() => {
+    let alive = true;
+
+    const refreshCount = async () => {
+      const c = await getTripQueueCount();
+      if (alive) setPendingCount(c);
+    };
+
+    const doFlush = async () => {
+      setSyncing(true);
+      try {
+        const res = await flushTripQueue(async (payload) => {
+          await dispatch(createTripThunk(payload as any)).unwrap();
+        });
+
+        await refreshCount();
+
+        // optional toast
+        // if (res.sent > 0) Alert.alert(t.synced, `Uploaded ${res.sent} trip(s).`);
+      } finally {
+        if (alive) setSyncing(false);
+      }
+    };
+
+    refreshCount();
+
+    // ✅ flush immediately if already online
+    NetInfo.fetch().then((s) => {
+      const online = !!s.isConnected && (s.isInternetReachable ?? true); // ✅ null => true
+      if (alive) setIsOnline(online);
+      if (online) doFlush();
+    });
+
+    const unsub = NetInfo.addEventListener((state) => {
+      const online = !!state.isConnected && (state.isInternetReachable ?? true); // ✅ null => true
+      if (!alive) return;
+      setIsOnline(online);
+      if (online) doFlush();
+    });
+
+    return () => {
+      alive = false;
+      unsub();
+    };
+  }, [dispatch]);
 
   const submit = async () => {
     if (!method) return Alert.alert(t.title, t.errMethod);
     if (!nearStation) return Alert.alert(t.title, t.errLanding);
     if (!plannedDT) return Alert.alert(t.title, t.errPlanned);
 
-    // ✅ BACKEND EXACT PAYLOAD
-    const apiPayload = {
+    const apiPayload: TripApiPayload = {
       fishing_method: mapMethodToApi(method),
       near_station: nearStation,
       planned_at: toISO(plannedDT),
       arrival_at: expectedReturn ? toISOArrival(expectedReturn) : null,
 
-      // ✅ numbers
       diesel: Number(dieselCost.toFixed(2)),
       ice: Number(iceCost.toFixed(2)),
       total: Number(totalCost.toFixed(2)),
 
       qr_count: Number(qrCount || 0),
       owner_code: ownerCode,
-      count: crewCount, // ✅ use crewCount as count (change if needed)
+      count: crewCount,
     };
 
-    try {
-      setPosting(true);
+    // ✅ OFFLINE => queue + dummy + go back
+    if (!isOnline) {
+      await enqueueTrip(apiPayload);
+      const c = await getTripQueueCount();
+      setPendingCount(c);
 
-      const created = await dispatch(createTripThunk(apiPayload as any)).unwrap();
-
-      router.replace("/(wild)/trips" as const);
-      Alert.alert(t.sent, `${t.status}: ${created.approval_status}\n${t.totalCost}: ${money(totalCost)}`);
-    } catch (e: any) {
       createTripDummy({
         tripId: tripName,
         tripName,
@@ -335,13 +469,86 @@ export default function NewTripRequest() {
         iceCost,
         totalCost,
         status: "pending",
-
-        // ✅ add backend field equivalent too
         count: crewCount,
       } as any);
 
       router.replace("/(wild)/trips" as const);
-      Alert.alert(t.apiFailDummy, String(e?.message || e));
+      Alert.alert(t.title, t.savedOffline);
+      return;
+    }
+
+    try {
+      setPosting(true);
+
+      const created = await dispatch(createTripThunk(apiPayload as any)).unwrap();
+
+      router.replace("/(wild)/trips" as const);
+      Alert.alert(t.sent, `${t.status}: ${created.approval_status}\n${t.totalCost}: ${money(totalCost)}`);
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      const m = msg.toLowerCase();
+      const networkish = m.includes("network") || m.includes("failed to fetch") || m.includes("timeout");
+
+      if (networkish) {
+        await enqueueTrip(apiPayload);
+        const c = await getTripQueueCount();
+        setPendingCount(c);
+
+        createTripDummy({
+          tripId: tripName,
+          tripName,
+          ownerName,
+          ownerCode,
+          registrationNo,
+          method,
+          landingCenter: nearStation,
+          locationCode: "",
+          plannedTripDateTime: plannedStr,
+          expectedReturnDate: returnStr || null,
+          crewCount,
+          qrCount: Number(qrCount || 0),
+          dieselLiters: toNum(dieselLiters),
+          dieselRate: toNum(dieselRate),
+          dieselCost,
+          iceKg: toNum(iceKg),
+          iceRate: toNum(iceRate),
+          iceCost,
+          totalCost,
+          status: "pending",
+          count: crewCount,
+        } as any);
+
+        router.replace("/(wild)/trips" as const);
+        Alert.alert(t.title, t.savedOffline);
+        return;
+      }
+
+      createTripDummy({
+        tripId: tripName,
+        tripName,
+        ownerName,
+        ownerCode,
+        registrationNo,
+        method,
+        landingCenter: nearStation,
+        locationCode: "",
+        plannedTripDateTime: plannedStr,
+        expectedReturnDate: returnStr || null,
+        crewCount,
+        qrCount: Number(qrCount || 0),
+        dieselLiters: toNum(dieselLiters),
+        dieselRate: toNum(dieselRate),
+        dieselCost,
+        iceKg: toNum(iceKg),
+        iceRate: toNum(iceRate),
+        iceCost,
+        totalCost,
+        status: "pending",
+        count: crewCount,
+      } as any);
+
+      router.replace("/(wild)/trips" as const);
+      Alert.alert(t.apiFailDummy, msg);
     } finally {
       setPosting(false);
     }
@@ -357,10 +564,22 @@ export default function NewTripRequest() {
         <View className="mb-3 flex-row items-center justify-between">
           <View>
             <Text className="text-lg font-bold text-[#2b2b2b]">{t.title}</Text>
+
             <View className="mt-1 flex-row items-center gap-2">
-              <View className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-              <Text className="text-xs font-semibold text-emerald-700">{t.online}</Text>
+              <View className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: isOnline ? "#10b981" : "#f59e0b" }} />
+              <Text className="text-xs font-semibold" style={{ color: isOnline ? "#047857" : "#92400e" }}>
+                {isOnline ? t.online : t.offline}
+              </Text>
+              {syncing ? <Text className="text-[11px] text-[#7a6f66]"> • {t.syncing}</Text> : null}
             </View>
+
+            {pendingCount > 0 ? (
+              <View className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                <Text className="text-xs font-semibold text-amber-800">
+                  {t.pending}: {pendingCount} {isOnline ? "" : "(offline)"}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           <Pressable
