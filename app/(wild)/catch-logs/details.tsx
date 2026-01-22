@@ -1,3 +1,4 @@
+// app/(wild)/catch/catchDetails.tsx  (adjust path if different)
 import React, { useEffect, useState } from "react";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import {
@@ -21,7 +22,7 @@ import { useLanguage } from "../../../src/data/wild/lang.store";
 import { useAppDispatch, useAppSelector } from "../../../src/store/hooks";
 import { fetchFilledByCode } from "../../../src/services/wild/filledQr.slice";
 
-/** -------------------- THEME (same as CreateCatchLog) -------------------- */
+/** -------------------- THEME -------------------- */
 const UI = {
   bg: "#fbf6f1",
   card: "#ffffff",
@@ -39,62 +40,59 @@ type Lang = "ta" | "en";
 const i18n: Record<Lang, any> = {
   ta: {
     title: "ஸ்கேன் & விவரங்கள் பார்க்க",
-    back: "மீண்டும்",
-    scan: "ஸ்கேன்",
     qrId: "QR ஐடி",
-    qrPh: "ஸ்கேன் அல்லது பதிவு செய்க (உதா: RV-CRATE-000633)",
+    qrPh: "ஸ்கேன் அல்லது பதிவு செய்க (உதா: RV-VESSEL-000633)",
     noQrTitle: "QR ஐடி இல்லை",
-    noQrSub: "“ஸ்கேன்” செய்யவும் அல்லது QR ஐடி பதிவிடவும்.",
+    noQrSub: "QR ஐடியை பதிவு செய்யவும் அல்லது கீழே ஸ்கேன் செய்யவும்.",
     loading: "தேடுகிறது...",
     noDataTitle: "தரவு இல்லை",
-    ownerTitle: "உரிமையாளர் விவரங்கள்",
-    name: "பெயர்",
-    phone: "தொலைபேசி",
-    address: "முகவரி",
-    vesselTitle: "படகு விவரங்கள்",
-    vesselName: "படகு பெயர்",
-    homePort: "துறைமுகம்",
-    fishingMethod: "மீன்பிடி முறை",
-    tripTitle: "பயண விவரங்கள்",
-    plannedAt: "புறப்படும் நேரம்",
-    arrivalAt: "அடைவு நேரம்",
     catchTitle: "பிடிப்பு பதிவு விவரங்கள்",
     fish: "மீன்",
     weight: "எடை",
     kg: "கி.கி",
     swipeHint: "படங்களை பார்க்க இடம்/வலம் ஸ்வைப் செய்யவும்",
+    date: "தேதி",
+    time: "நேரம்",
+    search: "தேடு",
+    camPermissionTitle: "Camera permission",
+    camPermissionMsg: "Camera permission is required to scan QR.",
+    scanHint: "QR ஐ ஸ்க்வேர்க்குள் காட்டவும்",
   },
   en: {
     title: "Scan & View Details",
-    back: "Back",
-    scan: "Scan",
     qrId: "QR ID",
-    qrPh: "Scan or type (ex: RV-CRATE-000633)",
+    qrPh: "Scan or type (ex: RV-vessel-000633)",
     noQrTitle: "No QR selected",
-    noQrSub: "Tap “Scan” or type a QR ID.",
+    noQrSub: "Type a QR ID or scan below.",
     loading: "Loading...",
     noDataTitle: "No data found",
-    ownerTitle: "Owner Details",
-    name: "Name",
-    phone: "Phone",
-    address: "Address",
-    vesselTitle: "Vessel Details",
-    vesselName: "Vessel Name",
-    homePort: "Home Port",
-    fishingMethod: "Fishing Method",
-    tripTitle: "Trip Details",
-    plannedAt: "Planned At",
-    arrivalAt: "Arrival At",
     catchTitle: "Catch Log Details",
     fish: "Fish",
     weight: "Weight",
     kg: "kg",
     swipeHint: "Swipe left/right to view images",
+    date: "Date",
+    time: "Time",
+    search: "Search",
+    camPermissionTitle: "Camera permission",
+    camPermissionMsg: "Camera permission is required to scan QR.",
+    scanHint: "Point the QR inside the square",
   },
 };
 
 function normalizeCode(raw: string) {
   return String(raw || "").trim();
+}
+
+// ✅ QR sometimes contains full url → extract last segment
+function extractCode(value: string) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+    const last = raw.split("/").filter(Boolean).pop() || "";
+    return last.trim();
+  }
+  return raw;
 }
 
 /** -------------------- small components -------------------- */
@@ -213,46 +211,36 @@ export default function CatchDetails() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ code?: string; crateId?: string; qrId?: string }>();
 
-  // ✅ accept any param name (older links)
   const initial = normalizeCode(params.code || params.qrId || params.crateId || "");
 
-  // ✅ GLOBAL language
   const { lang } = useLanguage();
   const t = i18n[(lang as Lang) || "ta"];
 
-  // ✅ Redux
   const dispatch = useAppDispatch();
   const filledState = useAppSelector((s: any) => s.filledQr);
   const loading = !!filledState?.loading;
-  const apiData = filledState?.data; // { success, qr }
+  const apiData = filledState?.data;
   const apiError = filledState?.error as string | null;
 
   const [permission, requestPermission] = useCameraPermissions();
-  const [scannerOn, setScannerOn] = useState(false);
 
-  // ✅ input holds QR code
   const [qrId, setQrId] = useState(initial);
   const [scannedOnce, setScannedOnce] = useState(false);
 
-  // data mapping (from your API response)
   const qr = apiData?.qr || null;
+
+  // ✅ After data loads, show only catch (hide search + scanner)
+  const hideSearchAndScanner = !!qr;
 
   const ensureCamera = async () => {
     if (!permission?.granted) {
       const res = await requestPermission();
       if (!res.granted) {
-        Alert.alert("Camera permission", "Camera permission is required to scan QR.");
+        Alert.alert(t.camPermissionTitle, t.camPermissionMsg);
         return false;
       }
     }
     return true;
-  };
-
-  const openScanner = async () => {
-    const ok = await ensureCamera();
-    if (!ok) return;
-    setScannedOnce(false);
-    setScannerOn(true);
   };
 
   const runFetch = async (code: string) => {
@@ -265,32 +253,36 @@ export default function CatchDetails() {
     if (scannedOnce) return;
     setScannedOnce(true);
 
-    const code = normalizeCode(data);
+    const code = extractCode(data);
     setQrId(code);
-    setScannerOn(false);
-
     runFetch(code);
+
+    setTimeout(() => setScannedOnce(false), 1200);
   };
 
-  // ✅ initial load if param exists
+  useEffect(() => {
+    (async () => {
+      if (!hideSearchAndScanner) await ensureCamera();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (initial) runFetch(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial]);
 
   return (
-    // ✅ FIX: SafeAreaView should NOT add top padding here (header will handle it)
     <SafeAreaView style={{ flex: 1, backgroundColor: UI.bg }} edges={["left", "right"]}>
-      {/* ✅ Hide expo-router header so route text doesn't show */}
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* ✅ Header: now fills the top inset area with WHITE (no gap) */}
+      {/* Header: ONLY back button */}
       <View
         style={{
           backgroundColor: "#fff",
           borderBottomWidth: 1,
           borderBottomColor: UI.border,
-          paddingTop: insets.top, // ✅ moved here
+          paddingTop: insets.top,
           paddingBottom: 10,
           paddingHorizontal: 16,
         }}
@@ -306,63 +298,48 @@ export default function CatchDetails() {
         </View>
       </View>
 
-      {/* ✅ QR Input + Scan button */}
-      <View className="px-4 mt-4">
-        <View className="rounded-2xl border bg-white px-3 py-2" style={{ borderColor: UI.border }}>
-          <View className="flex-row items-center justify-between">
+      {/* Search bar (NO scan button) */}
+      {!hideSearchAndScanner ? (
+        <View className="px-4 mt-4">
+          <View className="rounded-2xl border bg-white px-3 py-2" style={{ borderColor: UI.border }}>
             <Text className="text-[11px] font-semibold" style={{ color: UI.muted }}>
               {t.qrId}
             </Text>
 
-            <Pressable
-              onPress={openScanner}
-              className="flex-row items-center gap-2 rounded-xl border px-3 py-2 active:opacity-80"
-              style={{ borderColor: UI.border, backgroundColor: UI.chipBg }}
-            >
-              <Ionicons name="qr-code-outline" size={16} color={UI.accent} />
-              <Text className="text-[12px] font-extrabold" style={{ color: UI.accent }}>
-                {t.scan}
-              </Text>
-            </Pressable>
-          </View>
+            <View className="mt-2 flex-row items-center gap-2">
+              <Ionicons name="qr-code-outline" size={16} color={UI.faint} />
 
-          <View className="mt-2 flex-row items-center gap-2">
-            <Ionicons name="qr-code-outline" size={16} color={UI.faint} />
-
-            <TextInput
-              value={qrId}
-              onChangeText={setQrId}
-              placeholder={t.qrPh}
-              placeholderTextColor={UI.faint}
-              className="flex-1 text-[14px] font-extrabold"
-              style={{ color: UI.text }}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              onSubmitEditing={() => runFetch(qrId)}
-              returnKeyType="search"
-              blurOnSubmit
-            />
-          </View>
-        </View>
-      </View>
-
-      {/* Scanner */}
-      {scannerOn ? (
-        <View className="px-4 pb-2 mt-4">
-          <View className="rounded-3xl overflow-hidden border bg-white" style={{ borderColor: UI.border }}>
-            <View style={{ height: 330 }}>
-              <CameraView
-                style={{ flex: 1 }}
-                barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-                onBarcodeScanned={(r) => onScanned(r.data)}
+              <TextInput
+                value={qrId}
+                onChangeText={setQrId}
+                placeholder={t.qrPh}
+                placeholderTextColor={UI.faint}
+                className="flex-1 text-[14px] font-extrabold"
+                style={{ color: UI.text }}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                onSubmitEditing={() => runFetch(qrId)}
+                returnKeyType="search"
+                blurOnSubmit
               />
+
+              <Pressable
+                onPress={() => runFetch(qrId)}
+                className="rounded-xl border px-3 py-2 active:opacity-80"
+                style={{ borderColor: UI.border, backgroundColor: UI.chipBg }}
+              >
+                <Text className="text-[12px] font-extrabold" style={{ color: UI.accent }}>
+                  {t.search}
+                </Text>
+              </Pressable>
             </View>
           </View>
         </View>
       ) : null}
 
-      {/* Details */}
+      {/* Content */}
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 26, paddingTop: 14 }}>
+        {/* Status card */}
         {!qrId ? (
           <Card>
             <View className="p-4">
@@ -385,83 +362,56 @@ export default function CatchDetails() {
               </Text>
             </View>
           </Card>
-        ) : apiError ? (
+        ) : apiError || !qr ? (
+          // ✅ IMPORTANT: DO NOT show apiError text in UI
           <Card>
             <View className="p-4">
               <Text className="text-[15px] font-extrabold" style={{ color: UI.text }}>
                 {t.noDataTitle}
               </Text>
-              <Text className="text-[12px] font-semibold mt-1" style={{ color: UI.muted }}>
-                {apiError}
-              </Text>
             </View>
           </Card>
-        ) : !qr ? (
-          <Card>
-            <View className="p-4">
-              <Text className="text-[15px] font-extrabold" style={{ color: UI.text }}>
-                {t.noDataTitle}
-              </Text>
-              <Text className="text-[12px] font-semibold mt-1" style={{ color: UI.muted }}>
-                {qrId}
-              </Text>
+        ) : null}
+
+        {/* Square Scanner below the status card */}
+        {!hideSearchAndScanner ? (
+          <View className="mt-4 items-center">
+            <View
+              className="rounded-3xl overflow-hidden border bg-white"
+              style={{
+                borderColor: UI.border,
+                width: Math.min(320, Dimensions.get("window").width - 32),
+                height: Math.min(320, Dimensions.get("window").width - 32),
+              }}
+            >
+              <CameraView
+                style={{ flex: 1 }}
+                barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                onBarcodeScanned={(r) => onScanned(r.data)}
+              />
             </View>
-          </Card>
-        ) : (
-          <View className="gap-4">
-            {/* Owner */}
-            <Card>
-              <View className="p-4">
-                <SectionTitle icon="person-outline" title={t.ownerTitle} />
-                <View className="mt-3">
-                  <InfoRow k={t.name} v={qr.owner_name || qr.owner?.username || ""} />
-                  <InfoRow k={t.phone} v={qr.owner?.phone_no || ""} />
-                  <InfoRow k={t.address} v={qr.owner?.address || ""} last />
-                </View>
-              </View>
-            </Card>
 
-            {/* Vessel */}
-            <Card>
-              <View className="p-4">
-                <SectionTitle icon="boat-outline" title={t.vesselTitle} />
-                <View className="mt-3">
-                  <InfoRow k={t.vesselName} v={qr.vessel_name || qr.vessel?.vessel_name || ""} />
-                  <InfoRow k={t.homePort} v={qr.vessel?.home_port || ""} />
-                  <InfoRow
-                    k={t.fishingMethod}
-                    v={qr.vessel?.allowed_fishing_methods || qr.trip?.fishing_method || ""}
-                    last
-                  />
-                </View>
-              </View>
-            </Card>
+            <Text className="mt-2 text-[11px] font-semibold text-center" style={{ color: UI.muted }}>
+              {t.scanHint}
+            </Text>
+          </View>
+        ) : null}
 
-            {/* Trip */}
-            {qr.trip ? (
-              <Card>
-                <View className="p-4">
-                  <SectionTitle icon="navigate-outline" title={t.tripTitle} />
-                  <View className="mt-3">
-                    <InfoRow k={t.plannedAt} v={String(qr.trip?.planned_at || "")} />
-                    <InfoRow k={t.arrivalAt} v={String(qr.trip?.arrival_at || "")} last />
-                  </View>
-                </View>
-              </Card>
-            ) : null}
-
-            {/* Catch */}
+        {/* Catch details ONLY */}
+        {qr ? (
+          <View className="gap-4 mt-4">
             <Card>
               <View className="p-4">
                 <SectionTitle icon="fish-outline" title={t.catchTitle} />
+
                 <View
                   className="mt-3 rounded-2xl border p-3"
                   style={{ borderColor: UI.border, backgroundColor: UI.chipBg }}
                 >
                   <InfoRow k={t.fish} v={qr.fish_name || qr.fish?.fish_name || ""} />
                   <InfoRow k={t.weight} v={`${qr.weight || ""} ${t.kg}`} />
-                  <InfoRow k={"Date"} v={String(qr.date || "")} />
-                  <InfoRow k={"Time"} v={String(qr.time || "")} last />
+                  <InfoRow k={t.date} v={String(qr.date || "")} />
+                  <InfoRow k={t.time} v={String(qr.time || "")} last />
 
                   <SquareImageCarousel
                     images={qr.image_url ? [String(qr.image_url).replace(/%22/g, "")] : []}
@@ -471,7 +421,7 @@ export default function CatchDetails() {
               </View>
             </Card>
           </View>
-        )}
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
