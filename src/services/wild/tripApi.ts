@@ -113,9 +113,17 @@ export const tripApi = {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     }),
 
-  // ✅ LIST (plural) - if your backend list is also singular, change to "/api/trip"
+  // ✅ LIST (singular in your backend)
   fetchTrips: (token?: string) =>
-    request<Trip[]>("/api/trips", {
+    request<Trip[]>("/api/trip", {
+      method: "GET",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    }),
+
+  // ✅ GET ONE TRIP BY NUMERIC "id"
+  // Example: https://rootverse-backend-5qoo.onrender.com/api/trip/52
+  getTripById: (id: number | string, token?: string) =>
+    request<Trip>(`/api/trip/${encodeURIComponent(String(id))}`, {
       method: "GET",
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     }),
