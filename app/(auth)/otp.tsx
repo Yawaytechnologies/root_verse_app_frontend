@@ -24,24 +24,24 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { loginWithPhone } from "../../src/store/auth/login.slice";
 import { fetchMe } from "../../src/store/auth/me.slice";
 import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
 
 // ✅ Quality demo (sets code so quality/_layout.tsx can fetch inspector)
-import { setCheckerCode } from "../../src/store/qualityAuth/qualityAuth.slice";
+// import { setCheckerCode } from "../../src/store/qualityAuth/qualityAuth.slice";
 
 const { height: SCREEN_H } = Dimensions.get("window");
-
 
 const pickFirst = (...vals: any[]) =>
   vals.find((v) => v !== undefined && v !== null && String(v).trim() !== "");
 
 export default function OtpScreen() {
   const params = useLocalSearchParams<{ phone_no?: string | string[] }>();
-  const phone_no = Array.isArray(params.phone_no) ? params.phone_no[0] : params.phone_no;
+  const phone_no = Array.isArray(params.phone_no)
+    ? params.phone_no[0]
+    : params.phone_no;
 
   const dispatch = useAppDispatch();
   const login = useAppSelector((s) => (s as any).login); // keep if your reducer key is login
@@ -65,19 +65,33 @@ export default function OtpScreen() {
   }));
 
   useEffect(() => {
-    const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showEvt =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvt =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
     const subShow = Keyboard.addListener(showEvt, (e: any) => {
       keyboardH.value = e?.endCoordinates?.height ?? 0;
-      keyboardOpen.value = withTiming(1, { duration: 240, easing: Easing.out(Easing.cubic) });
-      bgDim.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) });
+      keyboardOpen.value = withTiming(1, {
+        duration: 240,
+        easing: Easing.out(Easing.cubic),
+      });
+      bgDim.value = withTiming(1, {
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+      });
     });
 
     const subHide = Keyboard.addListener(hideEvt, () => {
-      keyboardOpen.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
+      keyboardOpen.value = withTiming(0, {
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+      });
       keyboardH.value = 0;
-      bgDim.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
+      bgDim.value = withTiming(0, {
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+      });
     });
 
     return () => {
@@ -88,7 +102,10 @@ export default function OtpScreen() {
 
   const formProgress = useSharedValue(0);
   useEffect(() => {
-    formProgress.value = withDelay(250, withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) }));
+    formProgress.value = withDelay(
+      250,
+      withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) }),
+    );
   }, []);
 
   const formAnim = useAnimatedStyle(() => {
@@ -109,22 +126,35 @@ export default function OtpScreen() {
   }, [sec]);
 
   const routeByStatus = (statusRaw: any, rootRaw: any) => {
-    const status = String(statusRaw || "").trim().toUpperCase();
-    const rootType = String(rootRaw || "").trim().toUpperCase();
+    const status = String(statusRaw || "")
+      .trim()
+      .toUpperCase();
+    const rootType = String(rootRaw || "")
+      .trim()
+      .toUpperCase();
 
-    if (status === "PENDING_APPROVAL") return router.replace("/(auth)/pending" as any);
+    if (status === "PENDING_APPROVAL")
+      return router.replace("/(auth)/pending" as any);
     if (status === "REJECTED") return router.replace("/(auth)/rejected" as any);
 
     // ✅ INSPECTOR (hub)
-    if (rootType.includes("QUALITY_CHECKER")) return router.replace("/quality" as any);
+    if (rootType.includes("QUALITY_CHECKER"))
+      return router.replace("/quality" as any);
 
     // ✅ Owners
-    if (rootType.includes("WILD_CAPTURE")) return router.replace("/(wild)/dashboard" as any);
-    if (rootType.includes("AQUACULTURE")) return router.replace("/(aqua)/dashboard" as any);
-    if (rootType.includes("MARICULTURE")) return router.replace("/mariculture" as any);
-    if(rootType.includes("QUALITY_CHECKER"))return router.replace("/quality" as any);
+    if (rootType.includes("WILD_CAPTURE"))
+      return router.replace("/(wild)/dashboard" as any);
+    if (rootType.includes("AQUACULTURE"))
+      return router.replace("/(aqua)/dashboard" as any);
+    if (rootType.includes("MARICULTURE"))
+      return router.replace("/mariculture" as any);
+    if (rootType.includes("QUALITY_CHECKER"))
+      return router.replace("/quality" as any);
 
-    Alert.alert("Routing error", `Unknown rootverse_type: ${rootType || "EMPTY"}`);
+    Alert.alert(
+      "Routing error",
+      `Unknown rootverse_type: ${rootType || "EMPTY"}`,
+    );
     return;
   };
 
@@ -136,8 +166,6 @@ export default function OtpScreen() {
       return;
     }
 
-    
-
     setLoading(true);
     try {
       // ✅ unwrap gives actual returned JSON (not action object)
@@ -147,14 +175,20 @@ export default function OtpScreen() {
       const p = raw?.data ?? raw;
       const u = p?.user ?? p?.data?.user ?? p?.data ?? p;
 
-      const status = pickFirst(p?.status, u?.status, p?.verification_status, u?.verification_status, login?.status);
+      const status = pickFirst(
+        p?.status,
+        u?.status,
+        p?.verification_status,
+        u?.verification_status,
+        login?.status,
+      );
 
       let rootType = pickFirst(
         p?.rootverse_type,
         u?.rootverse_type,
         p?.rootverseType,
         u?.rootverseType,
-        login?.rootverse_type
+        login?.rootverse_type,
       );
 
       // ✅ if login response doesn't give it, fetch /me
@@ -180,11 +214,19 @@ export default function OtpScreen() {
       const msg = String(e?.message || e || "Login blocked");
       const m = msg.toLowerCase();
 
-      if (m.includes("pending") || m.includes("approval") || m.includes("not approved")) {
-        Alert.alert("Waiting for approval", "Admin has not approved your account yet.");
+      if (
+        m.includes("pending") ||
+        m.includes("approval") ||
+        m.includes("not approved")
+      ) {
+        Alert.alert(
+          "Waiting for approval",
+          "Admin has not approved your account yet.",
+        );
         return router.replace("/(auth)/pending" as any);
       }
-      if (m.includes("reject")) return router.replace("/(auth)/rejected" as any);
+      if (m.includes("reject"))
+        return router.replace("/(auth)/rejected" as any);
 
       if (m.includes("not found") || m.includes("no user")) {
         Alert.alert("Not registered", "Please register first.");
@@ -205,31 +247,72 @@ export default function OtpScreen() {
   return (
     <View className="flex-1 bg-black" style={{ position: "relative" }}>
       <LinearGradient
-        colors={["rgba(16,185,129,0.22)", "rgba(0,0,0,0.86)", "rgba(0,0,0,0.96)"]}
+        colors={[
+          "rgba(16,185,129,0.22)",
+          "rgba(0,0,0,0.86)",
+          "rgba(0,0,0,0.96)",
+        ]}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
         style={{ position: "absolute", inset: 0 }}
       />
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
         <View style={{ paddingTop: 70, paddingHorizontal: 20 }}>
-          <Pressable onPress={() => router.back()} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Pressable
+            onPress={() => router.back()}
+            style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+          >
             <Ionicons name="chevron-back" size={20} color="#cbd5e1" />
             <Text style={{ color: "#cbd5e1", fontWeight: "700" }}>Back</Text>
           </Pressable>
 
-          <Text style={{ marginTop: 20, color: "white", fontSize: 28, fontWeight: "900" }}>Verify OTP</Text>
-          <Text style={{ marginTop: 8, color: "#94a3b8" }}>Sent to {phone_no || "your number"}</Text>
+          <Text
+            style={{
+              marginTop: 20,
+              color: "white",
+              fontSize: 28,
+              fontWeight: "900",
+            }}
+          >
+            Verify OTP
+          </Text>
+          <Text style={{ marginTop: 8, color: "#94a3b8" }}>
+            Sent to {phone_no || "your number"}
+          </Text>
         </View>
 
         <Animated.View
           pointerEvents="none"
-          style={[{ position: "absolute", inset: 0, backgroundColor: "black", zIndex: 5 }, dimOverlayAnim]}
+          style={[
+            {
+              position: "absolute",
+              inset: 0,
+              backgroundColor: "black",
+              zIndex: 5,
+            },
+            dimOverlayAnim,
+          ]}
         />
 
-        <View style={{ position: "absolute", left: 20, right: 20, bottom: 190, zIndex: 10 }}>
+        <View
+          style={{
+            position: "absolute",
+            left: 20,
+            right: 20,
+            bottom: 190,
+            zIndex: 10,
+          }}
+        >
           <Animated.View style={formAnim}>
-            <BlurView intensity={22} tint="dark" style={{ borderRadius: 26, overflow: "hidden" }}>
+            <BlurView
+              intensity={22}
+              tint="dark"
+              style={{ borderRadius: 26, overflow: "hidden" }}
+            >
               <View className="bg-black/35 border border-white/10 rounded-[26px] p-5">
                 <Text className="text-slate-300 text-[11px] mb-2">OTP</Text>
 
@@ -238,16 +321,26 @@ export default function OtpScreen() {
                   <TextInput
                     ref={otpRef}
                     value={otp}
-                    onChangeText={(v) => setOtp(v.replace(/\D/g, "").slice(0, 6))}
+                    onChangeText={(v) =>
+                      setOtp(v.replace(/\D/g, "").slice(0, 6))
+                    }
                     placeholder="Enter OTP"
                     placeholderTextColor="#64748b"
                     keyboardType="number-pad"
                     className="text-white flex-1 ml-3"
-                    style={{ backgroundColor: "transparent", letterSpacing: 6, fontSize: 18 }}
+                    style={{
+                      backgroundColor: "transparent",
+                      letterSpacing: 6,
+                      fontSize: 18,
+                    }}
                   />
                   <View
                     className={`h-2.5 w-2.5 rounded-full ${
-                      otp.length === 0 ? "bg-slate-700" : otpOk ? "bg-emerald-400" : "bg-rose-400"
+                      otp.length === 0
+                        ? "bg-slate-700"
+                        : otpOk
+                          ? "bg-emerald-400"
+                          : "bg-rose-400"
                     }`}
                   />
                 </View>
@@ -258,17 +351,26 @@ export default function OtpScreen() {
                   </Text>
 
                   <Pressable onPress={onResend} disabled={sec > 0}>
-                    <Text className={`text-[11px] font-semibold ${sec > 0 ? "text-slate-500" : "text-emerald-300"}`}>
+                    <Text
+                      className={`text-[11px] font-semibold ${sec > 0 ? "text-slate-500" : "text-emerald-300"}`}
+                    >
                       Resend
                     </Text>
                   </Pressable>
                 </View>
 
-                <Pressable onPress={() => setAgree((p) => !p)} className="flex-row items-center mt-4">
+                <Pressable
+                  onPress={() => setAgree((p) => !p)}
+                  className="flex-row items-center mt-4"
+                >
                   <View className="h-5 w-5 rounded-md border border-white/20 items-center justify-center bg-white/5">
-                    {agree ? <Ionicons name="checkmark" size={14} color="#34d399" /> : null}
+                    {agree ? (
+                      <Ionicons name="checkmark" size={14} color="#34d399" />
+                    ) : null}
                   </View>
-                  <Text className="text-slate-300 text-[11px] ml-3">I confirm this OTP is mine</Text>
+                  <Text className="text-slate-300 text-[11px] ml-3">
+                    I confirm this OTP is mine
+                  </Text>
                 </Pressable>
 
                 <View className="mt-5">
@@ -282,9 +384,15 @@ export default function OtpScreen() {
                       colors={["#34d399", "#10b981", "#06b6d4"]}
                       start={{ x: 0, y: 0.5 }}
                       end={{ x: 1, y: 0.5 }}
-                      style={{ paddingVertical: 15, alignItems: "center", borderRadius: 24 }}
+                      style={{
+                        paddingVertical: 15,
+                        alignItems: "center",
+                        borderRadius: 24,
+                      }}
                     >
-                      <Text className="text-black font-semibold">{loading ? "Checking..." : "Verify & Continue"}</Text>
+                      <Text className="text-black font-semibold">
+                        {loading ? "Checking..." : "Verify & Continue"}
+                      </Text>
                     </LinearGradient>
                   </Pressable>
                 </View>
