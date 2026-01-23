@@ -1,4 +1,4 @@
-import { httpJson, httpPutForm, appendImageToForm } from "../http";
+import { appendImageToForm, httpJson, httpPutForm } from "../http";
 
 export type QrStatusResponse = {
   crateId: string;
@@ -10,9 +10,9 @@ export type CatchLogPayload = {
 
   tripId: string;
 
-  fishId: number;       // REQUIRED
-  rvVesselId: number;   // REQUIRED
-  ownerId: number;      // REQUIRED
+  fishId: number; // REQUIRED
+  rvVesselId: number; // REQUIRED
+  ownerId: number; // REQUIRED
 
   weightKg: number;
   catchDate: string; // YYYY-MM-DD
@@ -25,10 +25,13 @@ export type CatchLogPayload = {
   longitude?: number;
 };
 
-export async function apiCheckQrStatus(crateId: string): Promise<QrStatusResponse> {
-  const data = await httpJson<any>(`/api/qrs/${encodeURIComponent(crateId)}`, {
-    method: "GET",
-  });
+export async function apiCheckQrStatus(
+  crateId: string,
+): Promise<QrStatusResponse> {
+  const data = await httpJson<any>(
+    `https://rootverse-backend-5qoo.onrender.com/api/qrs/${encodeURIComponent(crateId)}`,
+    { method: "GET" },
+  );
 
   return {
     crateId: data?.crateId || crateId,
@@ -54,17 +57,30 @@ export async function apiSubmitCatchLog(payload: CatchLogPayload) {
   form.append("date", payload.catchDate);
 
   // ✅ ADDED: latitude / longitude (send only when available)
-  if (payload.latitude != null) form.append("latitude", String(payload.latitude));
-  if (payload.longitude != null) form.append("longitude", String(payload.longitude));
+  if (payload.latitude != null)
+    form.append("latitude", String(payload.latitude));
+  if (payload.longitude != null)
+    form.append("longitude", String(payload.longitude));
 
   // ✅ always send HH:MM:SS
-  const t = payload.catchTime?.length === 5 ? `${payload.catchTime}:00` : payload.catchTime;
+  const t =
+    payload.catchTime?.length === 5
+      ? `${payload.catchTime}:00`
+      : payload.catchTime;
   form.append("time", t);
 
   // ✅ images
   for (let i = 0; i < payload.images.length; i++) {
-    await appendImageToForm(form, "images", payload.images[i], `catch_${code}_${i + 1}.jpg`);
+    await appendImageToForm(
+      form,
+      "images",
+      payload.images[i],
+      `catch_${code}_${i + 1}.jpg`,
+    );
   }
 
-  return httpPutForm<any>(`/api/qrs/${encodeURIComponent(code)}`, form);
+  return httpPutForm<any>(
+    `https://rootverse-backend-5qoo.onrender.com/api/qrs/${encodeURIComponent(code)}`,
+    form,
+  );
 }
