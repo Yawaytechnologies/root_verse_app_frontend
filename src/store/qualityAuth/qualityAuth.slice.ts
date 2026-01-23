@@ -35,19 +35,7 @@ export const fetchInspectorByCode = createAsyncThunk<Inspector, string, { reject
     try {
       const code = String(checkerCode || "").trim();
 
-      // ✅ DEMO: backend not ready → return dummy inspector
-      if (code === DEMO_QC_CODE) {
-        return {
-          checker_code: DEMO_QC_CODE,
-          checker_name: "sam",
-          checker_email: "sam.qc@gmail.com",
-          checker_phone: "9876543288",
-          state_id: 1,
-          district_id: 4,
-          is_active: true,
-          rootverse_type: "QUALITY_CHECKER",
-        };
-      }
+ 
 
       // later: call backend endpoint here
       return rejectWithValue("QC_ENDPOINT_NOT_READY");
