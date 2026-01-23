@@ -35,18 +35,6 @@ import { setCheckerCode } from "../../src/store/qualityAuth/qualityAuth.slice";
 
 const { height: SCREEN_H } = Dimensions.get("window");
 
-// ✅ DEMO INSPECTOR (tomorrow remove this block and use backend payload)
-const DEMO_QC_PHONE = "9876543288";
-const DEMO_QC_CODE = "QC-000003";
-const DEMO_QC_PROFILE = {
-  checker_name: "sam",
-  checker_email: "sam.qc@gmail.com",
-  checker_phone: "9876543288",
-  state_id: 1,
-  district_id: 4,
-  is_active: true,
-  rootverse_type: "QUALITY_CHECKER",
-};
 
 const pickFirst = (...vals: any[]) =>
   vals.find((v) => v !== undefined && v !== null && String(v).trim() !== "");
@@ -134,6 +122,7 @@ export default function OtpScreen() {
     if (rootType.includes("WILD_CAPTURE")) return router.replace("/(wild)/dashboard" as any);
     if (rootType.includes("AQUACULTURE")) return router.replace("/(aqua)/dashboard" as any);
     if (rootType.includes("MARICULTURE")) return router.replace("/mariculture" as any);
+    if(rootType.includes("QUALITY_CHECKER"))return router.replace("/quality" as any);
 
     Alert.alert("Routing error", `Unknown rootverse_type: ${rootType || "EMPTY"}`);
     return;
@@ -147,18 +136,7 @@ export default function OtpScreen() {
       return;
     }
 
-    // ✅ DEMO: Inspector login hardcoded (backend not ready)
-    // Tomorrow: remove this block and rely on backend payload rootverse_type="QUALITY_CHECKER"
-    if (phone_no === DEMO_QC_PHONE) {
-      setLoading(true);
-      try {
-        await AsyncStorage.setItem("demo_qc_profile", JSON.stringify(DEMO_QC_PROFILE));
-        dispatch(setCheckerCode(DEMO_QC_CODE));
-        return router.replace("/quality" as any); // ✅ lands on hub screen (3 big buttons)
-      } finally {
-        setLoading(false);
-      }
-    }
+    
 
     setLoading(true);
     try {
