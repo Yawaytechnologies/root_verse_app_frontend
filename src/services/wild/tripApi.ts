@@ -47,15 +47,19 @@ type ApiWrapped<T> = {
   data?: T;
 };
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+// ✅ HARDCODED BASE URL (no .env)
+const BASE_URL = "https://rootverse-backend-5qoo.onrender.com";
 
 function baseUrl() {
-  if (!BASE_URL) throw new Error("Missing EXPO_PUBLIC_API_BASE_URL in .env");
   return BASE_URL.replace(/\/+$/, "");
 }
 
 function isWrapped<T>(x: any): x is ApiWrapped<T> {
-  return x && typeof x === "object" && ("success" in x || "data" in x || "message" in x);
+  return (
+    x &&
+    typeof x === "object" &&
+    ("success" in x || "data" in x || "message" in x)
+  );
 }
 
 function unwrapOrThrow<T>(payload: any): T {
@@ -97,7 +101,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const msg =
       json?.message ||
       json?.error ||
-      (typeof text === "string" && text.trim() ? text : `Request failed (${res.status})`);
+      (typeof text === "string" && text.trim()
+        ? text
+        : `Request failed (${res.status})`);
     throw new Error(msg);
   }
 
