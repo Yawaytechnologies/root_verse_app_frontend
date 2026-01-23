@@ -1,17 +1,17 @@
 // app/_layout.tsx
-import "react-native-reanimated";
-import React, { useEffect } from "react";
-import { Stack } from "expo-router";
-import { View, Platform } from "react-native";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { SafeAreaProvider } from "react-native-safe-area-context";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
+import { Stack } from "expo-router";
+import React, { useEffect } from "react";
+import { Platform, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import "react-native-reanimated";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import "./global.css";
 
 /** ✅ Redux */
 import { Provider } from "react-redux";
-import { store } from "../src/store/store";
+import { store } from "../src/store/auth/store";
 
 /** ✅ Toast */
 import Toast from "react-native-toast-message";

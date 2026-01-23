@@ -1,14 +1,45 @@
 // app/(wild)/index.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { router } from "expo-router";
-import { AppState, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  AppState,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
 import * as Haptics from "expo-haptics";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
 import { useTrace } from "../../src/data/wild/trace.store";
 
 type Lang = "ta" | "en";
+
+const OWNER_API_BASE = "https://rootverse-backend-5qoo.onrender.com/api/owner/fetch";
+
+type OwnerApiRes = {
+  id: number;
+  username?: string;
+  phone_no?: string;
+  address?: string;
+  rootverse_type?: string;
+  verification_status?: string;
+
+  profile_picture_url?: string;
+
+  owner_id?: string;
+
+  state_name?: string;
+  district_name?: string;
+
+  email?: string; // (not in your sample response, but keep safe)
+};
 
 const i18n = {
   en: {
@@ -43,6 +74,10 @@ const i18n = {
 
     langBtnTa: "தமிழ்",
     langBtnEn: "English",
+
+    loadingProfile: "Loading profile…",
+    failedProfile: "Failed to load profile",
+    retry: "Retry",
   },
   ta: {
     title: "Wild Fisher",
@@ -76,6 +111,10 @@ const i18n = {
 
     langBtnTa: "தமிழ்",
     langBtnEn: "English",
+
+    loadingProfile: "ப்ரோஃபைல் ஏற்றுகிறது…",
+    failedProfile: "ப்ரோஃபைல் ஏற்ற முடியவில்லை",
+    retry: "மீண்டும் முயற்சி",
   },
 };
 
@@ -107,6 +146,8 @@ const UI = {
   blueSoft: "#eaf1ff",
   green: "#16a34a",
   greenSoft: "#eafaf0",
+  red: "#dc2626",
+  redSoft: "#fee2e2",
 };
 
 function Card({
@@ -145,7 +186,17 @@ function ProfileDrawer({
 }: {
   open: boolean;
   onClose: () => void;
-  user: { ownerId: string; phone: string; email: string; address: string };
+  user: {
+    name: string;
+    role: string;
+    ownerId: string;
+    phone: string;
+    email: string;
+    address: string;
+    avatarUrl?: string;
+    district?: string;
+    state?: string;
+  };
   lang: Lang;
 }) {
   const t = i18n[lang];
@@ -162,6 +213,46 @@ function ProfileDrawer({
               <Pressable onPress={onClose} className="rounded-full p-2 active:opacity-70">
                 <Ionicons name="close" size={22} color={UI.text} />
               </Pressable>
+            </View>
+
+            {/* Avatar + name */}
+            <View className="mt-4 flex-row items-center gap-3">
+              <View
+                className="h-14 w-14 rounded-full items-center justify-center overflow-hidden"
+                style={{ backgroundColor: UI.blue }}
+              >
+                {user.avatarUrl ? (
+                  <Image
+                    source={{ uri: user.avatarUrl }}
+                    style={{ width: 56, height: 56 }}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <Text className="text-white font-extrabold">
+                    {user.name
+                      .split(" ")
+                      .slice(0, 2)
+                      .map((w) => w[0])
+                      .join("")
+                      .toUpperCase()}
+                  </Text>
+                )}
+              </View>
+
+              <View className="flex-1">
+                <Text className="text-base font-bold" style={{ color: UI.text }} numberOfLines={1}>
+                  {user.name}
+                </Text>
+                <Text className="text-xs" style={{ color: UI.muted }} numberOfLines={1}>
+                  {user.role} · {user.ownerId}
+                </Text>
+
+                {!!(user.district || user.state) && (
+                  <Text className="mt-1 text-xs" style={{ color: UI.muted }} numberOfLines={1}>
+                    {[user.district, user.state].filter(Boolean).join(", ")}
+                  </Text>
+                )}
+              </View>
             </View>
 
             <View className="mt-4 gap-3">
@@ -237,7 +328,6 @@ function ActionRow({
       className="active:opacity-85"
     >
       <Card>
-        {/* ✅ FIX: no justify-between; give text flex-1 so subtitle never overflows */}
         <View className="px-4 py-4 flex-row items-center">
           <View
             className="h-11 w-11 rounded-xl items-center justify-center"
@@ -273,6 +363,31 @@ function ActionRow({
   );
 }
 
+async function readOwnerIdFromStorage(): Promise<number | null> {
+  // Use any one key you already store after login
+  const keys = ["owner_db_id", "user_id", "id"];
+  for (const k of keys) {
+    const v = await AsyncStorage.getItem(k);
+    const n = v ? Number(String(v).trim()) : NaN;
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
+async function fetchOwnerById(ownerDbId: number): Promise<OwnerApiRes> {
+  const res = await fetch(`${OWNER_API_BASE}/${encodeURIComponent(String(ownerDbId))}`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`Owner API failed: ${res.status} ${res.statusText} ${txt}`.trim());
+  }
+
+  return (await res.json()) as OwnerApiRes;
+}
+
 export default function WildDashboard() {
   const insets = useSafeAreaInsets();
   const trace = useTrace();
@@ -286,15 +401,58 @@ export default function WildDashboard() {
 
   const lastCrateId = useMemo(() => trace.events?.[0]?.crateId ?? "", [trace.events]);
 
-  const user = {
-    name: "Gowtham Sakthivel",
-    role: "Vessel Owner",
-    ownerId: "NA026829",
-    phone: "6374484558",
-    email: "sgowtham2k1@gmail.com",
-    address:
-      "1/198 Main Road Kuthalam, Gopurajapuram (Post), Kuthalam - 609703, Nagapattinam",
+  // ✅ profile state
+  const [ownerDbId, setOwnerDbId] = useState<number>(14); // fallback so UI works
+  const [profile, setProfile] = useState<OwnerApiRes | null>(null);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
+
+  const loadProfile = async (idToLoad?: number) => {
+    try {
+      setLoadingProfile(true);
+      setProfileError(null);
+
+      const storageId = idToLoad ?? (await readOwnerIdFromStorage());
+      const finalId = storageId ?? 14;
+
+      setOwnerDbId(finalId);
+      const data = await fetchOwnerById(finalId);
+      setProfile(data);
+    } catch (e: any) {
+      setProfile(null);
+      setProfileError(e?.message || "Failed to load profile");
+    } finally {
+      setLoadingProfile(false);
+    }
   };
+
+  useEffect(() => {
+    loadProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ✅ map API → UI user
+  const user = useMemo(() => {
+    const name = profile?.username ? profile.username : "—";
+    const role = profile?.rootverse_type ? profile.rootverse_type : "—";
+    const ownerIdLabel = profile?.owner_id ? profile.owner_id : `ID-${ownerDbId}`;
+    const phone = profile?.phone_no ? profile.phone_no : "—";
+    const email = (profile as any)?.email ? String((profile as any).email) : "—";
+    const address = profile?.address ? profile.address : "—";
+    const avatarUrl = profile?.profile_picture_url || undefined;
+
+    return {
+      name,
+      role,
+      ownerId: ownerIdLabel,
+      phone,
+      email,
+      address,
+      avatarUrl,
+      state: profile?.state_name || "",
+      district: profile?.district_name || "",
+    };
+  }, [profile, ownerDbId]);
 
   // Speak once on first open
   const greeted = useRef(false);
@@ -317,17 +475,7 @@ export default function WildDashboard() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: UI.bg }} edges={["top", "left", "right"]}>
-      <ProfileDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        user={{
-          ownerId: user.ownerId,
-          phone: user.phone,
-          email: user.email,
-          address: user.address,
-        }}
-        lang={lang}
-      />
+      <ProfileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} user={user} lang={lang} />
 
       <ScrollView
         contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
@@ -343,40 +491,88 @@ export default function WildDashboard() {
 
         {/* Profile card */}
         <Card className="mt-4">
-          <Pressable onPress={() => setDrawerOpen(true)} className="px-4 py-4 active:opacity-80">
+          <Pressable
+            onPress={() => setDrawerOpen(true)}
+            className="px-4 py-4 active:opacity-80"
+            disabled={loadingProfile}
+          >
             <View className="flex-row items-center justify-between">
               <View className="flex-row items-center gap-3">
                 <View
-                  className="h-12 w-12 rounded-full items-center justify-center"
+                  className="h-12 w-12 rounded-full items-center justify-center overflow-hidden"
                   style={{ backgroundColor: UI.blue }}
                 >
-                  <Text className="text-white font-extrabold">
-                    {user.name
-                      .split(" ")
-                      .slice(0, 2)
-                      .map((w) => w[0])
-                      .join("")
-                      .toUpperCase()}
-                  </Text>
+                  {user.avatarUrl ? (
+                    <Image
+                      source={{ uri: user.avatarUrl }}
+                      style={{ width: 48, height: 48 }}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Text className="text-white font-extrabold">
+                      {(user.name || "—")
+                        .split(" ")
+                        .slice(0, 2)
+                        .map((w) => (w ? w[0] : "—"))
+                        .join("")
+                        .toUpperCase()}
+                    </Text>
+                  )}
                 </View>
 
-                <View>
-                  <Text className="text-sm font-bold" style={{ color: UI.text }}>
+                <View style={{ flex: 1 }}>
+                  <Text className="text-sm font-bold" style={{ color: UI.text }} numberOfLines={1}>
                     {user.name}
                   </Text>
-                  <Text className="text-xs" style={{ color: UI.muted }}>
+
+                  <Text className="text-xs" style={{ color: UI.muted }} numberOfLines={1}>
                     {user.role} · {user.ownerId}
                   </Text>
+
+                  {!!(user.district || user.state) && (
+                    <Text className="mt-0.5 text-xs" style={{ color: UI.muted }} numberOfLines={1}>
+                      {[user.district, user.state].filter(Boolean).join(", ")}
+                    </Text>
+                  )}
                 </View>
               </View>
 
-              <Ionicons name="chevron-forward" size={20} color={UI.muted} />
+              {loadingProfile ? (
+                <ActivityIndicator />
+              ) : (
+                <Ionicons name="chevron-forward" size={20} color={UI.muted} />
+              )}
             </View>
 
+            {/* hint / loader / error */}
             <View className="mt-3 rounded-xl px-3 py-2" style={{ backgroundColor: UI.blueSoft }}>
-              <Text className="text-xs font-semibold" style={{ color: UI.blue }}>
-                {t.hint}
-              </Text>
+              {loadingProfile ? (
+                <Text className="text-xs font-semibold" style={{ color: UI.blue }}>
+                  {t.loadingProfile}
+                </Text>
+              ) : profileError ? (
+                <View className="flex-row items-center justify-between">
+                  <Text className="text-xs font-semibold" style={{ color: UI.red }}>
+                    {t.failedProfile}
+                  </Text>
+                  <Pressable
+                    onPress={async () => {
+                      await haptic();
+                      loadProfile(ownerDbId);
+                    }}
+                    className="rounded-full px-3 py-1 border"
+                    style={{ borderColor: UI.border, backgroundColor: UI.card }}
+                  >
+                    <Text className="text-xs font-semibold" style={{ color: UI.text }}>
+                      {t.retry}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Text className="text-xs font-semibold" style={{ color: UI.blue }}>
+                  {t.hint}
+                </Text>
+              )}
             </View>
 
             {!!lastCrateId && (
@@ -385,8 +581,7 @@ export default function WildDashboard() {
                 style={{ backgroundColor: UI.greenSoft, borderColor: "#bfe8cd" }}
               >
                 <Text className="text-xs" style={{ color: UI.text }}>
-                  Last Sticker:{" "}
-                  <Text style={{ fontWeight: "800" }}>{String(lastCrateId)}</Text>
+                  Last Sticker: <Text style={{ fontWeight: "800" }}>{String(lastCrateId)}</Text>
                 </Text>
               </View>
             )}

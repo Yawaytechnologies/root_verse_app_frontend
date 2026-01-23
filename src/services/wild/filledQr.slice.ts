@@ -1,6 +1,6 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 
-const BASE_URL = "https://rootverse-backend.onrender.com";
+const BASE_URL = "https://rootverse-backend-5qoo.onrender.com";
 
 // ✅ safe JSON / text handler (prevents Unexpected token '<')
 async function safeRead(res: Response) {

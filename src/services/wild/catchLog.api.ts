@@ -19,6 +19,10 @@ export type CatchLogPayload = {
   catchTime: string; // HH:mm or HH:mm:ss
 
   images: string[];
+
+  // ✅ ADDED: location fields (flat)
+  latitude?: number;
+  longitude?: number;
 };
 
 export async function apiCheckQrStatus(crateId: string): Promise<QrStatusResponse> {
@@ -48,6 +52,10 @@ export async function apiSubmitCatchLog(payload: CatchLogPayload) {
   form.append("trip_id", String(payload.tripId));
   form.append("weight", String(payload.weightKg));
   form.append("date", payload.catchDate);
+
+  // ✅ ADDED: latitude / longitude (send only when available)
+  if (payload.latitude != null) form.append("latitude", String(payload.latitude));
+  if (payload.longitude != null) form.append("longitude", String(payload.longitude));
 
   // ✅ always send HH:MM:SS
   const t = payload.catchTime?.length === 5 ? `${payload.catchTime}:00` : payload.catchTime;

@@ -1,24 +1,27 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
-import {
-  Alert,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
-import DateTimePicker from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
 import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
 import { Ionicons } from "@expo/vector-icons";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import NetInfo from "@react-native-community/netinfo";
+
+// ✅ live location
+import * as Location from "expo-location";
 
 // ✅ Redux
 import { useAppDispatch, useAppSelector } from "../../../src/store/hooks";
 import { submitCatchLog } from "../../../src/services/wild/catchLog.slice";
+
+// ✅ Offline queue
+import {
+  enqueueCatchLog,
+  flushQueue,
+  getQueueCount,
+  type CatchLogPayload,
+} from "../../../src/utils/offlineQueue";
 
 /* ---------------- TYPES ---------------- */
 type TripItem = { tripId: string; port: string; vesselId: string };
@@ -34,6 +37,16 @@ type FishType = {
 type PickerItem = { key: string; label: string };
 type FishOption = { key: string; label: string; id: number };
 
+type LiveLocation = {
+  latitude: number;
+  longitude: number;
+  accuracy?: number | null;
+  heading?: number | null;
+  speed?: number | null;
+  capturedAt: string; // ISO
+};
+
+
 /* ---------------- DUMMY TRIPS ---------------- */
 const DUMMY_TRIPS: TripItem[] = [
   { tripId: "T250057", port: "Nagapattinam", vesselId: "RV-VES-NA026829" },
@@ -45,71 +58,107 @@ const DUMMY_TRIPS: TripItem[] = [
 const i18n = {
   ta: {
     title: "பிடிப்பு பதிவு",
-    sub: "QR ஸ்கேன் செய்து பதிவு செய்யவும் ✅",
-    step: (n: number) => `படி ${n}/3`,
+    sub: "Trip + Fish தேர்வு → பல QR ஸ்கேன் → Auto Date/Time → Photo → Save ✅",
+    step: (n: number) => `படி ${n}/4`,
     next: "அடுத்து",
     back: "மீண்டும்",
     save: "சேமி",
     required: "அவசியம்",
-    optional: "விருப்பம்",
-    addPhoto: "📷 படம் சேர்க்க",
+    addPhoto: "📸 படம் எடு",
     remove: "நீக்கு",
+    clearAll: "அனைத்தும் நீக்கு",
     langBtn: "English",
 
     trip: "பயணம் (Trip)",
     chooseTrip: "பயணத்தை தேர்வு செய்",
     species: "மீன் வகை",
     chooseSpecies: "மீன் வகை தேர்வு செய்",
-    weight: "எடை (kg)",
-    weightPH: "உதா: 120",
+
+    scanTitle: "QR ஸ்கேன்",
+    scanHint: "Trip + Fish தேர்வு செய்த பிறகு QR ஸ்கேன் செய்யலாம்",
+    scanReady: "கேமரா திறந்து பல QR ஸ்கேன் செய்யுங்கள்",
+    scannedList: "Scanned QRs",
+    scanCount: (n: number) => `மொத்தம்: ${n}`,
+    camDenied: "Camera permission அனுமதி இல்லை",
+    grantCam: "Camera அனுமதி கொடு",
+
+    locTitle: "Live Location",
+    locGetting: "Location எடுக்கிறது...",
+    locDenied: "Location permission இல்லை",
+    locGrant: "Location அனுமதி கொடு",
+    locRetry: "Retry location",
+
+    dateTime: "Date & Time (Auto)",
     date: "தேதி",
     time: "நேரம்",
-    pickDate: "தேதி தேர்வு செய்ய தட்டுங்கள் 📅",
-    pickTime: "நேரம் தேர்வு செய்ய தட்டுங்கள் ⏱️",
+    autoHint: "Save அழுத்தும் நேரத்தில் Date/Time auto ஆக capture ஆகும்.",
 
-    errTrip: "பயணத்தை தேர்வு செய்யவும்",
-    errSpecies: "மீன் வகையை தேர்வு செய்யவும்",
-    errWeight: "எடை போடவும்",
-    errDate: "தேதி தேர்வு செய்யவும்",
     saved: "சேமிக்கப்பட்டது ✅",
-    posting: "பதிவேற்றுகிறது...",
+    offlineSaved: "இணையம் இல்லை. Local-ல் save பண்ணிட்டோம். Net வந்தவுடன் auto sync ஆகும்.",
+    syncing: "Syncing pending...",
+    pending: "Pending sync",
 
     fishLoading: "மீன் வகைகள் ஏற்றுகிறது...",
     fishFailed: "மீன் வகைகள் பெற முடியவில்லை",
+
+    errTrip: "பயணத்தை தேர்வு செய்யவும்",
+    errSpecies: "மீன் வகையை தேர்வு செய்யவும்",
+    errQr: "குறைந்தது 1 QR ஸ்கேன் செய்யவும்",
+
+    batchResult: (ok: number, fail: number) =>
+      `Uploaded: ${ok}\nQueued/Failed: ${fail}`,
   },
   en: {
     title: "Catch Log",
-    sub: "Create catch linked to scanned QR ✅",
-    step: (n: number) => `Step ${n}/3`,
+    sub: "Select Trip + Fish → Scan multiple QRs → Auto Date/Time → Photo → Save ✅",
+    step: (n: number) => `Step ${n}/4`,
     next: "Next",
     back: "Back",
     save: "Save",
     required: "Required",
-    optional: "Optional",
-    addPhoto: "📷 Add Photos",
+    addPhoto: "📸 Capture Photo",
     remove: "Remove",
+    clearAll: "Clear all",
     langBtn: "தமிழ்",
 
     trip: "Trip",
     chooseTrip: "Choose trip",
     species: "Species",
     chooseSpecies: "Choose species",
-    weight: "Weight (kg)",
-    weightPH: "ex: 120",
+
+    scanTitle: "Scan QR",
+    scanHint: "Scan QR after selecting Trip + Fish",
+    scanReady: "Open camera and scan multiple QRs",
+    scannedList: "Scanned QRs",
+    scanCount: (n: number) => `Total: ${n}`,
+    camDenied: "Camera permission denied",
+    grantCam: "Grant camera access",
+
+    locTitle: "Live Location",
+    locGetting: "Getting location...",
+    locDenied: "Location permission denied",
+    locGrant: "Grant location access",
+    locRetry: "Retry location",
+
+    dateTime: "Date & Time (Auto)",
     date: "Date",
     time: "Time",
-    pickDate: "Tap to pick date 📅",
-    pickTime: "Tap to pick time ⏱️",
+    autoHint: "Date/Time will be captured automatically when you press Save.",
 
-    errTrip: "Please choose trip",
-    errSpecies: "Please choose species",
-    errWeight: "Please enter weight",
-    errDate: "Please choose date",
     saved: "Saved ✅",
-    posting: "Posting...",
+    offlineSaved: "No internet. Saved locally. Will auto-sync when network returns.",
+    syncing: "Syncing pending...",
+    pending: "Pending sync",
 
     fishLoading: "Loading fish types...",
     fishFailed: "Failed to load fish types",
+
+    errTrip: "Please choose trip",
+    errSpecies: "Please choose species",
+    errQr: "Please scan at least 1 QR",
+
+    batchResult: (ok: number, fail: number) =>
+      `Uploaded: ${ok}\nQueued/Failed: ${fail}`,
   },
 };
 
@@ -124,27 +173,32 @@ const UI = {
 };
 
 /* ---------------- HELPERS ---------------- */
-const toNum = (v: string) => {
-  const n = Number(String(v).replace(/[^0-9.]/g, ""));
-  return Number.isFinite(n) ? n : 0;
-};
-
-const fmtDate = (d?: Date | null) => {
-  if (!d) return "";
+const fmtDate = (d: Date) => {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 };
 
-const fmtTime = (d?: Date | null) => {
-  if (!d) return "";
+const fmtTime = (d: Date) => {
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
   return `${hh}:${mm}:00`;
 };
 
 const fishNameOf = (f: FishType) => String(f.fish_name || "").trim();
+
+function isNetworkishError(msg: string) {
+  const m = (msg || "").toLowerCase();
+  return (
+    m.includes("network") ||
+    m.includes("failed to fetch") ||
+    m.includes("timeout") ||
+    m.includes("socket") ||
+    m.includes("econn") ||
+    m.includes("offline")
+  );
+}
 
 /* ---------------- UI COMPONENTS ---------------- */
 function Card({
@@ -193,81 +247,6 @@ function SelectField({
   );
 }
 
-function DateField({
-  label,
-  value,
-  placeholder,
-  hint,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  hint: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} className="active:opacity-80">
-      <Text className={`text-xs ${UI.muted}`}>{label}</Text>
-      <Text className={`mt-1 text-base ${value ? UI.text : "text-[#b1a59a]"}`}>
-        {value || placeholder}
-      </Text>
-      <Text className="mt-1 text-[11px] text-[#b1a59a]">{hint}</Text>
-    </Pressable>
-  );
-}
-
-function PickerModal({
-  open,
-  title,
-  value,
-  mode,
-  onClose,
-  onPick,
-}: {
-  open: boolean;
-  title: string;
-  value: Date;
-  mode: "date" | "time";
-  onClose: () => void;
-  onPick: (d: Date) => void;
-}) {
-  if (!open) return null;
-
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable onPress={onClose} className="flex-1 bg-black/50 justify-end">
-        <Pressable onPress={() => {}} className="rounded-t-3xl bg-white p-4">
-          <View className="flex-row items-center justify-between">
-            <Text className={`text-base font-bold ${UI.text}`}>{title}</Text>
-            <Pressable onPress={onClose} className="px-3 py-2 active:opacity-70">
-              <Text style={{ color: UI.accent }} className="text-sm font-semibold">
-                Done
-              </Text>
-            </Pressable>
-          </View>
-
-          <View className="mt-3">
-            <DateTimePicker
-              value={value}
-              mode={mode}
-              display={Platform.OS === "ios" ? "spinner" : "default"}
-              onChange={(event, date) => {
-                if (Platform.OS !== "ios") {
-                  if ((event as any).type === "dismissed") return onClose();
-                  if (date) onPick(date);
-                  return onClose();
-                }
-                if (date) onPick(date);
-              }}
-            />
-          </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
 function PickerSheetObj<T extends PickerItem>({
   title,
   valueKey,
@@ -313,7 +292,9 @@ function PickerSheetObj<T extends PickerItem>({
           </Pressable>
         </View>
 
-        <View className={`mt-3 rounded-2xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}>
+        <View
+          className={`mt-3 rounded-2xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}
+        >
           <TextInput
             value={q}
             onChangeText={setQ}
@@ -348,8 +329,8 @@ function PickerSheetObj<T extends PickerItem>({
 
 /* ---------------- MAIN SCREEN ---------------- */
 export default function CreateCatchLog() {
-  const { crateId } = useLocalSearchParams<{ crateId: string }>();
-  const finalCrateId = String(crateId || "").trim();
+  const params = useLocalSearchParams<{ crateId?: string }>();
+  const initialCrateId = String(params?.crateId || "").trim();
 
   const dispatch = useAppDispatch();
   const catchState = useAppSelector((s: any) => s.catchLog);
@@ -358,7 +339,8 @@ export default function CreateCatchLog() {
   const [lang, setLang] = useState<Lang>("ta");
   const t = i18n[lang];
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  // ✅ steps: 1 Trip+Fish, 2 Scan many (+Location), 3 Auto Date/Time, 4 Photos+Save
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Trips
   const [tripOptions] = useState<TripItem[]>(DUMMY_TRIPS);
@@ -370,25 +352,86 @@ export default function CreateCatchLog() {
 
   // Required
   const [tripId, setTripId] = useState("");
-
-  // ✅ select by ID, show name
   const [fishId, setFishId] = useState<number | null>(null);
   const [fishName, setFishName] = useState("");
 
-  const [weightKg, setWeightKg] = useState("");
-  const [catchDate, setCatchDate] = useState<Date | null>(null);
-  const [catchTime, setCatchTime] = useState<Date | null>(new Date());
+  // ✅ MULTI-SCAN: scanned crateIds list
+  const [crateIds, setCrateIds] = useState<string[]>(() => (initialCrateId ? [initialCrateId] : []));
+  const crateCount = crateIds.length;
 
-  const [showDate, setShowDate] = useState(false);
-  const [showTime, setShowTime] = useState(false);
-
+  // Photos (shared for all in batch)
   const [images, setImages] = useState<string[]>([]);
+
+  // Network + pending
+  const [isOnline, setIsOnline] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+
+  // Camera permission + scan throttle
+  const [cameraPerm, requestCameraPerm] = useCameraPermissions();
+  const [canScan, setCanScan] = useState(true);
+
+  // ✅ Location
+  const [locPermGranted, setLocPermGranted] = useState<boolean>(false);
+  const [locLoading, setLocLoading] = useState<boolean>(false);
+  const [locError, setLocError] = useState<string | null>(null);
+  const [liveLoc, setLiveLoc] = useState<LiveLocation | null>(null);
+  const locSubRef = useRef<Location.LocationSubscription | null>(null);
 
   const tripRef = useRef<BottomSheetModal>(null);
   const fishRef = useRef<BottomSheetModal>(null);
 
-  const shownDate = fmtDate(catchDate);
-  const shownTime = fmtTime(catchTime);
+  // If crateId came from params, you can jump to step 3 (skip scanning)
+  useEffect(() => {
+    if (initialCrateId) {
+      setStep(3);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ✅ AUTO SYNC: on mount + on network change (FIXED: isInternetReachable can be null)
+  useEffect(() => {
+    let alive = true;
+
+    const refreshCount = async () => {
+      const c = await getQueueCount();
+      if (alive) setPendingCount(c);
+    };
+
+    const doFlush = async () => {
+      setSyncing(true);
+      try {
+        await flushQueue(async (payload: CatchLogPayload) => {
+          await dispatch(submitCatchLog(payload as any)).unwrap();
+        });
+      } finally {
+        await refreshCount();
+        if (alive) setSyncing(false);
+      }
+    };
+
+    refreshCount();
+
+    // initial online check + flush
+    NetInfo.fetch().then((s) => {
+      const online = !!s.isConnected && (s.isInternetReachable ?? true);
+      if (!alive) return;
+      setIsOnline(online);
+      if (online) doFlush();
+    });
+
+    const unsub = NetInfo.addEventListener((state) => {
+      const online = !!state.isConnected && (state.isInternetReachable ?? true);
+      if (!alive) return;
+      setIsOnline(online);
+      if (online) doFlush();
+    });
+
+    return () => {
+      alive = false;
+      unsub();
+    };
+  }, [dispatch]);
 
   // Fetch fish types
   useEffect(() => {
@@ -399,7 +442,7 @@ export default function CreateCatchLog() {
         setFishLoading(true);
         setFishError(null);
 
-        const res = await fetch("https://rootverse-backend.onrender.com/api/fish-types");
+        const res = await fetch("https://rootverse-backend-5qoo.onrender.com/api/fish-types");
         if (!res.ok) {
           const txt = await res.text().catch(() => "");
           throw new Error(`${res.status} ${txt || "Fish types request failed"}`);
@@ -425,43 +468,13 @@ export default function CreateCatchLog() {
     };
   }, [t.fishFailed]);
 
-  useEffect(() => {
-    if (!finalCrateId) {
-      Alert.alert("Missing QR", "No crateId provided. Please scan again.");
-      router.replace("/catch-logs");
-    }
-  }, [finalCrateId]);
-
   const fishPickerOptions: FishOption[] = useMemo(() => {
     return fishTypes
       .filter((f) => f?.id && fishNameOf(f))
-      .map((f) => ({
-        key: String(f.id),
-        label: fishNameOf(f),
-        id: f.id,
-      }));
+      .map((f) => ({ key: String(f.id), label: fishNameOf(f), id: f.id }));
   }, [fishTypes]);
 
-  const pickImages = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      return Alert.alert("Permission", "Allow photo access to upload images.");
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsMultipleSelection: true,
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-      selectionLimit: 6,
-    });
-
-    if (result.canceled) return;
-
-    const uris = result.assets.map((a) => a.uri);
-    setImages((prev) => [...prev, ...uris].slice(0, 10));
-  };
-
-  const removeImage = (uri: string) => setImages((prev) => prev.filter((u) => u !== uri));
+  const scanEnabled = !!tripId && !!fishId;
 
   const validateStep = () => {
     if (step === 1) {
@@ -470,8 +483,7 @@ export default function CreateCatchLog() {
       return true;
     }
     if (step === 2) {
-      if (!weightKg.trim()) return Alert.alert(t.required, t.errWeight), false;
-      if (!catchDate) return Alert.alert(t.required, t.errDate), false;
+      if (crateIds.length === 0) return Alert.alert(t.required, t.errQr), false;
       return true;
     }
     return true;
@@ -479,128 +491,237 @@ export default function CreateCatchLog() {
 
   const next = () => {
     if (!validateStep()) return;
-    setStep((s) => (s === 1 ? 2 : 3));
+    setStep((s) => (s === 1 ? 2 : s === 2 ? 3 : 4));
   };
 
-  const back = () => setStep((s) => (s === 3 ? 2 : 1));
+  const back = () => setStep((s) => (s === 4 ? 3 : s === 3 ? 2 : 1));
 
-  const save = async () => {
-    if (!finalCrateId) return Alert.alert("Missing QR", "crateId not found.");
-    if (!tripId) return Alert.alert(t.required, t.errTrip);
-    if (!fishId) return Alert.alert(t.required, t.errSpecies);
-    if (!weightKg.trim()) return Alert.alert(t.required, t.errWeight);
-    if (!catchDate) return Alert.alert(t.required, t.errDate);
+  /* ---------------- ✅ MULTI QR SCAN LOGIC ---------------- */
+  const addCrateId = (id: string) => {
+    const value = String(id || "").trim();
+    if (!value) return;
 
-    // dummy
-    const DEFAULT_RV_VESSEL_ID = 2;
-    const DEFAULT_OWNER_ID = 9;
+    setCrateIds((prev) => {
+      if (prev.includes(value)) return prev; // no duplicates
+      return [...prev, value];
+    });
+  };
+
+  const removeCrateId = (id: string) => setCrateIds((prev) => prev.filter((x) => x !== id));
+  const clearCrates = () => setCrateIds([]);
+
+  const onBarcodeScanned = (data: string) => {
+    if (!scanEnabled) return;
+
+    const value = String(data || "").trim();
+    if (!value) return;
+
+    if (!canScan) return;
+    setCanScan(false);
+
+    addCrateId(value);
+
+    // small throttle so camera doesn't fire multiple times for same QR
+    setTimeout(() => setCanScan(true), 350);
+  };
+
+  /* ---------------- Photos ---------------- */
+  const captureImageOnly = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) return Alert.alert("Permission", "Allow camera access to capture photos.");
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+      allowsEditing: false,
+      cameraType: ImagePicker.CameraType.back,
+    });
+
+    if (result.canceled) return;
+    const uri = result.assets?.[0]?.uri;
+    if (!uri) return;
+
+    setImages((prev) => [...prev, uri].slice(0, 10));
+  };
+
+  const removeImage = (uri: string) => setImages((prev) => prev.filter((u) => u !== uri));
+
+  // Auto preview (readonly UI only)
+  const nowPreview = useMemo(() => new Date(), [step, crateCount, tripId, fishId]);
+
+  /* ---------------- ✅ LIVE LOCATION (Step 2) ---------------- */
+  const stopLocation = () => {
+    try {
+      locSubRef.current?.remove();
+    } catch {}
+    locSubRef.current = null;
+  };
+
+  const startLocation = async () => {
+    setLocError(null);
+    setLocLoading(true);
 
     try {
-      console.log("SENDING fishId:", fishId, "fishName:", fishName);
+      const fg = await Location.requestForegroundPermissionsAsync();
+      const granted = fg.status === "granted";
+      setLocPermGranted(granted);
 
-      const result = await dispatch(
-        submitCatchLog({
-          linkedCrateId: finalCrateId,
-          tripId,
-          fishId: fishId, // ✅ ID only
-          rvVesselId: DEFAULT_RV_VESSEL_ID,
-          ownerId: DEFAULT_OWNER_ID,
-          weightKg: toNum(weightKg),
-          catchDate: fmtDate(catchDate),
-          catchTime: fmtTime(catchTime),
-          images,
-        } as any)
-      ).unwrap();
+      if (!granted) {
+        setLiveLoc(null);
+        setLocError(t.locDenied);
+        return;
+      }
 
-    const catchId = result?.id || result?.catchId || "Success";
-      Alert.alert(t.saved, `Catch ID: ${catchId}`);
+      const last = await Location.getLastKnownPositionAsync({});
+      if (last?.coords) {
+       setLiveLoc({
+  latitude: last.coords.latitude,
+  longitude: last.coords.longitude,
+  accuracy: last.coords.accuracy ?? null,
+  heading: last.coords.heading ?? null,
+  speed: last.coords.speed ?? null,
+  capturedAt: new Date(last.timestamp).toISOString(),
+});
 
-      router.replace({
-        pathname: "/catch-logs/details",
-        params: { crateId: finalCrateId },
-      });
+      }
+
+      stopLocation();
+      locSubRef.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 2000,
+          distanceInterval: 2,
+        },
+        (pos) => {
+          const c = pos.coords;
+          setLiveLoc({
+  latitude: c.latitude,
+  longitude: c.longitude,
+  accuracy: c.accuracy ?? null,
+  heading: c.heading ?? null,
+  speed: c.speed ?? null,
+  capturedAt: new Date(pos.timestamp).toISOString(),
+});
+
+        }
+      );
     } catch (e: any) {
-      Alert.alert("Error", String(e?.message || e));
+      setLiveLoc(null);
+      setLocError(String(e?.message || e));
+    } finally {
+      setLocLoading(false);
     }
+  };
+
+  // Start location ONLY when step 2 is active, stop otherwise
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      if (step !== 2) {
+        stopLocation();
+        return;
+      }
+      await startLocation();
+      if (!alive) stopLocation();
+    })();
+
+    return () => {
+      alive = false;
+      if (step === 2) stopLocation();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, lang]);
+
+  /* ---------------- ✅ SAVE BATCH (post many QRs) ---------------- */
+  const save = async () => {
+    if (!tripId) return Alert.alert(t.required, t.errTrip);
+    if (!fishId) return Alert.alert(t.required, t.errSpecies);
+    if (crateIds.length === 0) return Alert.alert(t.required, t.errQr);
+
+    const now = new Date();
+    const base = {
+      tripId,
+      fishId,
+      rvVesselId: 2, // TODO: replace with real
+      ownerId: 9, // TODO: replace with real
+      catchDate: fmtDate(now),
+      catchTime: fmtTime(now),
+      images,
+      ...(liveLoc
+  ? {
+      latitude: liveLoc.latitude,
+      longitude: liveLoc.longitude,
+    }
+  : {}),
+
+    };
+
+    // Build payloads for each scanned QR
+    const payloads: CatchLogPayload[] = crateIds.map((cid) => ({
+      ...(base as any),
+      linkedCrateId: cid,
+    }));
+
+    // OFFLINE: queue all
+    if (!isOnline) {
+      for (const p of payloads) await enqueueCatchLog(p);
+      const c = await getQueueCount();
+      setPendingCount(c);
+
+      Alert.alert(t.saved, t.offlineSaved);
+      // go somewhere safe - open first scanned details
+      router.replace({ pathname: "/catch-logs/details", params: { crateId: crateIds[0] } });
+      return;
+    }
+
+    // ONLINE: try post one by one.
+    // If network breaks in middle -> queue remaining automatically.
+    let ok = 0;
+    let fail = 0;
+
+    for (let i = 0; i < payloads.length; i++) {
+      const p = payloads[i];
+
+      try {
+        await dispatch(submitCatchLog(p as any)).unwrap();
+        ok++;
+      } catch (e: any) {
+        const msg = String(e?.message || e);
+        if (isNetworkishError(msg)) {
+          // queue this and remaining
+          const remaining = payloads.slice(i);
+          for (const rp of remaining) await enqueueCatchLog(rp);
+          fail += remaining.length;
+
+          const c = await getQueueCount();
+          setPendingCount(c);
+
+          Alert.alert(t.saved, `${t.offlineSaved}\n\n${t.batchResult(ok, fail)}`);
+          router.replace({ pathname: "/catch-logs/details", params: { crateId: crateIds[0] } });
+          return;
+        }
+
+        // non-network error: just count as failed (don’t block other QRs)
+        fail++;
+      }
+    }
+
+    // done
+    const c = await getQueueCount();
+    setPendingCount(c);
+
+    if (fail === 0) {
+      Alert.alert(t.saved, `✅ ${t.scanCount(ok)}`);
+    } else {
+      Alert.alert("Partial", t.batchResult(ok, fail));
+    }
+
+    router.replace({ pathname: "/catch-logs/details", params: { crateId: crateIds[0] } });
   };
 
   return (
     <View className={`flex-1 ${UI.bg}`}>
-      {/* Native pickers */}
-      <PickerModal
-        open={showDate && Platform.OS !== "web"}
-        title={t.date}
-        value={catchDate ?? new Date()}
-        mode="date"
-        onClose={() => setShowDate(false)}
-        onPick={(d) => setCatchDate(d)}
-      />
-      <PickerModal
-        open={showTime && Platform.OS !== "web"}
-        title={t.time}
-        value={catchTime ?? new Date()}
-        mode="time"
-        onClose={() => setShowTime(false)}
-        onPick={(d) => setCatchTime(d)}
-      />
-
-      {/* Trip sheet (simple) */}
-      <BottomSheetModal
-        ref={tripRef}
-        snapPoints={["45%", "75%"]}
-        enablePanDownToClose
-        backgroundStyle={{ borderRadius: 24 }}
-        handleIndicatorStyle={{ opacity: 0.35 }}
-      >
-        <BottomSheetView style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
-          <View className="flex-row items-center justify-between">
-            <Text className={`text-base font-bold ${UI.text}`}>{t.chooseTrip}</Text>
-            <Pressable
-              onPress={() => tripRef.current?.dismiss()}
-              className="rounded-full px-3 py-2 active:opacity-80"
-            >
-              <Text style={{ color: UI.accent }} className="text-sm font-semibold">
-                Done
-              </Text>
-            </Pressable>
-          </View>
-
-          <ScrollView className="mt-3" keyboardShouldPersistTaps="handled">
-            {tripOptions.map((x) => {
-              const active = x.tripId === tripId;
-              return (
-                <Pressable
-                  key={x.tripId}
-                  onPress={() => {
-                    setTripId(x.tripId);
-                    tripRef.current?.dismiss();
-                  }}
-                  className={`mb-2 rounded-2xl border px-4 py-3 active:opacity-80 ${
-                    active ? `bg-[#fff3e7] border-[#ffd9b6]` : `${UI.border} bg-white`
-                  }`}
-                >
-                  <Text className={`text-sm font-semibold ${UI.text}`}>{x.tripId}</Text>
-                  <Text className={`mt-1 text-xs ${UI.muted}`}>{x.port}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </BottomSheetView>
-      </BottomSheetModal>
-
-      {/* ✅ Fish picker: select by id, show name */}
-      <PickerSheetObj<FishOption>
-        title={t.chooseSpecies}
-        valueKey={fishId ? String(fishId) : ""}
-        options={fishPickerOptions}
-        onSelect={(item) => {
-          setFishId(item.id);       // ✅ store id
-          setFishName(item.label);  // ✅ show name
-        }}
-        sheetRef={fishRef}
-        searchPlaceholder="Search fish..."
-      />
-
       <ScrollView contentContainerClassName="p-4 pb-10">
         {/* Header */}
         <Card className="p-4">
@@ -619,12 +740,33 @@ export default function CreateCatchLog() {
           </View>
 
           <View className="mt-3">
-            <Text className={`text-xs ${UI.muted}`}>QR Code</Text>
-            <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>{finalCrateId}</Text>
+            <Text className={`text-xs ${UI.muted}`}>{t.scannedList}</Text>
+            <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>
+              {crateCount ? t.scanCount(crateCount) : "—"}
+            </Text>
           </View>
 
           <View className={`mt-3 rounded-xl border ${UI.chipBorder} ${UI.chipBg} px-3 py-2`}>
             <Text className={`text-xs font-semibold ${UI.text}`}>{t.step(step)}</Text>
+          </View>
+
+          {/* Network / Pending */}
+          <View className="mt-3">
+            <Text className={`text-[11px] ${UI.muted}`}>
+              Network:{" "}
+              <Text className="font-bold" style={{ color: isOnline ? "#1f7a3f" : "#b45309" }}>
+                {isOnline ? "ONLINE" : "OFFLINE"}
+              </Text>
+              {syncing ? `  •  ${t.syncing}` : ""}
+            </Text>
+
+            {pendingCount > 0 ? (
+              <View className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                <Text className="text-xs font-semibold text-amber-800">
+                  {t.pending}: {pendingCount} {isOnline ? "" : "(offline)"}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           {fishLoading ? (
@@ -639,6 +781,63 @@ export default function CreateCatchLog() {
             </View>
           ) : null}
         </Card>
+
+        {/* Trip sheet */}
+        <BottomSheetModal
+          ref={tripRef}
+          snapPoints={["45%", "75%"]}
+          enablePanDownToClose
+          backgroundStyle={{ borderRadius: 24 }}
+          handleIndicatorStyle={{ opacity: 0.35 }}
+        >
+          <BottomSheetView style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
+            <View className="flex-row items-center justify-between">
+              <Text className={`text-base font-bold ${UI.text}`}>{t.chooseTrip}</Text>
+              <Pressable
+                onPress={() => tripRef.current?.dismiss()}
+                className="rounded-full px-3 py-2 active:opacity-80"
+              >
+                <Text style={{ color: UI.accent }} className="text-sm font-semibold">
+                  Done
+                </Text>
+              </Pressable>
+            </View>
+
+            <ScrollView className="mt-3" keyboardShouldPersistTaps="handled">
+              {tripOptions.map((x) => {
+                const active = x.tripId === tripId;
+                return (
+                  <Pressable
+                    key={x.tripId}
+                    onPress={() => {
+                      setTripId(x.tripId);
+                      tripRef.current?.dismiss();
+                    }}
+                    className={`mb-2 rounded-2xl border px-4 py-3 active:opacity-80 ${
+                      active ? `bg-[#fff3e7] border-[#ffd9b6]` : `${UI.border} bg-white`
+                    }`}
+                  >
+                    <Text className={`text-sm font-semibold ${UI.text}`}>{x.tripId}</Text>
+                    <Text className={`mt-1 text-xs ${UI.muted}`}>{x.port}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </BottomSheetView>
+        </BottomSheetModal>
+
+        {/* Fish picker */}
+        <PickerSheetObj<FishOption>
+          title={t.chooseSpecies}
+          valueKey={fishId ? String(fishId) : ""}
+          options={fishPickerOptions}
+          onSelect={(item) => {
+            setFishId(item.id);
+            setFishName(item.label);
+          }}
+          sheetRef={fishRef}
+          searchPlaceholder="Search fish..."
+        />
 
         {/* STEP 1 */}
         {step === 1 ? (
@@ -660,7 +859,6 @@ export default function CreateCatchLog() {
                 placeholder={t.chooseSpecies}
                 hint={fishLoading ? t.fishLoading : "Tap ▾"}
                 onPress={() => {
-                  // ✅ opens sheet only
                   if (!fishLoading) fishRef.current?.present();
                 }}
               />
@@ -677,39 +875,212 @@ export default function CreateCatchLog() {
           </View>
         ) : null}
 
-        {/* STEP 2 */}
+        {/* STEP 2: Scan many + location */}
         {step === 2 ? (
           <View className="mt-4 gap-3">
-            <FieldCard>
-              <Text className={`text-xs ${UI.muted}`}>{`✅ ${t.weight} (${t.required})`}</Text>
-              <TextInput
-                value={weightKg}
-                onChangeText={setWeightKg}
-                keyboardType="numeric"
-                placeholder={t.weightPH}
-                className={`mt-1 text-base ${UI.text}`}
-              />
-            </FieldCard>
+            <Card className="p-4">
+              <View className="flex-row items-center gap-2">
+                <Ionicons name="qr-code-outline" size={20} color={UI.accent} />
+                <Text className={`text-sm font-extrabold ${UI.text}`}>{t.scanTitle}</Text>
+              </View>
 
-            <FieldCard>
-              <DateField
-                label={`✅ ${t.date} (${t.required})`}
-                value={shownDate}
-                placeholder="YYYY-MM-DD"
-                hint={t.pickDate}
-                onPress={() => setShowDate(true)}
-              />
-            </FieldCard>
+              <Text className={`mt-1 text-[11px] ${UI.muted}`}>
+                {scanEnabled ? t.scanReady : t.scanHint}
+              </Text>
 
-            <FieldCard>
-              <DateField
-                label={`${t.time} (${t.optional})`}
-                value={shownTime}
-                placeholder="HH:MM:SS"
-                hint={t.pickTime}
-                onPress={() => setShowTime(true)}
-              />
-            </FieldCard>
+              {/* Location */}
+              <View className={`mt-3 rounded-2xl border ${UI.border} bg-[#fbf6f1] px-3 py-3`}>
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center gap-2">
+                    <Ionicons name="location-outline" size={18} color={UI.accent} />
+                    <Text className={`text-sm font-extrabold ${UI.text}`}>{t.locTitle}</Text>
+                  </View>
+
+                  <Pressable
+                    onPress={startLocation}
+                    className="rounded-full border border-[#ead7c8] bg-white px-3 py-2 active:opacity-80"
+                  >
+                    <Text className={`text-xs font-semibold ${UI.text}`}>
+                      {locLoading ? "..." : t.locRetry}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {!locPermGranted && locError ? (
+                  <View className="mt-2">
+                    <Text className="text-xs font-semibold text-rose-700">{locError}</Text>
+                    <Pressable
+                      onPress={startLocation}
+                      className="mt-2 rounded-2xl px-4 py-3 active:opacity-80"
+                      style={{ backgroundColor: UI.accent }}
+                    >
+                      <Text className="text-center text-white font-extrabold">{t.locGrant}</Text>
+                    </Pressable>
+                  </View>
+                ) : locLoading && !liveLoc ? (
+                  <Text className={`mt-2 text-xs ${UI.muted}`}>{t.locGetting}</Text>
+                ) : liveLoc ? (
+                  <View className="mt-2">
+                    <Text className={`text-xs ${UI.muted}`}>Lat / Lng</Text>
+                    <Text className={`mt-1 text-sm font-extrabold ${UI.text}`}>
+                      {liveLoc.latitude.toFixed(6)}, {liveLoc.longitude.toFixed(6)}
+
+                    </Text>
+
+                    <View className="mt-2 flex-row flex-wrap gap-2">
+                      <View className="rounded-full border border-[#ead7c8] bg-white px-3 py-1">
+                        <Text className={`text-[11px] ${UI.text}`}>
+                          acc: {liveLoc.accuracy ? `${Math.round(liveLoc.accuracy)}m` : "—"}
+                        </Text>
+                      </View>
+                      <View className="rounded-full border border-[#ead7c8] bg-white px-3 py-1">
+                        <Text className={`text-[11px] ${UI.text}`}>
+                          speed: {liveLoc.speed != null ? `${liveLoc.speed.toFixed(1)} m/s` : "—"}
+                        </Text>
+                      </View>
+                      <View className="rounded-full border border-[#ead7c8] bg-white px-3 py-1">
+                        <Text className={`text-[11px] ${UI.text}`}>
+                          time: {new Date(liveLoc.capturedAt).toLocaleTimeString()}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                ) : locError ? (
+                  <Text className="mt-2 text-xs font-semibold text-rose-700">{locError}</Text>
+                ) : (
+                  <Text className={`mt-2 text-xs ${UI.muted}`}>{t.locGetting}</Text>
+                )}
+              </View>
+
+              {/* Camera */}
+              <View className="mt-3 overflow-hidden rounded-2xl border border-[#ead7c8] bg-black">
+                {!cameraPerm?.granted ? (
+                  <View className="p-4">
+                    <Text className="text-white text-sm font-semibold">{t.camDenied}</Text>
+                    <Pressable
+                      onPress={requestCameraPerm}
+                      className="mt-3 rounded-2xl px-4 py-3 active:opacity-80"
+                      style={{ backgroundColor: UI.accent }}
+                    >
+                      <Text className="text-center text-white font-extrabold">{t.grantCam}</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <View style={{ height: 320 }}>
+                    <CameraView
+                      style={{ flex: 1 }}
+                      facing="back"
+                      barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                      onBarcodeScanned={(e) => {
+                        if (!scanEnabled) return;
+                        onBarcodeScanned(String((e as any)?.data || ""));
+                      }}
+                    />
+                    <View className="absolute bottom-0 left-0 right-0 p-3 bg-black/60">
+                      <Text className="text-white text-xs">
+                        Trip: <Text className="font-bold">{tripId || "—"}</Text> | Fish:{" "}
+                        <Text className="font-bold">{fishName || "—"}</Text>
+                      </Text>
+                      <Text className="text-white text-[11px] mt-1">
+                        {scanEnabled ? "Scan QRs one by one. They will be added to the list." : "Select Trip + Fish first (Back)."}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+
+              {/* Scanned list */}
+              <View className="mt-3">
+                <View className="flex-row items-center justify-between">
+                  <Text className={`text-sm font-extrabold ${UI.text}`}>
+                    {t.scannedList} • {t.scanCount(crateCount)}
+                  </Text>
+
+                  {crateCount > 0 ? (
+                    <Pressable
+                      onPress={clearCrates}
+                      className="rounded-full border border-[#ead7c8] bg-white px-3 py-2 active:opacity-80"
+                    >
+                      <Text className={`text-xs font-semibold ${UI.text}`}>{t.clearAll}</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+
+                {crateCount === 0 ? (
+                  <View className={`mt-2 rounded-xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}>
+                    <Text className={`text-xs ${UI.muted}`}>{t.errQr}</Text>
+                  </View>
+                ) : (
+                  <View className="mt-2 gap-2">
+                    {crateIds.map((cid) => (
+                      <View
+                        key={cid}
+                        className={`flex-row items-center justify-between rounded-xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}
+                      >
+                        <Text className={`flex-1 text-xs font-semibold ${UI.text}`} numberOfLines={1}>
+                          {cid}
+                        </Text>
+                        <Pressable
+                          onPress={() => removeCrateId(cid)}
+                          className="ml-3 rounded-full bg-rose-100 px-3 py-1 active:opacity-80"
+                        >
+                          <Text className="text-xs font-semibold text-rose-700">{t.remove}</Text>
+                        </Pressable>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </Card>
+
+            <View className="mt-2 flex-row gap-3">
+              <Pressable
+                className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-4 active:opacity-80`}
+                onPress={back}
+              >
+                <Text className={`text-center ${UI.text} text-base font-extrabold`}>{t.back}</Text>
+              </Pressable>
+
+              <Pressable
+                className="flex-1 rounded-2xl px-4 py-4 active:opacity-90"
+                style={{ backgroundColor: UI.accent, opacity: crateCount > 0 ? 1 : 0.6 }}
+                onPress={next}
+                disabled={crateCount === 0}
+              >
+                <Text className="text-center text-white text-base font-extrabold">{t.next}</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+
+        {/* STEP 3: Auto Date/Time */}
+        {step === 3 ? (
+          <View className="mt-4 gap-3">
+            <Card className="p-4">
+              <View className="flex-row items-center gap-2">
+                <Ionicons name="time-outline" size={20} color={UI.accent} />
+                <Text className={`text-sm font-extrabold ${UI.text}`}>{t.dateTime}</Text>
+              </View>
+
+              <View className={`mt-3 rounded-xl border ${UI.border} bg-[#fbf6f1] px-3 py-3`}>
+                <Text className={`text-xs ${UI.muted}`}>{t.date}</Text>
+                <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>{fmtDate(nowPreview)}</Text>
+
+                <View className="mt-3 h-[1px] bg-[#ead7c8]" />
+
+                <Text className={`mt-3 text-xs ${UI.muted}`}>{t.time}</Text>
+                <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>{fmtTime(nowPreview)}</Text>
+
+                <Text className={`mt-2 text-[11px] ${UI.muted}`}>{t.autoHint}</Text>
+
+                <View className={`mt-3 rounded-xl border ${UI.border} bg-white px-3 py-2`}>
+                  <Text className={`text-xs ${UI.muted}`}>{t.scannedList}</Text>
+                  <Text className={`mt-1 text-sm font-extrabold ${UI.text}`}>
+                    {t.scanCount(crateCount)}
+                  </Text>
+                </View>
+              </View>
+            </Card>
 
             <View className="mt-2 flex-row gap-3">
               <Pressable
@@ -730,8 +1101,8 @@ export default function CreateCatchLog() {
           </View>
         ) : null}
 
-        {/* STEP 3 */}
-        {step === 3 ? (
+        {/* STEP 4: Photos + Save batch */}
+        {step === 4 ? (
           <View className="mt-4">
             <Card className="p-4">
               <View className="flex-row items-center gap-2">
@@ -739,8 +1110,18 @@ export default function CreateCatchLog() {
                 <Text className={`text-sm font-extrabold ${UI.text}`}>{t.addPhoto}</Text>
               </View>
 
+              <View className={`mt-2 rounded-xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}>
+                <Text className={`text-xs ${UI.muted}`}>{t.scannedList}</Text>
+                <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>
+                  {t.scanCount(crateCount)}
+                </Text>
+                <Text className={`mt-1 text-[11px] ${UI.muted}`}>
+                  (This will create {crateCount} catch log(s) using same Trip + Fish + Photos)
+                </Text>
+              </View>
+
               <Pressable
-                onPress={pickImages}
+                onPress={captureImageOnly}
                 className="mt-3 rounded-2xl border px-4 py-3 active:opacity-90"
                 style={{ borderColor: UI.accent, backgroundColor: "#fff3e7" }}
               >
@@ -784,10 +1165,10 @@ export default function CreateCatchLog() {
                 className="flex-1 rounded-2xl px-4 py-4 active:opacity-90"
                 style={{ backgroundColor: UI.accent, opacity: posting ? 0.7 : 1 }}
                 onPress={save}
-                disabled={posting}
+                disabled={posting || crateCount === 0}
               >
                 <Text className="text-center text-white text-base font-extrabold">
-                  {posting ? (lang === "ta" ? "சேமிக்கிறது..." : "Saving...") : t.save}
+                  {posting ? (lang === "ta" ? "சேமிக்கிறது..." : "Saving...") : `${t.save} (${crateCount})`}
                 </Text>
               </Pressable>
             </View>
