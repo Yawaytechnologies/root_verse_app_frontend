@@ -15,7 +15,10 @@ import loginReducer from "./login.slice";
 import meReducer from "./me.slice";
 import registrationReducer from "./registration.slice";
 
-// ---- ui slice (one level up: src/store/theme.slice.ts) ----
+// ---- quality ---- ✅ ADD
+import qrDetailsReducer from "../quality/qrDetails.slice";
+
+// ---- ui slice ----
 import themeReducer from "../theme.slice";
 
 export const store = configureStore({
@@ -33,6 +36,9 @@ export const store = configureStore({
     location: locationReducer,
     login: loginReducer,
     me: meReducer,
+
+    // ✅ quality
+    qrDetails: qrDetailsReducer,
 
     // ui
     theme: themeReducer,

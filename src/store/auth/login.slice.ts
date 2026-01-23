@@ -1,11 +1,11 @@
-import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import { ENV } from "../../config/env";
 
 export const TOKEN_KEY = "auth_token"; // ✅ MUST match me.slice.ts
 
 type ApprovalStatus = "APPROVED" | "PENDING_APPROVAL" | "REJECTED";
-type RootverseType = "WILD_CAPTURE" | "AQUACULTURE" | "MARICULTURE";
+export type RootverseType = "WILD_CAPTURE" | "AQUACULTURE" | "MARICULTURE" | "QUALITY_CHECKER";
 
 type LoginRes = {
   token?: string;
@@ -16,6 +16,7 @@ type LoginRes = {
   user?: {
     status?: ApprovalStatus;
     rootverse_type?: RootverseType;
+    [key: string]: any;
   };
   data?: any; // some backends wrap here
   [key: string]: any;
@@ -37,6 +38,37 @@ const initialState: LoginState = {
   rootverse_type: null,
 };
 
+/* -------------------------------------------
+   ✅ QC DUMMY ONLY (tomorrow demo)
+-------------------------------------------- */
+const QC_DEMO_ENABLED = true;
+
+// put your QC demo phone(s) here
+const QC_DEMO_PHONES = new Set<string>(["9876543288"]);
+
+const QC_DEMO_PAYLOAD: {
+  token: string;
+  status: ApprovalStatus;
+  rootverse_type: RootverseType;
+  user: any;
+} = {
+  token: "demo-qc-token",
+  status: "APPROVED",
+  rootverse_type: "QUALITY_CHECKER",
+  user: {
+    id: 101,
+    checker_name: "sam",
+    checker_email: "sam.qc@gmail.com",
+    checker_phone: "9876543288",
+    state_id: 1,
+    district_id: 4,
+    is_active: true,
+    rootverse_type: "QUALITY_CHECKER",
+  },
+};
+
+/* ------------------------------------------- */
+
 function pickToken(payload: any): string | null {
   const token =
     payload?.token ||
@@ -52,15 +84,29 @@ function pickToken(payload: any): string | null {
 }
 
 export const loginWithPhone = createAsyncThunk<
-  { token: string; status: ApprovalStatus | null; rootverse_type: RootverseType | null },
+  { token: string; status: ApprovalStatus | null; rootverse_type: RootverseType | null; user?: any },
   string,
   { rejectValue: string }
 >("login/withPhone", async (phone_no, { rejectWithValue }) => {
   try {
+    const cleanPhone = String(phone_no || "").trim();
+
+    // ✅ QC demo bypass ONLY
+    if (QC_DEMO_ENABLED && QC_DEMO_PHONES.has(cleanPhone)) {
+      await AsyncStorage.setItem(TOKEN_KEY, QC_DEMO_PAYLOAD.token);
+      return {
+        token: QC_DEMO_PAYLOAD.token,
+        status: QC_DEMO_PAYLOAD.status,
+        rootverse_type: QC_DEMO_PAYLOAD.rootverse_type,
+        user: QC_DEMO_PAYLOAD.user,
+      };
+    }
+
+    // ✅ OWNERS = REAL BACKEND (your old working API)
     const res = await fetch(`${ENV.API_BASE}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ phone_no }), // ✅ must match backend
+      body: JSON.stringify({ phone_no: cleanPhone }),
     });
 
     const text = await res.text();
@@ -68,7 +114,6 @@ export const loginWithPhone = createAsyncThunk<
     try {
       data = text ? JSON.parse(text) : {};
     } catch {
-      // backend returned non-json
       return rejectWithValue("LOGIN_NOT_JSON");
     }
 
@@ -78,7 +123,6 @@ export const loginWithPhone = createAsyncThunk<
 
     const token = pickToken(data);
     if (!token) {
-      // log once to catch backend response shape during dev
       console.log("LOGIN_RESPONSE_NO_TOKEN =>", data);
       return rejectWithValue("NO_TOKEN");
     }
@@ -90,7 +134,7 @@ export const loginWithPhone = createAsyncThunk<
     const rootverse_type: RootverseType | null =
       data?.rootverse_type ?? data?.user?.rootverse_type ?? null;
 
-    return { token, status, rootverse_type };
+    return { token, status, rootverse_type, user: data?.user ?? data?.data?.user ?? null };
   } catch (e: any) {
     return rejectWithValue(e?.message || "Network error");
   }
