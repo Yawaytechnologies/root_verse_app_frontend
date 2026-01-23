@@ -38,35 +38,6 @@ const initialState: LoginState = {
   rootverse_type: null,
 };
 
-/* -------------------------------------------
-   ✅ QC DUMMY ONLY (tomorrow demo)
--------------------------------------------- */
-const QC_DEMO_ENABLED = true;
-
-// put your QC demo phone(s) here
-const QC_DEMO_PHONES = new Set<string>(["9876543288"]);
-
-const QC_DEMO_PAYLOAD: {
-  token: string;
-  status: ApprovalStatus;
-  rootverse_type: RootverseType;
-  user: any;
-} = {
-  token: "demo-qc-token",
-  status: "APPROVED",
-  rootverse_type: "QUALITY_CHECKER",
-  user: {
-    id: 101,
-    checker_name: "sam",
-    checker_email: "sam.qc@gmail.com",
-    checker_phone: "9876543288",
-    state_id: 1,
-    district_id: 4,
-    is_active: true,
-    rootverse_type: "QUALITY_CHECKER",
-  },
-};
-
 /* ------------------------------------------- */
 
 function pickToken(payload: any): string | null {
@@ -91,16 +62,7 @@ export const loginWithPhone = createAsyncThunk<
   try {
     const cleanPhone = String(phone_no || "").trim();
 
-    // ✅ QC demo bypass ONLY
-    if (QC_DEMO_ENABLED && QC_DEMO_PHONES.has(cleanPhone)) {
-      await AsyncStorage.setItem(TOKEN_KEY, QC_DEMO_PAYLOAD.token);
-      return {
-        token: QC_DEMO_PAYLOAD.token,
-        status: QC_DEMO_PAYLOAD.status,
-        rootverse_type: QC_DEMO_PAYLOAD.rootverse_type,
-        user: QC_DEMO_PAYLOAD.user,
-      };
-    }
+  
 
     // ✅ OWNERS = REAL BACKEND (your old working API)
     const res = await fetch(`${ENV.API_BASE}/api/auth/login`, {
