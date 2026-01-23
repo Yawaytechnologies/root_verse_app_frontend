@@ -1,7 +1,10 @@
-import React, { useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import React, { useMemo, useState } from "react";
+import { Platform, Pressable, ScrollView, Text, View } from "react-native";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 import QcScannerScreen from "./QcScannerScreen";
 import QcScanViewDetailsScreen from "./QcScanViewDetailsScreen";
@@ -10,8 +13,14 @@ export type Division = "WILD" | "AQUA" | "MARICULTURE";
 
 export type InspectorInfo = {
   name: string;
-  zone: string;
-  id: string;
+
+  // ✅ now support both name + id forms
+  state_id?: number;
+  district_id?: number;
+  state_name?: string;
+  district_name?: string;
+
+  id: string; // display id (checker_code or qc id)
   divisionLabel: string;
 };
 
@@ -32,10 +41,30 @@ export type CompletedInspection = {
 type Props = {
   division: Division;
   inspector: InspectorInfo;
-  totalInspections: number; // pass completed.length
+  totalInspections: number;
   completed: CompletedInspection[];
   onViewInspection: (id: string) => void;
 };
+
+function formatZone(i: InspectorInfo) {
+  // ✅ BEST: show names if backend provides them
+  const dName = (i.district_name || "").trim();
+  const sName = (i.state_name || "").trim();
+
+  if (dName && sName) return `${dName}, ${sName}`;
+  if (sName) return sName;
+  if (dName) return dName;
+
+  // fallback: show ids so at least something appears
+  const dId = typeof i.district_id === "number" ? String(i.district_id) : "";
+  const sId = typeof i.state_id === "number" ? String(i.state_id) : "";
+
+  if (dId && sId) return `District #${dId}, State #${sId}`;
+  if (sId) return `State #${sId}`;
+  if (dId) return `District #${dId}`;
+
+  return "—";
+}
 
 export default function QualityInspectorDashboard({
   division,
@@ -47,25 +76,20 @@ export default function QualityInspectorDashboard({
   const insets = useSafeAreaInsets();
   const theme = useMemo(() => getTheme(division), [division]);
 
-  // ✅ 3 tabs now
-  const [tab, setTab] = useState<"scanner" | "completed" | "scan_view">("scanner");
+  const [tab, setTab] = useState<"scanner" | "completed" | "scan_view">(
+    "scanner",
+  );
   const [lang, setLang] = useState<"en" | "ta">("en");
 
   const completedCount = completed.length;
 
-  // ✅ safe camera import (web-safe)
-  const CameraView = useMemo(() => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const mod = require("expo-camera");
-      return mod?.CameraView || mod?.Camera || null;
-    } catch {
-      return null;
-    }
-  }, []);
+  const zoneText = useMemo(() => formatZone(inspector), [inspector]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#030712" }} edges={["top"]}>
+    <SafeAreaView
+      style={{ flex: 1, backgroundColor: "#030712" }}
+      edges={["top"]}
+    >
       {/* ===== Header ===== */}
       <View
         style={{
@@ -98,7 +122,11 @@ export default function QualityInspectorDashboard({
                 justifyContent: "center",
               }}
             >
-              <Ionicons name="shield-checkmark-outline" size={22} color="#fff" />
+              <Ionicons
+                name="shield-checkmark-outline"
+                size={22}
+                color="#fff"
+              />
             </View>
 
             <View style={{ marginTop: -2 }}>
@@ -126,7 +154,9 @@ export default function QualityInspectorDashboard({
               marginTop: -2,
             }}
           >
-            <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900" }}>
+            <Text
+              style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900" }}
+            >
               EN
             </Text>
 
@@ -152,7 +182,9 @@ export default function QualityInspectorDashboard({
               />
             </View>
 
-            <Text style={{ color: "rgba(255,255,255,0.75)", fontWeight: "900" }}>
+            <Text
+              style={{ color: "rgba(255,255,255,0.75)", fontWeight: "900" }}
+            >
               தமிழ்
             </Text>
           </Pressable>
@@ -186,6 +218,7 @@ export default function QualityInspectorDashboard({
                 {inspector.name}
               </Text>
 
+              {/* ✅ zone now shows names (district_name, state_name) */}
               <Text
                 style={{
                   color: "rgba(255,255,255,0.92)",
@@ -193,7 +226,8 @@ export default function QualityInspectorDashboard({
                   fontSize: 13,
                 }}
               >
-                {lang === "en" ? "Quality Inspector" : "தர ஆய்வாளர்"} • {inspector.zone}
+                {lang === "en" ? "Quality Inspector" : "தர ஆய்வாளர்"} •{" "}
+                {zoneText}
               </Text>
 
               <Text
@@ -260,7 +294,6 @@ export default function QualityInspectorDashboard({
               activeColor={theme.scannerActive}
               onPress={() => setTab("scanner")}
             />
-
             <MiniTab
               active={tab === "completed"}
               label={`${lang === "en" ? "Completed" : "நிறைவு"} (${completedCount})`}
@@ -268,7 +301,6 @@ export default function QualityInspectorDashboard({
               activeColor={theme.completedActive}
               onPress={() => setTab("completed")}
             />
-
             <MiniTab
               active={tab === "scan_view"}
               label={lang === "en" ? "Scan & View" : "ஸ்கேன் & காண்க"}
@@ -282,7 +314,6 @@ export default function QualityInspectorDashboard({
         {/* ===== Content ===== */}
         <View style={{ paddingHorizontal: 16, paddingVertical: 14 }}>
           {tab === "scanner" ? (
-            // ✅ QC FORM SCANNER: no need to fetch details now, only popup form
             <QcScannerScreen division={division} lang={lang} />
           ) : tab === "completed" ? (
             <>
@@ -293,7 +324,6 @@ export default function QualityInspectorDashboard({
               <View style={{ marginTop: 12, gap: 14 }}>
                 {completed.map((c) => (
                   <Card key={c.id}>
-                    {/* keep your completed card UI exactly */}
                     <View
                       style={{
                         flexDirection: "row",
@@ -301,10 +331,20 @@ export default function QualityInspectorDashboard({
                         gap: 10,
                       }}
                     >
-                      <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}
+                      >
                         <Pill
                           text={c.statusBadge}
-                          tone={c.statusBadge === "Approved" ? "approved" : "rejected"}
+                          tone={
+                            c.statusBadge === "Approved"
+                              ? "approved"
+                              : "rejected"
+                          }
                         />
                         {!!c.tag && <Pill text={c.tag} tone="tag" />}
                       </View>
@@ -313,7 +353,12 @@ export default function QualityInspectorDashboard({
                         <Text style={{ color: "rgba(255,255,255,0.55)" }}>
                           Inspected:
                         </Text>
-                        <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "800" }}>
+                        <Text
+                          style={{
+                            color: "rgba(255,255,255,0.85)",
+                            fontWeight: "800",
+                          }}
+                        >
                           {c.inspectedDate}
                         </Text>
                       </View>
@@ -330,24 +375,40 @@ export default function QualityInspectorDashboard({
                       {c.title}
                     </Text>
 
-                    <Text style={{ color: "rgba(255,255,255,0.7)", marginTop: 6 }}>
+                    <Text
+                      style={{ color: "rgba(255,255,255,0.7)", marginTop: 6 }}
+                    >
                       Farmer: {c.farmer}
                     </Text>
 
                     {division === "AQUA" ? (
                       <>
-                        <View style={{ flexDirection: "row", marginTop: 14, gap: 12 }}>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            marginTop: 14,
+                            gap: 12,
+                          }}
+                        >
                           <Info label="Quantity" value={c.quantity || "—"} />
                           <Info label="Water Temp" value={c.waterTemp ?? "—"} />
                         </View>
 
-                        <View style={{ flexDirection: "row", marginTop: 14, gap: 12 }}>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            marginTop: 14,
+                            gap: 12,
+                          }}
+                        >
                           <Info label="pH Level" value={c.phLevel ?? "—"} />
                           <Info label="Grade" value={c.grade ?? "—"} />
                         </View>
 
                         <View style={{ marginTop: 14 }}>
-                          <Text style={{ color: "rgba(255,255,255,0.55)" }}>Quality</Text>
+                          <Text style={{ color: "rgba(255,255,255,0.55)" }}>
+                            Quality
+                          </Text>
                           <Text
                             style={{
                               color: "#34D399",
@@ -385,7 +446,13 @@ export default function QualityInspectorDashboard({
                         justifyContent: "center",
                       }}
                     >
-                      <Text style={{ color: "white", fontWeight: "900", fontSize: 15 }}>
+                      <Text
+                        style={{
+                          color: "white",
+                          fontWeight: "900",
+                          fontSize: 15,
+                        }}
+                      >
                         View
                       </Text>
                     </Pressable>
@@ -394,7 +461,6 @@ export default function QualityInspectorDashboard({
               </View>
             </>
           ) : (
-            // ✅ SCAN & VIEW DETAILS: scanner + manual input + fetch FILLED + show details
             <QcScanViewDetailsScreen division={division} lang={lang} />
           )}
         </View>
@@ -473,7 +539,13 @@ function Card({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Pill({ text, tone }: { text: string; tone: "tag" | "approved" | "rejected" }) {
+function Pill({
+  text,
+  tone,
+}: {
+  text: string;
+  tone: "tag" | "approved" | "rejected";
+}) {
   const bg =
     tone === "approved"
       ? "rgba(16, 185, 129, 0.16)"
@@ -508,7 +580,14 @@ function Info({ label, value }: { label: string; value: string }) {
   return (
     <View style={{ flex: 1 }}>
       <Text style={{ color: "rgba(255,255,255,0.45)" }}>{label}</Text>
-      <Text style={{ color: "white", fontWeight: "900", marginTop: 4, fontSize: 16 }}>
+      <Text
+        style={{
+          color: "white",
+          fontWeight: "900",
+          marginTop: 4,
+          fontSize: 16,
+        }}
+      >
         {value}
       </Text>
     </View>
@@ -526,8 +605,17 @@ function FieldRow({
 }) {
   return (
     <View>
-      <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>{label}</Text>
-      <Text style={{ color: valueColor ?? "white", fontWeight: "900", marginTop: 4, fontSize: 16 }}>
+      <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>
+        {label}
+      </Text>
+      <Text
+        style={{
+          color: valueColor ?? "white",
+          fontWeight: "900",
+          marginTop: 4,
+          fontSize: 16,
+        }}
+      >
         {value}
       </Text>
     </View>
@@ -536,8 +624,20 @@ function FieldRow({
 
 function getTheme(division: Division) {
   if (division === "AQUA")
-    return { bannerFrom: "#1D4ED8", scannerActive: "#3b82f6", completedActive: "#34D399" };
+    return {
+      bannerFrom: "#1D4ED8",
+      scannerActive: "#3b82f6",
+      completedActive: "#34D399",
+    };
   if (division === "MARICULTURE")
-    return { bannerFrom: "#A855F7", scannerActive: "#3b82f6", completedActive: "#34D399" };
-  return { bannerFrom: "#0EA5A4", scannerActive: "#3b82f6", completedActive: "#34D399" };
+    return {
+      bannerFrom: "#A855F7",
+      scannerActive: "#3b82f6",
+      completedActive: "#34D399",
+    };
+  return {
+    bannerFrom: "#0EA5A4",
+    scannerActive: "#3b82f6",
+    completedActive: "#34D399",
+  };
 }

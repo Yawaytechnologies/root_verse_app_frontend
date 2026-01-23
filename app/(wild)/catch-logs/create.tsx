@@ -1,3 +1,4 @@
+// app/(wild)/catch-logs/create.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
@@ -11,9 +12,15 @@ import NetInfo from "@react-native-community/netinfo";
 // ✅ live location
 import * as Location from "expo-location";
 
+// ✅ token storage (kept, even if owner endpoint doesn't require it)
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
 // ✅ Redux
 import { useAppDispatch, useAppSelector } from "../../../src/store/hooks";
 import { submitCatchLog } from "../../../src/services/wild/catchLog.slice";
+
+// ✅ get logged-in user id
+import { fetchMe } from "../../../src/store/auth/me.slice";
 
 // ✅ Offline queue
 import {
@@ -45,7 +52,6 @@ type LiveLocation = {
   speed?: number | null;
   capturedAt: string; // ISO
 };
-
 
 /* ---------------- DUMMY TRIPS ---------------- */
 const DUMMY_TRIPS: TripItem[] = [
@@ -105,8 +111,7 @@ const i18n = {
     errSpecies: "மீன் வகையை தேர்வு செய்யவும்",
     errQr: "குறைந்தது 1 QR ஸ்கேன் செய்யவும்",
 
-    batchResult: (ok: number, fail: number) =>
-      `Uploaded: ${ok}\nQueued/Failed: ${fail}`,
+    batchResult: (ok: number, fail: number) => `Uploaded: ${ok}\nQueued/Failed: ${fail}`,
   },
   en: {
     title: "Catch Log",
@@ -157,8 +162,7 @@ const i18n = {
     errSpecies: "Please choose species",
     errQr: "Please scan at least 1 QR",
 
-    batchResult: (ok: number, fail: number) =>
-      `Uploaded: ${ok}\nQueued/Failed: ${fail}`,
+    batchResult: (ok: number, fail: number) => `Uploaded: ${ok}\nQueued/Failed: ${fail}`,
   },
 };
 
@@ -201,26 +205,12 @@ function isNetworkishError(msg: string) {
 }
 
 /* ---------------- UI COMPONENTS ---------------- */
-function Card({
-  children,
-  className = "",
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <View className={`rounded-2xl border ${UI.border} bg-white ${className}`}>
-      {children}
-    </View>
-  );
+function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return <View className={`rounded-2xl border ${UI.border} bg-white ${className}`}>{children}</View>;
 }
 
 function FieldCard({ children }: { children: React.ReactNode }) {
-  return (
-    <View className={`rounded-2xl border ${UI.border} bg-white px-4 py-3`}>
-      {children}
-    </View>
-  );
+  return <View className={`rounded-2xl border ${UI.border} bg-white px-4 py-3`}>{children}</View>;
 }
 
 function SelectField({
@@ -282,25 +272,15 @@ function PickerSheetObj<T extends PickerItem>({
       <BottomSheetView style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
         <View className="flex-row items-center justify-between">
           <Text className={`text-base font-bold ${UI.text}`}>{title}</Text>
-          <Pressable
-            onPress={() => sheetRef.current?.dismiss()}
-            className="rounded-full px-3 py-2 active:opacity-80"
-          >
+          <Pressable onPress={() => sheetRef.current?.dismiss()} className="rounded-full px-3 py-2 active:opacity-80">
             <Text style={{ color: UI.accent }} className="text-sm font-semibold">
               Done
             </Text>
           </Pressable>
         </View>
 
-        <View
-          className={`mt-3 rounded-2xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}
-        >
-          <TextInput
-            value={q}
-            onChangeText={setQ}
-            placeholder={searchPlaceholder}
-            className={`text-base ${UI.text}`}
-          />
+        <View className={`mt-3 rounded-2xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}>
+          <TextInput value={q} onChangeText={setQ} placeholder={searchPlaceholder} className={`text-base ${UI.text}`} />
         </View>
 
         <ScrollView className="mt-3" keyboardShouldPersistTaps="handled">
@@ -336,40 +316,40 @@ export default function CreateCatchLog() {
   const catchState = useAppSelector((s: any) => s.catchLog);
   const posting = !!catchState?.loading;
 
+  // ✅ logged in user from me.slice
+  const meState = useAppSelector((s: any) => s.me);
+  const meUser = meState?.user || meState?.data || meState?.me || meState || null;
+
   const [lang, setLang] = useState<Lang>("ta");
   const t = i18n[lang];
 
-  // ✅ steps: 1 Trip+Fish, 2 Scan many (+Location), 3 Auto Date/Time, 4 Photos+Save
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
-  // Trips
   const [tripOptions] = useState<TripItem[]>(DUMMY_TRIPS);
 
-  // Fish types
   const [fishTypes, setFishTypes] = useState<FishType[]>([]);
   const [fishLoading, setFishLoading] = useState(false);
   const [fishError, setFishError] = useState<string | null>(null);
 
-  // Required
   const [tripId, setTripId] = useState("");
   const [fishId, setFishId] = useState<number | null>(null);
   const [fishName, setFishName] = useState("");
 
-  // ✅ MULTI-SCAN: scanned crateIds list
   const [crateIds, setCrateIds] = useState<string[]>(() => (initialCrateId ? [initialCrateId] : []));
   const crateCount = crateIds.length;
 
-  // Photos (shared for all in batch)
   const [images, setImages] = useState<string[]>([]);
 
-  // Network + pending
   const [isOnline, setIsOnline] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
 
-  // Camera permission + scan throttle
   const [cameraPerm, requestCameraPerm] = useCameraPermissions();
   const [canScan, setCanScan] = useState(true);
+
+  // ✅ OWNER BUSINESS CODE (owner_id like "OWN-0001")
+  const [ownerId, setOwnerId] = useState<string | null>(null);
+  const [ownerLoading, setOwnerLoading] = useState(false);
 
   // ✅ Location
   const [locPermGranted, setLocPermGranted] = useState<boolean>(false);
@@ -381,15 +361,17 @@ export default function CreateCatchLog() {
   const tripRef = useRef<BottomSheetModal>(null);
   const fishRef = useRef<BottomSheetModal>(null);
 
-  // If crateId came from params, you can jump to step 3 (skip scanning)
   useEffect(() => {
-    if (initialCrateId) {
-      setStep(3);
-    }
+    if (initialCrateId) setStep(3);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ AUTO SYNC: on mount + on network change (FIXED: isInternetReachable can be null)
+  // ✅ load me on mount
+  useEffect(() => {
+    dispatch(fetchMe());
+  }, [dispatch]);
+
+  // ✅ AUTO SYNC
   useEffect(() => {
     let alive = true;
 
@@ -412,7 +394,6 @@ export default function CreateCatchLog() {
 
     refreshCount();
 
-    // initial online check + flush
     NetInfo.fetch().then((s) => {
       const online = !!s.isConnected && (s.isInternetReachable ?? true);
       if (!alive) return;
@@ -433,6 +414,61 @@ export default function CreateCatchLog() {
     };
   }, [dispatch]);
 
+  // ✅ Fetch owner business code: owner_id ("OWN-0001") using login user id
+  const loadOwnerFromLogin = async (): Promise<string | null> => {
+    try {
+      setOwnerLoading(true);
+
+      const userId = Number(meUser?.id);
+      if (!userId || Number.isNaN(userId)) {
+        Alert.alert("Owner", "Login user id not available (me.id missing)");
+        return null;
+      }
+
+      const token = await AsyncStorage.getItem("auth_token"); // optional header if backend needs
+
+      const url = `https://rootverse-backend-5qoo.onrender.com/api/owner/fetch/${userId}`;
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        Alert.alert("OWNER FETCH FAILED", `${res.status} ${txt || "Owner fetch failed"}`);
+        return null;
+      }
+
+      const json = await res.json();
+
+      // ✅ YOU NEED THIS (owner_id)
+      const ownerCode = json?.owner_id ? String(json.owner_id) : "";
+
+      if (!ownerCode) {
+        Alert.alert("OWNER ERROR", "owner_id missing in response");
+        return null;
+      }
+
+      setOwnerId(ownerCode);
+      return ownerCode;
+    } catch (e: any) {
+      Alert.alert("OWNER ERROR", String(e?.message || e));
+      return null;
+    } finally {
+      setOwnerLoading(false);
+    }
+  };
+
+  // Fetch owner when meUser.id is ready
+  useEffect(() => {
+    if (!meUser?.id) return;
+    loadOwnerFromLogin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meUser?.id]);
+
   // Fetch fish types
   useEffect(() => {
     let alive = true;
@@ -449,11 +485,7 @@ export default function CreateCatchLog() {
         }
 
         const json = await res.json();
-        const list: FishType[] = Array.isArray(json)
-          ? json
-          : Array.isArray(json?.data)
-          ? json.data
-          : [];
+        const list: FishType[] = Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
 
         if (alive) setFishTypes(list);
       } catch (e: any) {
@@ -496,13 +528,13 @@ export default function CreateCatchLog() {
 
   const back = () => setStep((s) => (s === 4 ? 3 : s === 3 ? 2 : 1));
 
-  /* ---------------- ✅ MULTI QR SCAN LOGIC ---------------- */
+  /* ---------------- MULTI QR SCAN ---------------- */
   const addCrateId = (id: string) => {
     const value = String(id || "").trim();
     if (!value) return;
 
     setCrateIds((prev) => {
-      if (prev.includes(value)) return prev; // no duplicates
+      if (prev.includes(value)) return prev;
       return [...prev, value];
     });
   };
@@ -521,7 +553,6 @@ export default function CreateCatchLog() {
 
     addCrateId(value);
 
-    // small throttle so camera doesn't fire multiple times for same QR
     setTimeout(() => setCanScan(true), 350);
   };
 
@@ -549,7 +580,7 @@ export default function CreateCatchLog() {
   // Auto preview (readonly UI only)
   const nowPreview = useMemo(() => new Date(), [step, crateCount, tripId, fishId]);
 
-  /* ---------------- ✅ LIVE LOCATION (Step 2) ---------------- */
+  /* ---------------- LIVE LOCATION (Step 2) ---------------- */
   const stopLocation = () => {
     try {
       locSubRef.current?.remove();
@@ -574,15 +605,14 @@ export default function CreateCatchLog() {
 
       const last = await Location.getLastKnownPositionAsync({});
       if (last?.coords) {
-       setLiveLoc({
-  latitude: last.coords.latitude,
-  longitude: last.coords.longitude,
-  accuracy: last.coords.accuracy ?? null,
-  heading: last.coords.heading ?? null,
-  speed: last.coords.speed ?? null,
-  capturedAt: new Date(last.timestamp).toISOString(),
-});
-
+        setLiveLoc({
+          latitude: last.coords.latitude,
+          longitude: last.coords.longitude,
+          accuracy: last.coords.accuracy ?? null,
+          heading: last.coords.heading ?? null,
+          speed: last.coords.speed ?? null,
+          capturedAt: new Date(last.timestamp).toISOString(),
+        });
       }
 
       stopLocation();
@@ -595,14 +625,13 @@ export default function CreateCatchLog() {
         (pos) => {
           const c = pos.coords;
           setLiveLoc({
-  latitude: c.latitude,
-  longitude: c.longitude,
-  accuracy: c.accuracy ?? null,
-  heading: c.heading ?? null,
-  speed: c.speed ?? null,
-  capturedAt: new Date(pos.timestamp).toISOString(),
-});
-
+            latitude: c.latitude,
+            longitude: c.longitude,
+            accuracy: c.accuracy ?? null,
+            heading: c.heading ?? null,
+            speed: c.speed ?? null,
+            capturedAt: new Date(pos.timestamp).toISOString(),
+          });
         }
       );
     } catch (e: any) {
@@ -613,7 +642,7 @@ export default function CreateCatchLog() {
     }
   };
 
-  // Start location ONLY when step 2 is active, stop otherwise
+  // Start location ONLY when step 2 is active
   useEffect(() => {
     let alive = true;
 
@@ -633,50 +662,44 @@ export default function CreateCatchLog() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, lang]);
 
-  /* ---------------- ✅ SAVE BATCH (post many QRs) ---------------- */
+  /* ---------------- SAVE BATCH ---------------- */
   const save = async () => {
     if (!tripId) return Alert.alert(t.required, t.errTrip);
     if (!fishId) return Alert.alert(t.required, t.errSpecies);
     if (crateIds.length === 0) return Alert.alert(t.required, t.errQr);
+
+    // ✅ GUARANTEE owner business code "OWN-0001"
+    let ownerFinal = ownerId;
+    if (!ownerFinal) ownerFinal = await loadOwnerFromLogin();
+    if (!ownerFinal) return Alert.alert("Owner", "owner_id not loaded from login");
 
     const now = new Date();
     const base = {
       tripId,
       fishId,
       rvVesselId: 2, // TODO: replace with real
-      ownerId: 9, // TODO: replace with real
+      ownerId: ownerFinal, // ✅ THIS IS owner_id string
       catchDate: fmtDate(now),
       catchTime: fmtTime(now),
       images,
-      ...(liveLoc
-  ? {
-      latitude: liveLoc.latitude,
-      longitude: liveLoc.longitude,
-    }
-  : {}),
-
+      ...(liveLoc ? { latitude: liveLoc.latitude, longitude: liveLoc.longitude } : {}),
     };
 
-    // Build payloads for each scanned QR
     const payloads: CatchLogPayload[] = crateIds.map((cid) => ({
       ...(base as any),
       linkedCrateId: cid,
     }));
 
-    // OFFLINE: queue all
     if (!isOnline) {
       for (const p of payloads) await enqueueCatchLog(p);
       const c = await getQueueCount();
       setPendingCount(c);
 
       Alert.alert(t.saved, t.offlineSaved);
-      // go somewhere safe - open first scanned details
       router.replace({ pathname: "/catch-logs/details", params: { crateId: crateIds[0] } });
       return;
     }
 
-    // ONLINE: try post one by one.
-    // If network breaks in middle -> queue remaining automatically.
     let ok = 0;
     let fail = 0;
 
@@ -689,7 +712,6 @@ export default function CreateCatchLog() {
       } catch (e: any) {
         const msg = String(e?.message || e);
         if (isNetworkishError(msg)) {
-          // queue this and remaining
           const remaining = payloads.slice(i);
           for (const rp of remaining) await enqueueCatchLog(rp);
           fail += remaining.length;
@@ -702,20 +724,15 @@ export default function CreateCatchLog() {
           return;
         }
 
-        // non-network error: just count as failed (don’t block other QRs)
         fail++;
       }
     }
 
-    // done
     const c = await getQueueCount();
     setPendingCount(c);
 
-    if (fail === 0) {
-      Alert.alert(t.saved, `✅ ${t.scanCount(ok)}`);
-    } else {
-      Alert.alert("Partial", t.batchResult(ok, fail));
-    }
+    if (fail === 0) Alert.alert(t.saved, `✅ ${t.scanCount(ok)}`);
+    else Alert.alert("Partial", t.batchResult(ok, fail));
 
     router.replace({ pathname: "/catch-logs/details", params: { crateId: crateIds[0] } });
   };
@@ -748,6 +765,16 @@ export default function CreateCatchLog() {
 
           <View className={`mt-3 rounded-xl border ${UI.chipBorder} ${UI.chipBg} px-3 py-2`}>
             <Text className={`text-xs font-semibold ${UI.text}`}>{t.step(step)}</Text>
+          </View>
+
+          {/* ✅ Owner status (owner_id code) */}
+          <View className="mt-3">
+            <Text className={`text-[11px] ${UI.muted}`}>
+              Owner:{" "}
+              <Text className="font-bold" style={{ color: ownerId ? "#1f7a3f" : "#b45309" }}>
+                {ownerId ? ownerId : ownerLoading ? "loading..." : "not loaded"}
+              </Text>
+            </Text>
           </View>
 
           {/* Network / Pending */}
@@ -793,10 +820,7 @@ export default function CreateCatchLog() {
           <BottomSheetView style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
             <View className="flex-row items-center justify-between">
               <Text className={`text-base font-bold ${UI.text}`}>{t.chooseTrip}</Text>
-              <Pressable
-                onPress={() => tripRef.current?.dismiss()}
-                className="rounded-full px-3 py-2 active:opacity-80"
-              >
+              <Pressable onPress={() => tripRef.current?.dismiss()} className="rounded-full px-3 py-2 active:opacity-80">
                 <Text style={{ color: UI.accent }} className="text-sm font-semibold">
                   Done
                 </Text>
@@ -875,7 +899,7 @@ export default function CreateCatchLog() {
           </View>
         ) : null}
 
-        {/* STEP 2: Scan many + location */}
+        {/* STEP 2 */}
         {step === 2 ? (
           <View className="mt-4 gap-3">
             <Card className="p-4">
@@ -884,9 +908,7 @@ export default function CreateCatchLog() {
                 <Text className={`text-sm font-extrabold ${UI.text}`}>{t.scanTitle}</Text>
               </View>
 
-              <Text className={`mt-1 text-[11px] ${UI.muted}`}>
-                {scanEnabled ? t.scanReady : t.scanHint}
-              </Text>
+              <Text className={`mt-1 text-[11px] ${UI.muted}`}>{scanEnabled ? t.scanReady : t.scanHint}</Text>
 
               {/* Location */}
               <View className={`mt-3 rounded-2xl border ${UI.border} bg-[#fbf6f1] px-3 py-3`}>
@@ -900,9 +922,7 @@ export default function CreateCatchLog() {
                     onPress={startLocation}
                     className="rounded-full border border-[#ead7c8] bg-white px-3 py-2 active:opacity-80"
                   >
-                    <Text className={`text-xs font-semibold ${UI.text}`}>
-                      {locLoading ? "..." : t.locRetry}
-                    </Text>
+                    <Text className={`text-xs font-semibold ${UI.text}`}>{locLoading ? "..." : t.locRetry}</Text>
                   </Pressable>
                 </View>
 
@@ -924,7 +944,6 @@ export default function CreateCatchLog() {
                     <Text className={`text-xs ${UI.muted}`}>Lat / Lng</Text>
                     <Text className={`mt-1 text-sm font-extrabold ${UI.text}`}>
                       {liveLoc.latitude.toFixed(6)}, {liveLoc.longitude.toFixed(6)}
-
                     </Text>
 
                     <View className="mt-2 flex-row flex-wrap gap-2">
@@ -982,7 +1001,9 @@ export default function CreateCatchLog() {
                         <Text className="font-bold">{fishName || "—"}</Text>
                       </Text>
                       <Text className="text-white text-[11px] mt-1">
-                        {scanEnabled ? "Scan QRs one by one. They will be added to the list." : "Select Trip + Fish first (Back)."}
+                        {scanEnabled
+                          ? "Scan QRs one by one. They will be added to the list."
+                          : "Select Trip + Fish first (Back)."}
                       </Text>
                     </View>
                   </View>
@@ -1034,10 +1055,7 @@ export default function CreateCatchLog() {
             </Card>
 
             <View className="mt-2 flex-row gap-3">
-              <Pressable
-                className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-4 active:opacity-80`}
-                onPress={back}
-              >
+              <Pressable className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-4 active:opacity-80`} onPress={back}>
                 <Text className={`text-center ${UI.text} text-base font-extrabold`}>{t.back}</Text>
               </Pressable>
 
@@ -1053,7 +1071,7 @@ export default function CreateCatchLog() {
           </View>
         ) : null}
 
-        {/* STEP 3: Auto Date/Time */}
+        {/* STEP 3 */}
         {step === 3 ? (
           <View className="mt-4 gap-3">
             <Card className="p-4">
@@ -1075,33 +1093,24 @@ export default function CreateCatchLog() {
 
                 <View className={`mt-3 rounded-xl border ${UI.border} bg-white px-3 py-2`}>
                   <Text className={`text-xs ${UI.muted}`}>{t.scannedList}</Text>
-                  <Text className={`mt-1 text-sm font-extrabold ${UI.text}`}>
-                    {t.scanCount(crateCount)}
-                  </Text>
+                  <Text className={`mt-1 text-sm font-extrabold ${UI.text}`}>{t.scanCount(crateCount)}</Text>
                 </View>
               </View>
             </Card>
 
             <View className="mt-2 flex-row gap-3">
-              <Pressable
-                className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-4 active:opacity-80`}
-                onPress={back}
-              >
+              <Pressable className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-4 active:opacity-80`} onPress={back}>
                 <Text className={`text-center ${UI.text} text-base font-extrabold`}>{t.back}</Text>
               </Pressable>
 
-              <Pressable
-                className="flex-1 rounded-2xl px-4 py-4 active:opacity-90"
-                style={{ backgroundColor: UI.accent }}
-                onPress={next}
-              >
+              <Pressable className="flex-1 rounded-2xl px-4 py-4 active:opacity-90" style={{ backgroundColor: UI.accent }} onPress={next}>
                 <Text className="text-center text-white text-base font-extrabold">{t.next}</Text>
               </Pressable>
             </View>
           </View>
         ) : null}
 
-        {/* STEP 4: Photos + Save batch */}
+        {/* STEP 4 */}
         {step === 4 ? (
           <View className="mt-4">
             <Card className="p-4">
@@ -1112,9 +1121,7 @@ export default function CreateCatchLog() {
 
               <View className={`mt-2 rounded-xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}>
                 <Text className={`text-xs ${UI.muted}`}>{t.scannedList}</Text>
-                <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>
-                  {t.scanCount(crateCount)}
-                </Text>
+                <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>{t.scanCount(crateCount)}</Text>
                 <Text className={`mt-1 text-[11px] ${UI.muted}`}>
                   (This will create {crateCount} catch log(s) using same Trip + Fish + Photos)
                 </Text>
@@ -1156,19 +1163,25 @@ export default function CreateCatchLog() {
               <Pressable
                 className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-4 active:opacity-80`}
                 onPress={back}
-                disabled={posting}
+                disabled={posting || ownerLoading}
               >
                 <Text className={`text-center ${UI.text} text-base font-extrabold`}>{t.back}</Text>
               </Pressable>
 
               <Pressable
                 className="flex-1 rounded-2xl px-4 py-4 active:opacity-90"
-                style={{ backgroundColor: UI.accent, opacity: posting ? 0.7 : 1 }}
+                style={{ backgroundColor: UI.accent, opacity: posting || ownerLoading ? 0.7 : 1 }}
                 onPress={save}
-                disabled={posting || crateCount === 0}
+                disabled={posting || ownerLoading || crateCount === 0}
               >
                 <Text className="text-center text-white text-base font-extrabold">
-                  {posting ? (lang === "ta" ? "சேமிக்கிறது..." : "Saving...") : `${t.save} (${crateCount})`}
+                  {ownerLoading
+                    ? "Loading owner..."
+                    : posting
+                    ? lang === "ta"
+                      ? "சேமிக்கிறது..."
+                      : "Saving..."
+                    : `${t.save} (${crateCount})`}
                 </Text>
               </Pressable>
             </View>
