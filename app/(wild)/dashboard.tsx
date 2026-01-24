@@ -21,7 +21,20 @@ import { useTrace } from "../../src/data/wild/trace.store";
 
 type Lang = "ta" | "en";
 
-const OWNER_API_BASE = "https://rootverse-backend-5qoo.onrender.com/api/owner/fetch";
+/**
+ * ✅ IMPORTANT
+ * /api/me DOES NOT "give token".
+ * It RETURNS current logged-in user ONLY if you SEND token in header:
+ *   Authorization: Bearer <token>
+ *
+ * So you must store token after login in AsyncStorage with this key.
+ * Make sure this matches your login.slice.ts / me.slice.ts
+ */
+const TOKEN_KEY = "auth_token";
+
+const API_BASE = "https://rootverse-backend-5qoo.onrender.com";
+const ME_API = `${API_BASE}/api/me`;
+const OWNER_API_BASE = `${API_BASE}/api/owner/fetch`;
 
 type OwnerApiRes = {
   id: number;
@@ -30,15 +43,26 @@ type OwnerApiRes = {
   address?: string;
   rootverse_type?: string;
   verification_status?: string;
-
   profile_picture_url?: string;
-
   owner_id?: string;
-
   state_name?: string;
   district_name?: string;
+  email?: string;
+};
 
-  email?: string; // (not in your sample response, but keep safe)
+type MeApiRes = {
+  id: number;
+  username?: string;
+  phone_no?: string;
+  address?: string;
+  rootverse_type?: string;
+  verification_status?: string;
+  profile_picture_url?: string;
+  owner_id?: string;
+  state_name?: string;
+  district_name?: string;
+  email?: string;
+  [key: string]: any;
 };
 
 const i18n = {
@@ -78,6 +102,9 @@ const i18n = {
     loadingProfile: "Loading profile…",
     failedProfile: "Failed to load profile",
     retry: "Retry",
+
+    noToken: "No token found. Please login again.",
+    sessionExpired: "Session expired. Please login again.",
   },
   ta: {
     title: "Wild Fisher",
@@ -115,6 +142,9 @@ const i18n = {
     loadingProfile: "ப்ரோஃபைல் ஏற்றுகிறது…",
     failedProfile: "ப்ரோஃபைல் ஏற்ற முடியவில்லை",
     retry: "மீண்டும் முயற்சி",
+
+    noToken: "டோக்கன் இல்லை. மீண்டும் லாகின் செய்யவும்.",
+    sessionExpired: "செஷன் முடிந்தது. மீண்டும் லாகின் செய்யவும்.",
   },
 };
 
@@ -215,24 +245,19 @@ function ProfileDrawer({
               </Pressable>
             </View>
 
-            {/* Avatar + name */}
             <View className="mt-4 flex-row items-center gap-3">
               <View
                 className="h-14 w-14 rounded-full items-center justify-center overflow-hidden"
                 style={{ backgroundColor: UI.blue }}
               >
                 {user.avatarUrl ? (
-                  <Image
-                    source={{ uri: user.avatarUrl }}
-                    style={{ width: 56, height: 56 }}
-                    resizeMode="cover"
-                  />
+                  <Image source={{ uri: user.avatarUrl }} style={{ width: 56, height: 56 }} resizeMode="cover" />
                 ) : (
                   <Text className="text-white font-extrabold">
-                    {user.name
+                    {(user.name || "—")
                       .split(" ")
                       .slice(0, 2)
-                      .map((w) => w[0])
+                      .map((w) => (w ? w[0] : "—"))
                       .join("")
                       .toUpperCase()}
                   </Text>
@@ -329,29 +354,16 @@ function ActionRow({
     >
       <Card>
         <View className="px-4 py-4 flex-row items-center">
-          <View
-            className="h-11 w-11 rounded-xl items-center justify-center"
-            style={{ backgroundColor: UI.blueSoft }}
-          >
+          <View className="h-11 w-11 rounded-xl items-center justify-center" style={{ backgroundColor: UI.blueSoft }}>
             <Ionicons name={icon} size={22} color={UI.blue} />
           </View>
 
           <View className="ml-3 flex-1">
-            <Text
-              className="text-sm font-bold"
-              style={{ color: UI.text }}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
+            <Text className="text-sm font-bold" style={{ color: UI.text }} numberOfLines={1}>
               {title}
             </Text>
 
-            <Text
-              className="mt-0.5 text-xs"
-              style={{ color: UI.muted }}
-              numberOfLines={2}
-              ellipsizeMode="tail"
-            >
+            <Text className="mt-0.5 text-xs" style={{ color: UI.muted }} numberOfLines={2}>
               {subtitle}
             </Text>
           </View>
@@ -363,21 +375,59 @@ function ActionRow({
   );
 }
 
-async function readOwnerIdFromStorage(): Promise<number | null> {
-  // Use any one key you already store after login
-  const keys = ["owner_db_id", "user_id", "id"];
+/** ✅ read token (the only thing you need for /api/me) */
+async function readTokenFromStorage(): Promise<string | null> {
+  const keys = [TOKEN_KEY, "access_token", "token"];
   for (const k of keys) {
     const v = await AsyncStorage.getItem(k);
-    const n = v ? Number(String(v).trim()) : NaN;
-    if (Number.isFinite(n) && n > 0) return n;
+    const token = (v || "").trim();
+    if (token) return token;
   }
   return null;
 }
 
-async function fetchOwnerById(ownerDbId: number): Promise<OwnerApiRes> {
+async function clearAuthStorage() {
+  const keys = [TOKEN_KEY, "access_token", "token"];
+  await Promise.all(keys.map((k) => AsyncStorage.removeItem(k)));
+}
+
+/** ✅ GET current logged-in owner via token */
+async function fetchMe(token: string): Promise<MeApiRes> {
+  const res = await fetch(ME_API, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`ME API failed: ${res.status} ${res.statusText} ${txt}`.trim());
+  }
+
+  const json: any = await res.json();
+
+  // ✅ handle different backend shapes safely
+  const me: any = json?.user ?? json?.data?.user ?? json?.data ?? json;
+
+  const id = Number(me?.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new Error("ME API returned invalid user id");
+  }
+
+  return { ...me, id } as MeApiRes;
+}
+
+/** ✅ (optional) fetch owner full profile by numeric id (if you need extra fields) */
+async function fetchOwnerById(ownerDbId: number, token?: string): Promise<OwnerApiRes> {
   const res = await fetch(`${OWNER_API_BASE}/${encodeURIComponent(String(ownerDbId))}`, {
     method: "GET",
-    headers: { Accept: "application/json" },
+    headers: {
+      Accept: "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : null),
+    },
   });
 
   if (!res.ok) {
@@ -401,26 +451,49 @@ export default function WildDashboard() {
 
   const lastCrateId = useMemo(() => trace.events?.[0]?.crateId ?? "", [trace.events]);
 
-  // ✅ profile state
-  const [ownerDbId, setOwnerDbId] = useState<number>(14); // fallback so UI works
+  // ✅ profile state (NO HARDCODED 14)
+  const [ownerDbId, setOwnerDbId] = useState<number | null>(null);
+  const [me, setMe] = useState<MeApiRes | null>(null);
   const [profile, setProfile] = useState<OwnerApiRes | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
 
-  const loadProfile = async (idToLoad?: number) => {
+  const loadProfile = async () => {
     try {
       setLoadingProfile(true);
       setProfileError(null);
 
-      const storageId = idToLoad ?? (await readOwnerIdFromStorage());
-      const finalId = storageId ?? 14;
+      const token = await readTokenFromStorage();
+      if (!token) {
+        setMe(null);
+        setProfile(null);
+        setOwnerDbId(null);
+        setProfileError(t.noToken);
+        router.replace("/(auth)/otp" as const); // change if your login route differs
+        return;
+      }
 
-      setOwnerDbId(finalId);
-      const data = await fetchOwnerById(finalId);
-      setProfile(data);
+      const meData = await fetchMe(token);
+      setMe(meData);
+      setOwnerDbId(meData.id);
+
+      // ✅ If /api/me already contains everything you need, you can skip this call.
+      // Keeping it because your owner fetch has profile_picture_url, etc.
+      const ownerData = await fetchOwnerById(meData.id, token);
+      setProfile(ownerData);
     } catch (e: any) {
+      if (e?.message === "UNAUTHORIZED") {
+        await clearAuthStorage();
+        setMe(null);
+        setProfile(null);
+        setOwnerDbId(null);
+        setProfileError(t.sessionExpired);
+        router.replace("/(auth)/otp" as const);
+        return;
+      }
+
       setProfile(null);
-      setProfileError(e?.message || "Failed to load profile");
+      setProfileError(e?.message || t.failedProfile);
     } finally {
       setLoadingProfile(false);
     }
@@ -431,15 +504,33 @@ export default function WildDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ map API → UI user
+  // ✅ reload when app comes foreground (after logout/login)
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") loadProfile();
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ✅ map API → UI user (prefer owner profile; fallback to /me)
   const user = useMemo(() => {
-    const name = profile?.username ? profile.username : "—";
-    const role = profile?.rootverse_type ? profile.rootverse_type : "—";
-    const ownerIdLabel = profile?.owner_id ? profile.owner_id : `ID-${ownerDbId}`;
-    const phone = profile?.phone_no ? profile.phone_no : "—";
-    const email = (profile as any)?.email ? String((profile as any).email) : "—";
-    const address = profile?.address ? profile.address : "—";
-    const avatarUrl = profile?.profile_picture_url || undefined;
+    const src: any = profile || me;
+
+    const name = src?.username ? String(src.username) : "—";
+    const role = src?.rootverse_type ? String(src.rootverse_type) : "—";
+
+    // owner_id is like "OWN-0001"
+    const ownerIdLabel = src?.owner_id
+      ? String(src.owner_id)
+      : ownerDbId
+      ? `ID-${ownerDbId}`
+      : "—";
+
+    const phone = src?.phone_no ? String(src.phone_no) : "—";
+    const email = src?.email ? String(src.email) : "—";
+    const address = src?.address ? String(src.address) : "—";
+    const avatarUrl = src?.profile_picture_url ? String(src.profile_picture_url) : undefined;
 
     return {
       name,
@@ -449,10 +540,10 @@ export default function WildDashboard() {
       email,
       address,
       avatarUrl,
-      state: profile?.state_name || "",
-      district: profile?.district_name || "",
+      state: src?.state_name || "",
+      district: src?.district_name || "",
     };
-  }, [profile, ownerDbId]);
+  }, [profile, me, ownerDbId]);
 
   // Speak once on first open
   const greeted = useRef(false);
@@ -481,7 +572,6 @@ export default function WildDashboard() {
         contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
         contentContainerClassName="px-4 pb-6"
       >
-        {/* ✅ Top header */}
         <View className="pt-3 flex-row items-center justify-between">
           <Text className="text-base font-bold" style={{ color: UI.text }}>
             {t.title}
@@ -489,12 +579,11 @@ export default function WildDashboard() {
           <StatusChip online={online} label={online ? t.online : t.offline} />
         </View>
 
-        {/* Profile card */}
         <Card className="mt-4">
           <Pressable
             onPress={() => setDrawerOpen(true)}
             className="px-4 py-4 active:opacity-80"
-            disabled={loadingProfile}
+            disabled={loadingProfile || !!profileError}
           >
             <View className="flex-row items-center justify-between">
               <View className="flex-row items-center gap-3">
@@ -503,11 +592,7 @@ export default function WildDashboard() {
                   style={{ backgroundColor: UI.blue }}
                 >
                   {user.avatarUrl ? (
-                    <Image
-                      source={{ uri: user.avatarUrl }}
-                      style={{ width: 48, height: 48 }}
-                      resizeMode="cover"
-                    />
+                    <Image source={{ uri: user.avatarUrl }} style={{ width: 48, height: 48 }} resizeMode="cover" />
                   ) : (
                     <Text className="text-white font-extrabold">
                       {(user.name || "—")
@@ -544,7 +629,6 @@ export default function WildDashboard() {
               )}
             </View>
 
-            {/* hint / loader / error */}
             <View className="mt-3 rounded-xl px-3 py-2" style={{ backgroundColor: UI.blueSoft }}>
               {loadingProfile ? (
                 <Text className="text-xs font-semibold" style={{ color: UI.blue }}>
@@ -552,13 +636,13 @@ export default function WildDashboard() {
                 </Text>
               ) : profileError ? (
                 <View className="flex-row items-center justify-between">
-                  <Text className="text-xs font-semibold" style={{ color: UI.red }}>
-                    {t.failedProfile}
+                  <Text className="text-xs font-semibold flex-1 pr-2" style={{ color: UI.red }} numberOfLines={2}>
+                    {profileError}
                   </Text>
                   <Pressable
                     onPress={async () => {
                       await haptic();
-                      loadProfile(ownerDbId);
+                      loadProfile();
                     }}
                     className="rounded-full px-3 py-1 border"
                     style={{ borderColor: UI.border, backgroundColor: UI.card }}
@@ -588,7 +672,6 @@ export default function WildDashboard() {
           </Pressable>
         </Card>
 
-        {/* ✅ Language toggle (keep this one) */}
         <View className="mt-3 flex-row justify-end">
           <Pressable
             onPress={async () => {
@@ -604,7 +687,6 @@ export default function WildDashboard() {
           </Pressable>
         </View>
 
-        {/* Actions list */}
         <View className="mt-5">
           <Text className="mb-2 text-sm font-bold" style={{ color: UI.text }}>
             {t.actions}
@@ -649,7 +731,6 @@ export default function WildDashboard() {
           </View>
         </View>
 
-        {/* Bottom CTA */}
         <Pressable
           onPress={() => router.push("/(wild)/trips/create" as const)}
           className="mt-6 rounded-2xl px-4 py-4 active:opacity-90"
