@@ -1,16 +1,43 @@
+// src/utils/offlineQueue.ts
 import AsyncStorage from "@react-native-async-storage/async-storage";
+
+/**
+ * OFFLINE QUEUE:
+ * - stores items to be sent later
+ * LOCAL INDEX (by crateId):
+ * - stores last saved payload per crateId so Details screen can show offline
+ *
+ * ✅ UPDATED FOR YOUR CURRENT FLOW:
+ * - rvVesselId can be string (vessel code) OR number (legacy)
+ * - ownerId can be number (db id) OR string (legacy) OR null (offline)
+ * - fishId can be number OR null (offline)
+ */
 
 export type CatchLogPayload = {
   linkedCrateId: string;
+
   tripId: string;
-  fishId: number;
-  rvVesselId: number;
-  ownerId: number;
+
+  // offline can be invalid or unknown if no cached fish list (optional)
+  fishId: number | null;
+  fishName?: string;
+
+  // ✅ allow both (your create.tsx sends vessel CODE string)
+  rvVesselId: string | number;
+
+  // ✅ allow numeric owner db id (your create.tsx uses number)
+  // still supports legacy string owner_code if older payload exists
+  ownerId: number | string | null;
+
   catchDate: string; // yyyy-mm-dd
   catchTime: string; // hh:mm:ss
   images: string[]; // local URIs
-   latitude?: number;
+
+  latitude?: number;
   longitude?: number;
+
+  // optional meta
+  qrKind?: "CRATE" | "VESSEL" | "UNKNOWN";
 };
 
 type QueueItem = {
@@ -22,13 +49,23 @@ type QueueItem = {
   lastError?: string;
 };
 
+type LocalIndexItem = {
+  payload: CatchLogPayload;
+  savedAt: number;
+  status: "QUEUED" | "SYNCED";
+};
+
+type LocalIndex = Record<string, LocalIndexItem>;
+
 const KEY = "OFFLINE_QUEUE_V1";
+const INDEX_KEY = "OFFLINE_CATCHLOG_INDEX_V1";
 
 const uid = () =>
   `${Date.now()}_${Math.random().toString(16).slice(2)}_${Math.random()
     .toString(16)
     .slice(2)}`;
 
+/* ---------------- QUEUE READ/WRITE ---------------- */
 async function readQueue(): Promise<QueueItem[]> {
   const raw = await AsyncStorage.getItem(KEY);
   if (!raw) return [];
@@ -44,21 +81,134 @@ async function writeQueue(q: QueueItem[]) {
   await AsyncStorage.setItem(KEY, JSON.stringify(q));
 }
 
-export async function enqueueCatchLog(payload: CatchLogPayload) {
+/* ---------------- INDEX READ/WRITE ---------------- */
+async function readIndex(): Promise<LocalIndex> {
+  try {
+    const raw = await AsyncStorage.getItem(INDEX_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeIndex(index: LocalIndex) {
+  await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(index));
+}
+
+/* ---------------- HELPERS ---------------- */
+function crateKey(payload: CatchLogPayload) {
+  return String(payload?.linkedCrateId || "").trim();
+}
+
+function sanitizePayload(p: CatchLogPayload): CatchLogPayload {
+  // prevent broken/undefined fields from older builds
+  return {
+    ...p,
+    linkedCrateId: String(p?.linkedCrateId || "").trim(),
+    tripId: String((p as any)?.tripId || "").trim(),
+    fishId:
+      typeof (p as any)?.fishId === "number" ? (p as any).fishId : (p as any)?.fishId ?? null,
+    fishName: (p as any)?.fishName ? String((p as any).fishName) : undefined,
+    rvVesselId: (p as any)?.rvVesselId ?? "",
+    ownerId: (p as any)?.ownerId ?? null,
+    catchDate: String((p as any)?.catchDate || ""),
+    catchTime: String((p as any)?.catchTime || ""),
+    images: Array.isArray((p as any)?.images) ? (p as any).images : [],
+    latitude: typeof (p as any)?.latitude === "number" ? (p as any).latitude : undefined,
+    longitude: typeof (p as any)?.longitude === "number" ? (p as any).longitude : undefined,
+    qrKind: (p as any)?.qrKind,
+  };
+}
+
+/* ---------------- INDEX OPS ---------------- */
+export async function upsertLocalCatchLog(
+  payload: CatchLogPayload,
+  status: "QUEUED" | "SYNCED"
+) {
+  const cleaned = sanitizePayload(payload);
+  const crateId = crateKey(cleaned);
+  if (!crateId) return;
+
+  const index = await readIndex();
+  index[crateId] = {
+    payload: cleaned,
+    savedAt: Date.now(),
+    status,
+  };
+  await writeIndex(index);
+}
+
+export async function markLocalCatchLogSynced(crateId: string) {
+  const id = String(crateId || "").trim();
+  if (!id) return;
+
+  const index = await readIndex();
+  if (!index[id]) return;
+
+  index[id] = {
+    ...index[id],
+    status: "SYNCED",
+    savedAt: Date.now(),
+  };
+  await writeIndex(index);
+}
+
+/**
+ * Details screen helper:
+ * returns local saved payload even when offline.
+ */
+export async function getLocalCatchLogByCrateId(
+  crateId: string
+): Promise<LocalIndexItem | null> {
+  const id = String(crateId || "").trim();
+  if (!id) return null;
+
+  const index = await readIndex();
+  if (index[id]) return index[id];
+
+  // fallback: scan queue if index missing (older builds)
   const q = await readQueue();
-  q.push({
-    id: uid(),
-    type: "CATCH_LOG",
-    payload,
-    createdAt: Date.now(),
-    tries: 0,
-  });
-  await writeQueue(q);
+  const found = q.find(
+    (x) => x.type === "CATCH_LOG" && String(x.payload?.linkedCrateId || "").trim() === id
+  );
+  if (found?.payload) {
+    const item: LocalIndexItem = {
+      payload: sanitizePayload(found.payload),
+      savedAt: found.createdAt,
+      status: "QUEUED",
+    };
+    // write it for next time
+    const idx = await readIndex();
+    idx[id] = item;
+    await writeIndex(idx);
+    return item;
+  }
+
+  return null;
 }
 
 export async function getQueueCount() {
   const q = await readQueue();
   return q.length;
+}
+
+export async function enqueueCatchLog(payload: CatchLogPayload) {
+  const cleaned = sanitizePayload(payload);
+
+  const q = await readQueue();
+  q.push({
+    id: uid(),
+    type: "CATCH_LOG",
+    payload: cleaned,
+    createdAt: Date.now(),
+    tries: 0,
+  });
+  await writeQueue(q);
+
+  // ✅ store per crateId for Details screen
+  await upsertLocalCatchLog(cleaned, "QUEUED");
 }
 
 /**
@@ -78,12 +228,19 @@ export async function flushQueue(sendCatchLog: (p: CatchLogPayload) => Promise<a
       continue;
     }
 
+    // ✅ sanitize on the way (handles old queue format)
+    const cleaned = sanitizePayload(item.payload);
+
     try {
-      await sendCatchLog(item.payload);
+      await sendCatchLog(cleaned);
       sent += 1;
+
+      // ✅ mark local record as synced after success
+      await markLocalCatchLogSynced(cleaned.linkedCrateId);
     } catch (e: any) {
       keep.push({
         ...item,
+        payload: cleaned,
         tries: (item.tries ?? 0) + 1,
         lastError: String(e?.message || e),
       });
@@ -96,4 +253,15 @@ export async function flushQueue(sendCatchLog: (p: CatchLogPayload) => Promise<a
 
 export async function clearQueue() {
   await AsyncStorage.removeItem(KEY);
+}
+
+export async function clearLocalIndex() {
+  await AsyncStorage.removeItem(INDEX_KEY);
+}
+
+/**
+ * OPTIONAL: clear everything (queue + index)
+ */
+export async function clearAllOfflineCatchLogs() {
+  await AsyncStorage.multiRemove([KEY, INDEX_KEY]);
 }
