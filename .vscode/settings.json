@@ -16,4 +16,5 @@
   "files.watcherExclude": {
     "**/node_modules/**": true
   }
+  
 }

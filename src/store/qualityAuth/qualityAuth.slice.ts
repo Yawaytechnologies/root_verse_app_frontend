@@ -36,28 +36,49 @@ const initialState: State = {
   error: null,
 };
 
-// Optional helper: tries to resolve IDs -> names if backend supports it.
-// If these endpoints don't exist, it silently continues.
-async function tryResolveName(
+async function fetchQcByCode(
   token: string,
-  url: string,
-): Promise<string | undefined> {
+  checkerCode: string,
+): Promise<Partial<Inspector> | null> {
   try {
-    const r = await fetch(url, {
-      headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
-    });
-    const raw = await r.json().catch(() => ({}));
-    if (!r.ok) return undefined;
-    const data = raw?.data ?? raw;
-    return data?.name ?? data?.state_name ?? data?.district_name ?? undefined;
+    const res = await fetch(
+      `${BASE_URL}/api/quality-checker/${encodeURIComponent(checkerCode)}`,
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+
+    const raw = await res.json().catch(() => ({}));
+    if (!res.ok) return null;
+
+    const d = raw?.data ?? raw;
+
+    return {
+      id: d?.id,
+      checker_code: d?.checker_code ?? checkerCode,
+      checker_name: d?.checker_name,
+      checker_email: d?.checker_email,
+      checker_phone: d?.checker_phone,
+      state_id: d?.state_id,
+      state_name: d?.state_name,
+      district_id: d?.district_id,
+      district_name: d?.district_name,
+      is_active: d?.is_active,
+      rootverse_type: "QUALITY_CHECKER",
+    };
   } catch {
-    return undefined;
+    return null;
   }
 }
 
 /**
  * ✅ Fetch LOGGED-IN QC (token-based)
  * GET /api/me
+ * Fallback -> GET /api/quality-checker/:checker_code to get state/district names.
  */
 export const fetchQcMe = createAsyncThunk<
   Inspector,
@@ -83,7 +104,7 @@ export const fetchQcMe = createAsyncThunk<
 
     const me = raw?.data ?? raw?.user ?? raw;
 
-    if (me?.rootverse_type !== "QUALITY_CHECKER") {
+    if (String(me?.rootverse_type || "").toUpperCase() !== "QUALITY_CHECKER") {
       return rejectWithValue("NOT_QC_USER");
     }
 
@@ -109,18 +130,17 @@ export const fetchQcMe = createAsyncThunk<
     if (!inspector.checker_code) return rejectWithValue("ME_NO_CHECKER_CODE");
     if (!inspector.checker_name) return rejectWithValue("ME_NO_CHECKER_NAME");
 
-    // ✅ If backend returns only ids, try to resolve names (safe optional)
-    if (!inspector.state_name && inspector.state_id) {
-      inspector.state_name = await tryResolveName(
-        token,
-        `${BASE_URL}/api/states/${inspector.state_id}`, // <-- change if your endpoint differs
-      );
-    }
-    if (!inspector.district_name && inspector.district_id) {
-      inspector.district_name = await tryResolveName(
-        token,
-        `${BASE_URL}/api/districts/${inspector.district_id}`, // <-- change if your endpoint differs
-      );
+    const needsMore =
+      !inspector.state_name ||
+      !inspector.district_name ||
+      !inspector.state_id ||
+      !inspector.district_id;
+
+    if (needsMore) {
+      const full = await fetchQcByCode(token, inspector.checker_code);
+      if (full) {
+        return { ...inspector, ...full, rootverse_type: "QUALITY_CHECKER" };
+      }
     }
 
     return inspector;
