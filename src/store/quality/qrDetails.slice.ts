@@ -55,35 +55,46 @@ function mapToCatchLog(q: any): CatchLogDetails {
   };
 }
 
-// ✅ IMPORTANT: Scanner must fetch details even when NOT "FILLED"
-export const fetchCatchLogByQr = createAsyncThunk<CatchLogDetails, string, { rejectValue: string }>(
-  "qrDetails/fetchCatchLogByQr",
-  async (qrCode, { rejectWithValue }) => {
-    const code = encodeURIComponent(String(qrCode || "").trim());
+function normalizeQr(raw: string) {
+  return String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
+}
 
-    const tryFetch = async (url: string) => {
-      const res = await httpJson<ApiAnyResponse>(url);
+// ✅ PRE-SUBMIT DETAILS FLOW:
+// 1) /api/filled/:code  (works after QC submit)
+// 2) /api/qrs/status/NEW/code/:code (works before submit)
+export const fetchCatchLogByQr = createAsyncThunk<
+  CatchLogDetails,
+  string,
+  { rejectValue: string }
+>("qrDetails/fetchCatchLogByQr", async (qrCode, { rejectWithValue }) => {
+  try {
+    const code = normalizeQr(qrCode);
+    if (!code) return rejectWithValue("QR_CODE_REQUIRED");
+
+    const tryFetch = async (path: string) => {
+      const res = await httpJson<ApiAnyResponse>(path, { method: "GET" });
       return res?.qr ?? res?.data ?? null;
     };
 
-    try {
-      // ✅ 1) NEW backend endpoint (preferred)
-      let q = await tryFetch(`/api/qr-details/${code}`).catch(() => null);
+    // 1) FILLED (read-only)
+    let q = await tryFetch(`/api/filled/${encodeURIComponent(code)}`).catch(
+      () => null
+    );
 
-      // ✅ 2) fallback: common QR endpoint
-      if (!q) q = await tryFetch(`/api/qrs/${code}`).catch(() => null);
-
-      // ✅ 3) fallback: old filled endpoint (only works after QC submit)
-      if (!q) q = await tryFetch(`/api/filled/${code}`).catch(() => null);
-
-      if (!q) return rejectWithValue("QR not found");
-
-      return mapToCatchLog(q);
-    } catch (e: any) {
-      return rejectWithValue(e?.message || "Failed to fetch QR details");
+    // 2) NEW (pre-submit)
+    if (!q) {
+      q = await tryFetch(
+        `/api/qrs/status/NEW/code/${encodeURIComponent(code)}`
+      ).catch(() => null);
     }
+
+    if (!q) return rejectWithValue("QR not found");
+
+    return mapToCatchLog(q);
+  } catch (e: any) {
+    return rejectWithValue(e?.message || "Failed to fetch QR details");
   }
-);
+});
 
 const slice = createSlice({
   name: "qrDetails",
@@ -114,10 +125,12 @@ const slice = createSlice({
 export const { clearCatchLog } = slice.actions;
 export default slice.reducer;
 
-// ✅ SAFE selectors (won't crash if reducer key missing by mistake)
 export const selectQrDetailsState = (state: RootState): State =>
   ((state as any).qrDetails as State) ?? initialState;
 
-export const selectCatchLog = (state: RootState) => selectQrDetailsState(state).data;
-export const selectCatchLogLoading = (state: RootState) => selectQrDetailsState(state).loading;
-export const selectCatchLogError = (state: RootState) => selectQrDetailsState(state).error;
+export const selectCatchLog = (state: RootState) =>
+  selectQrDetailsState(state).data;
+export const selectCatchLogLoading = (state: RootState) =>
+  selectQrDetailsState(state).loading;
+export const selectCatchLogError = (state: RootState) =>
+  selectQrDetailsState(state).error;
