@@ -6,6 +6,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
  * - stores items to be sent later
  * LOCAL INDEX (by crateId):
  * - stores last saved payload per crateId so Details screen can show offline
+ *
+ * ✅ UPDATED FOR YOUR CURRENT FLOW:
+ * - rvVesselId can be string (vessel code) OR number (legacy)
+ * - ownerId can be number (db id) OR string (legacy) OR null (offline)
+ * - fishId can be number OR null (offline)
  */
 
 export type CatchLogPayload = {
@@ -15,13 +20,14 @@ export type CatchLogPayload = {
 
   // offline can be invalid or unknown if no cached fish list (optional)
   fishId: number | null;
-  fishName?: string; // store name so you can map to real id later
+  fishName?: string;
 
-  rvVesselId: number;
+  // ✅ allow both (your create.tsx sends vessel CODE string)
+  rvVesselId: string | number;
 
-  // IMPORTANT: offline allowed => null
-  // If your backend expects owner_id string (OWN-0001), keep it string
-  ownerId: string | null;
+  // ✅ allow numeric owner db id (your create.tsx uses number)
+  // still supports legacy string owner_code if older payload exists
+  ownerId: number | string | null;
 
   catchDate: string; // yyyy-mm-dd
   catchTime: string; // hh:mm:ss
@@ -29,6 +35,9 @@ export type CatchLogPayload = {
 
   latitude?: number;
   longitude?: number;
+
+  // optional meta
+  qrKind?: "CRATE" | "VESSEL" | "UNKNOWN";
 };
 
 type QueueItem = {
@@ -88,13 +97,43 @@ async function writeIndex(index: LocalIndex) {
   await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(index));
 }
 
-export async function upsertLocalCatchLog(payload: CatchLogPayload, status: "QUEUED" | "SYNCED") {
-  const crateId = String(payload?.linkedCrateId || "").trim();
+/* ---------------- HELPERS ---------------- */
+function crateKey(payload: CatchLogPayload) {
+  return String(payload?.linkedCrateId || "").trim();
+}
+
+function sanitizePayload(p: CatchLogPayload): CatchLogPayload {
+  // prevent broken/undefined fields from older builds
+  return {
+    ...p,
+    linkedCrateId: String(p?.linkedCrateId || "").trim(),
+    tripId: String((p as any)?.tripId || "").trim(),
+    fishId:
+      typeof (p as any)?.fishId === "number" ? (p as any).fishId : (p as any)?.fishId ?? null,
+    fishName: (p as any)?.fishName ? String((p as any).fishName) : undefined,
+    rvVesselId: (p as any)?.rvVesselId ?? "",
+    ownerId: (p as any)?.ownerId ?? null,
+    catchDate: String((p as any)?.catchDate || ""),
+    catchTime: String((p as any)?.catchTime || ""),
+    images: Array.isArray((p as any)?.images) ? (p as any).images : [],
+    latitude: typeof (p as any)?.latitude === "number" ? (p as any).latitude : undefined,
+    longitude: typeof (p as any)?.longitude === "number" ? (p as any).longitude : undefined,
+    qrKind: (p as any)?.qrKind,
+  };
+}
+
+/* ---------------- INDEX OPS ---------------- */
+export async function upsertLocalCatchLog(
+  payload: CatchLogPayload,
+  status: "QUEUED" | "SYNCED"
+) {
+  const cleaned = sanitizePayload(payload);
+  const crateId = crateKey(cleaned);
   if (!crateId) return;
 
   const index = await readIndex();
   index[crateId] = {
-    payload,
+    payload: cleaned,
     savedAt: Date.now(),
     status,
   };
@@ -117,10 +156,12 @@ export async function markLocalCatchLogSynced(crateId: string) {
 }
 
 /**
- * THIS is what your Details screen needs.
- * It returns local saved payload even when offline.
+ * Details screen helper:
+ * returns local saved payload even when offline.
  */
-export async function getLocalCatchLogByCrateId(crateId: string): Promise<LocalIndexItem | null> {
+export async function getLocalCatchLogByCrateId(
+  crateId: string
+): Promise<LocalIndexItem | null> {
   const id = String(crateId || "").trim();
   if (!id) return null;
 
@@ -129,9 +170,15 @@ export async function getLocalCatchLogByCrateId(crateId: string): Promise<LocalI
 
   // fallback: scan queue if index missing (older builds)
   const q = await readQueue();
-  const found = q.find((x) => x.type === "CATCH_LOG" && x.payload?.linkedCrateId === id);
+  const found = q.find(
+    (x) => x.type === "CATCH_LOG" && String(x.payload?.linkedCrateId || "").trim() === id
+  );
   if (found?.payload) {
-    const item: LocalIndexItem = { payload: found.payload, savedAt: found.createdAt, status: "QUEUED" };
+    const item: LocalIndexItem = {
+      payload: sanitizePayload(found.payload),
+      savedAt: found.createdAt,
+      status: "QUEUED",
+    };
     // write it for next time
     const idx = await readIndex();
     idx[id] = item;
@@ -148,18 +195,20 @@ export async function getQueueCount() {
 }
 
 export async function enqueueCatchLog(payload: CatchLogPayload) {
+  const cleaned = sanitizePayload(payload);
+
   const q = await readQueue();
   q.push({
     id: uid(),
     type: "CATCH_LOG",
-    payload,
+    payload: cleaned,
     createdAt: Date.now(),
     tries: 0,
   });
   await writeQueue(q);
 
   // ✅ store per crateId for Details screen
-  await upsertLocalCatchLog(payload, "QUEUED");
+  await upsertLocalCatchLog(cleaned, "QUEUED");
 }
 
 /**
@@ -179,15 +228,19 @@ export async function flushQueue(sendCatchLog: (p: CatchLogPayload) => Promise<a
       continue;
     }
 
+    // ✅ sanitize on the way (handles old queue format)
+    const cleaned = sanitizePayload(item.payload);
+
     try {
-      await sendCatchLog(item.payload);
+      await sendCatchLog(cleaned);
       sent += 1;
 
       // ✅ mark local record as synced after success
-      await markLocalCatchLogSynced(item.payload.linkedCrateId);
+      await markLocalCatchLogSynced(cleaned.linkedCrateId);
     } catch (e: any) {
       keep.push({
         ...item,
+        payload: cleaned,
         tries: (item.tries ?? 0) + 1,
         lastError: String(e?.message || e),
       });
@@ -204,4 +257,11 @@ export async function clearQueue() {
 
 export async function clearLocalIndex() {
   await AsyncStorage.removeItem(INDEX_KEY);
+}
+
+/**
+ * OPTIONAL: clear everything (queue + index)
+ */
+export async function clearAllOfflineCatchLogs() {
+  await AsyncStorage.multiRemove([KEY, INDEX_KEY]);
 }

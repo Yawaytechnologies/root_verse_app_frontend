@@ -16,25 +16,21 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import NetInfo from "@react-native-community/netinfo";
 
 import { useTrace } from "../../src/data/wild/trace.store";
 
 type Lang = "ta" | "en";
 
-/**
- * ✅ IMPORTANT
- * /api/me DOES NOT "give token".
- * It RETURNS current logged-in user ONLY if you SEND token in header:
- *   Authorization: Bearer <token>
- *
- * So you must store token after login in AsyncStorage with this key.
- * Make sure this matches your login.slice.ts / me.slice.ts
- */
 const TOKEN_KEY = "auth_token";
 
 const API_BASE = "https://rootverse-backend-5qoo.onrender.com";
 const ME_API = `${API_BASE}/api/me`;
 const OWNER_API_BASE = `${API_BASE}/api/owner/fetch`;
+
+// ✅ offline cache keys
+const LAST_OWNER_ID_KEY = "rv_last_owner_id";
+const OWNER_CACHE_PREFIX = "rv_owner_cache:";
 
 type OwnerApiRes = {
   id: number;
@@ -105,6 +101,7 @@ const i18n = {
 
     noToken: "No token found. Please login again.",
     sessionExpired: "Session expired. Please login again.",
+    offlineNoCache: "Offline. No cached profile found.",
   },
   ta: {
     title: "Wild Fisher",
@@ -145,6 +142,7 @@ const i18n = {
 
     noToken: "டோக்கன் இல்லை. மீண்டும் லாகின் செய்யவும்.",
     sessionExpired: "செஷன் முடிந்தது. மீண்டும் லாகின் செய்யவும்.",
+    offlineNoCache: "ஆஃப்லைன். சேமித்த ப்ரோஃபைல் இல்லை.",
   },
 };
 
@@ -165,7 +163,6 @@ async function haptic() {
   } catch {}
 }
 
-/** ✅ Video-like palette (cool grey + blue) */
 const UI = {
   bg: "#f5f7fb",
   card: "#ffffff",
@@ -200,8 +197,15 @@ function Card({
 function StatusChip({ online, label }: { online: boolean; label: string }) {
   return (
     <View className="flex-row items-center gap-2">
-      <Ionicons name="wifi" size={16} color={online ? UI.green : UI.muted} />
-      <Text className="text-xs font-semibold" style={{ color: online ? UI.green : UI.muted }}>
+      <Ionicons
+        name={online ? "wifi" : "wifi-outline"}
+        size={16}
+        color={online ? UI.green : UI.red}
+      />
+      <Text
+        className="text-sm font-semibold"
+        style={{ color: online ? UI.green : UI.red }}
+      >
         {label}
       </Text>
     </View>
@@ -237,23 +241,23 @@ function ProfileDrawer({
         <Pressable onPress={() => {}} className="absolute left-0 top-0 h-full w-[86%] bg-white">
           <ScrollView contentContainerClassName="px-4 pt-6 pb-10">
             <View className="flex-row items-center justify-between">
-              <Text className="text-lg font-bold" style={{ color: UI.text }}>
+              <Text className="text-xl font-bold" style={{ color: UI.text }}>
                 {t.myDetails}
               </Text>
               <Pressable onPress={onClose} className="rounded-full p-2 active:opacity-70">
-                <Ionicons name="close" size={22} color={UI.text} />
+                <Ionicons name="close" size={24} color={UI.text} />
               </Pressable>
             </View>
 
             <View className="mt-4 flex-row items-center gap-3">
               <View
-                className="h-14 w-14 rounded-full items-center justify-center overflow-hidden"
+                className="h-16 w-16 rounded-full items-center justify-center overflow-hidden"
                 style={{ backgroundColor: UI.blue }}
               >
                 {user.avatarUrl ? (
-                  <Image source={{ uri: user.avatarUrl }} style={{ width: 56, height: 56 }} resizeMode="cover" />
+                  <Image source={{ uri: user.avatarUrl }} style={{ width: 64, height: 64 }} resizeMode="cover" />
                 ) : (
-                  <Text className="text-white font-extrabold">
+                  <Text className="text-white font-extrabold text-lg">
                     {(user.name || "—")
                       .split(" ")
                       .slice(0, 2)
@@ -265,15 +269,15 @@ function ProfileDrawer({
               </View>
 
               <View className="flex-1">
-                <Text className="text-base font-bold" style={{ color: UI.text }} numberOfLines={1}>
+                <Text className="text-lg font-bold" style={{ color: UI.text }} numberOfLines={1}>
                   {user.name}
                 </Text>
-                <Text className="text-xs" style={{ color: UI.muted }} numberOfLines={1}>
+                <Text className="text-sm" style={{ color: UI.muted }} numberOfLines={1}>
                   {user.role} · {user.ownerId}
                 </Text>
 
                 {!!(user.district || user.state) && (
-                  <Text className="mt-1 text-xs" style={{ color: UI.muted }} numberOfLines={1}>
+                  <Text className="mt-1 text-sm" style={{ color: UI.muted }} numberOfLines={1}>
                     {[user.district, user.state].filter(Boolean).join(", ")}
                   </Text>
                 )}
@@ -289,10 +293,10 @@ function ProfileDrawer({
               ].map((x) => (
                 <Card key={x.k}>
                   <View className="p-4">
-                    <Text className="text-xs" style={{ color: UI.muted }}>
+                    <Text className="text-sm" style={{ color: UI.muted }}>
                       {x.k}
                     </Text>
-                    <Text className="mt-1 text-sm" style={{ color: UI.text, fontWeight: "600" }}>
+                    <Text className="mt-1 text-base" style={{ color: UI.text, fontWeight: "700" }}>
                       {x.v}
                     </Text>
                   </View>
@@ -305,7 +309,7 @@ function ProfileDrawer({
               className="mt-6 rounded-2xl px-4 py-4 active:opacity-90"
               style={{ backgroundColor: UI.blue }}
             >
-              <Text className="text-center text-white font-semibold">{t.close}</Text>
+              <Text className="text-center text-white font-semibold text-base">{t.close}</Text>
             </Pressable>
           </ScrollView>
         </Pressable>
@@ -354,28 +358,29 @@ function ActionRow({
     >
       <Card>
         <View className="px-4 py-4 flex-row items-center">
-          <View className="h-11 w-11 rounded-xl items-center justify-center" style={{ backgroundColor: UI.blueSoft }}>
-            <Ionicons name={icon} size={22} color={UI.blue} />
+          <View className="h-12 w-12 rounded-xl items-center justify-center" style={{ backgroundColor: UI.blueSoft }}>
+            <Ionicons name={icon} size={24} color={UI.blue} />
           </View>
 
           <View className="ml-3 flex-1">
-            <Text className="text-sm font-bold" style={{ color: UI.text }} numberOfLines={1}>
+            <Text className="text-base font-bold" style={{ color: UI.text }} numberOfLines={1}>
               {title}
             </Text>
 
-            <Text className="mt-0.5 text-xs" style={{ color: UI.muted }} numberOfLines={2}>
+            <Text className="mt-0.5 text-sm" style={{ color: UI.muted }} numberOfLines={2}>
               {subtitle}
             </Text>
           </View>
 
-          <Ionicons name="chevron-forward" size={20} color={UI.muted} />
+          <Ionicons name="chevron-forward" size={22} color={UI.muted} />
         </View>
       </Card>
     </Pressable>
   );
 }
 
-/** ✅ read token (the only thing you need for /api/me) */
+/* ----------------- AUTH + CACHE HELPERS ----------------- */
+
 async function readTokenFromStorage(): Promise<string | null> {
   const keys = [TOKEN_KEY, "access_token", "token"];
   for (const k of keys) {
@@ -391,7 +396,44 @@ async function clearAuthStorage() {
   await Promise.all(keys.map((k) => AsyncStorage.removeItem(k)));
 }
 
-/** ✅ GET current logged-in owner via token */
+function cacheKeyForOwnerId(ownerId: number) {
+  return `${OWNER_CACHE_PREFIX}${ownerId}`;
+}
+
+async function saveLastOwnerId(ownerId: number) {
+  await AsyncStorage.setItem(LAST_OWNER_ID_KEY, String(ownerId));
+}
+
+async function readLastOwnerId(): Promise<number | null> {
+  const v = await AsyncStorage.getItem(LAST_OWNER_ID_KEY);
+  const n = v ? Number(String(v).trim()) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+async function saveOwnerCache(ownerId: number, data: OwnerApiRes) {
+  await AsyncStorage.setItem(cacheKeyForOwnerId(ownerId), JSON.stringify(data));
+  await saveLastOwnerId(ownerId);
+}
+
+async function readOwnerCache(ownerId: number): Promise<OwnerApiRes | null> {
+  const raw = await AsyncStorage.getItem(cacheKeyForOwnerId(ownerId));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as OwnerApiRes;
+  } catch {
+    return null;
+  }
+}
+
+async function isOnlineNow(): Promise<boolean> {
+  const s = await NetInfo.fetch();
+  const connected = !!s.isConnected;
+  const reachable = s.isInternetReachable; // can be null
+  return reachable === null ? connected : connected && reachable;
+}
+
+/* ----------------- API CALLS ----------------- */
+
 async function fetchMe(token: string): Promise<MeApiRes> {
   const res = await fetch(ME_API, {
     method: "GET",
@@ -408,25 +450,19 @@ async function fetchMe(token: string): Promise<MeApiRes> {
   }
 
   const json: any = await res.json();
-
-  // ✅ handle different backend shapes safely
   const me: any = json?.user ?? json?.data?.user ?? json?.data ?? json;
 
   const id = Number(me?.id);
-  if (!Number.isFinite(id) || id <= 0) {
-    throw new Error("ME API returned invalid user id");
-  }
-
+  if (!Number.isFinite(id) || id <= 0) throw new Error("ME API returned invalid user id");
   return { ...me, id } as MeApiRes;
 }
 
-/** ✅ (optional) fetch owner full profile by numeric id (if you need extra fields) */
 async function fetchOwnerById(ownerDbId: number, token?: string): Promise<OwnerApiRes> {
   const res = await fetch(`${OWNER_API_BASE}/${encodeURIComponent(String(ownerDbId))}`, {
     method: "GET",
     headers: {
       Accept: "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : null),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
 
@@ -438,6 +474,8 @@ async function fetchOwnerById(ownerDbId: number, token?: string): Promise<OwnerA
   return (await res.json()) as OwnerApiRes;
 }
 
+/* ----------------- SCREEN ----------------- */
+
 export default function WildDashboard() {
   const insets = useSafeAreaInsets();
   const trace = useTrace();
@@ -446,41 +484,75 @@ export default function WildDashboard() {
   const [lang, setLang] = useState<Lang>("ta");
   const t = i18n[lang];
 
-  // demo network state (replace later)
-  const [online] = useState(true);
+  // ✅ real network state
+  const [online, setOnline] = useState(true);
 
   const lastCrateId = useMemo(() => trace.events?.[0]?.crateId ?? "", [trace.events]);
 
-  // ✅ profile state (NO HARDCODED 14)
+  // ✅ profile state
   const [ownerDbId, setOwnerDbId] = useState<number | null>(null);
   const [me, setMe] = useState<MeApiRes | null>(null);
   const [profile, setProfile] = useState<OwnerApiRes | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
 
-  const loadProfile = async () => {
-    try {
-      setLoadingProfile(true);
-      setProfileError(null);
+  // ✅ network listener
+  useEffect(() => {
+    const sub = NetInfo.addEventListener((s) => {
+      const connected = !!s.isConnected;
+      const reachable = s.isInternetReachable;
+      const on = reachable === null ? connected : connected && reachable;
+      setOnline(on);
+    });
+    return () => sub();
+  }, []);
 
+  const loadProfile = async () => {
+    setLoadingProfile(true);
+    setProfileError(null);
+
+    try {
+      // 1) Always try to show cached profile immediately (offline support)
+      const lastId = await readLastOwnerId();
+      if (lastId) {
+        const cached = await readOwnerCache(lastId);
+        if (cached) {
+          setOwnerDbId(lastId);
+          setProfile(cached);
+        }
+      }
+
+      // 2) Need token to know “who is logged in” and to refresh profile
       const token = await readTokenFromStorage();
       if (!token) {
-        setMe(null);
-        setProfile(null);
-        setOwnerDbId(null);
-        setProfileError(t.noToken);
-        router.replace("/(auth)/otp" as const); // change if your login route differs
+        // If we have cache, show it (offline) and don't force login here.
+        // But if no cache, push to login.
+        if (!profile && !lastId) {
+          setProfileError(t.noToken);
+          router.replace("/(auth)/otp" as const);
+        }
         return;
       }
 
+      // 3) If offline, stop here (cache already shown)
+      const onNow = await isOnlineNow();
+      setOnline(onNow);
+      if (!onNow) {
+        if (!profile && !lastId) setProfileError(t.offlineNoCache);
+        return;
+      }
+
+      // 4) Online: fetch current user from /api/me
       const meData = await fetchMe(token);
       setMe(meData);
       setOwnerDbId(meData.id);
 
-      // ✅ If /api/me already contains everything you need, you can skip this call.
-      // Keeping it because your owner fetch has profile_picture_url, etc.
+      // 5) Fetch full owner profile (your /owner/fetch has avatar url etc)
       const ownerData = await fetchOwnerById(meData.id, token);
       setProfile(ownerData);
+
+      // 6) Cache it for offline use
+      await saveOwnerCache(meData.id, ownerData);
     } catch (e: any) {
       if (e?.message === "UNAUTHORIZED") {
         await clearAuthStorage();
@@ -492,8 +564,8 @@ export default function WildDashboard() {
         return;
       }
 
-      setProfile(null);
-      setProfileError(e?.message || t.failedProfile);
+      // If online fetch fails but cache exists, keep cache on screen
+      if (!profile) setProfileError(e?.message || t.failedProfile);
     } finally {
       setLoadingProfile(false);
     }
@@ -513,19 +585,12 @@ export default function WildDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ map API → UI user (prefer owner profile; fallback to /me)
   const user = useMemo(() => {
     const src: any = profile || me;
 
     const name = src?.username ? String(src.username) : "—";
     const role = src?.rootverse_type ? String(src.rootverse_type) : "—";
-
-    // owner_id is like "OWN-0001"
-    const ownerIdLabel = src?.owner_id
-      ? String(src.owner_id)
-      : ownerDbId
-      ? `ID-${ownerDbId}`
-      : "—";
+    const ownerIdLabel = src?.owner_id ? String(src.owner_id) : ownerDbId ? `ID-${ownerDbId}` : "—";
 
     const phone = src?.phone_no ? String(src.phone_no) : "—";
     const email = src?.email ? String(src.email) : "—";
@@ -572,29 +637,31 @@ export default function WildDashboard() {
         contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
         contentContainerClassName="px-4 pb-6"
       >
+        {/* Header */}
         <View className="pt-3 flex-row items-center justify-between">
-          <Text className="text-base font-bold" style={{ color: UI.text }}>
+          <Text className="text-lg font-bold" style={{ color: UI.text }}>
             {t.title}
           </Text>
           <StatusChip online={online} label={online ? t.online : t.offline} />
         </View>
 
+        {/* Profile card */}
         <Card className="mt-4">
           <Pressable
             onPress={() => setDrawerOpen(true)}
             className="px-4 py-4 active:opacity-80"
-            disabled={loadingProfile || !!profileError}
+            disabled={loadingProfile || !!profileError || !profile}
           >
             <View className="flex-row items-center justify-between">
               <View className="flex-row items-center gap-3">
                 <View
-                  className="h-12 w-12 rounded-full items-center justify-center overflow-hidden"
+                  className="h-14 w-14 rounded-full items-center justify-center overflow-hidden"
                   style={{ backgroundColor: UI.blue }}
                 >
                   {user.avatarUrl ? (
-                    <Image source={{ uri: user.avatarUrl }} style={{ width: 48, height: 48 }} resizeMode="cover" />
+                    <Image source={{ uri: user.avatarUrl }} style={{ width: 56, height: 56 }} resizeMode="cover" />
                   ) : (
-                    <Text className="text-white font-extrabold">
+                    <Text className="text-white font-extrabold text-lg">
                       {(user.name || "—")
                         .split(" ")
                         .slice(0, 2)
@@ -606,37 +673,33 @@ export default function WildDashboard() {
                 </View>
 
                 <View style={{ flex: 1 }}>
-                  <Text className="text-sm font-bold" style={{ color: UI.text }} numberOfLines={1}>
+                  <Text className="text-base font-bold" style={{ color: UI.text }} numberOfLines={1}>
                     {user.name}
                   </Text>
 
-                  <Text className="text-xs" style={{ color: UI.muted }} numberOfLines={1}>
+                  <Text className="text-sm" style={{ color: UI.muted }} numberOfLines={1}>
                     {user.role} · {user.ownerId}
                   </Text>
 
                   {!!(user.district || user.state) && (
-                    <Text className="mt-0.5 text-xs" style={{ color: UI.muted }} numberOfLines={1}>
+                    <Text className="mt-0.5 text-sm" style={{ color: UI.muted }} numberOfLines={1}>
                       {[user.district, user.state].filter(Boolean).join(", ")}
                     </Text>
                   )}
                 </View>
               </View>
 
-              {loadingProfile ? (
-                <ActivityIndicator />
-              ) : (
-                <Ionicons name="chevron-forward" size={20} color={UI.muted} />
-              )}
+              {loadingProfile ? <ActivityIndicator /> : <Ionicons name="chevron-forward" size={22} color={UI.muted} />}
             </View>
 
             <View className="mt-3 rounded-xl px-3 py-2" style={{ backgroundColor: UI.blueSoft }}>
               {loadingProfile ? (
-                <Text className="text-xs font-semibold" style={{ color: UI.blue }}>
+                <Text className="text-sm font-semibold" style={{ color: UI.blue }}>
                   {t.loadingProfile}
                 </Text>
               ) : profileError ? (
                 <View className="flex-row items-center justify-between">
-                  <Text className="text-xs font-semibold flex-1 pr-2" style={{ color: UI.red }} numberOfLines={2}>
+                  <Text className="text-sm font-semibold flex-1 pr-2" style={{ color: UI.red }} numberOfLines={2}>
                     {profileError}
                   </Text>
                   <Pressable
@@ -647,24 +710,21 @@ export default function WildDashboard() {
                     className="rounded-full px-3 py-1 border"
                     style={{ borderColor: UI.border, backgroundColor: UI.card }}
                   >
-                    <Text className="text-xs font-semibold" style={{ color: UI.text }}>
+                    <Text className="text-sm font-semibold" style={{ color: UI.text }}>
                       {t.retry}
                     </Text>
                   </Pressable>
                 </View>
               ) : (
-                <Text className="text-xs font-semibold" style={{ color: UI.blue }}>
+                <Text className="text-sm font-semibold" style={{ color: UI.blue }}>
                   {t.hint}
                 </Text>
               )}
             </View>
 
             {!!lastCrateId && (
-              <View
-                className="mt-2 rounded-xl px-3 py-2 border"
-                style={{ backgroundColor: UI.greenSoft, borderColor: "#bfe8cd" }}
-              >
-                <Text className="text-xs" style={{ color: UI.text }}>
+              <View className="mt-2 rounded-xl px-3 py-2 border" style={{ backgroundColor: UI.greenSoft, borderColor: "#bfe8cd" }}>
+                <Text className="text-sm" style={{ color: UI.text }}>
                   Last Sticker: <Text style={{ fontWeight: "800" }}>{String(lastCrateId)}</Text>
                 </Text>
               </View>
@@ -672,6 +732,7 @@ export default function WildDashboard() {
           </Pressable>
         </Card>
 
+        {/* Language toggle */}
         <View className="mt-3 flex-row justify-end">
           <Pressable
             onPress={async () => {
@@ -681,14 +742,15 @@ export default function WildDashboard() {
             className="rounded-full border bg-white px-3 py-2 active:opacity-80"
             style={{ borderColor: UI.border }}
           >
-            <Text className="text-xs font-semibold" style={{ color: UI.text }}>
+            <Text className="text-sm font-semibold" style={{ color: UI.text }}>
               {lang === "ta" ? i18n.ta.langBtnEn : i18n.en.langBtnTa}
             </Text>
           </Pressable>
         </View>
 
+        {/* Actions */}
         <View className="mt-5">
-          <Text className="mb-2 text-sm font-bold" style={{ color: UI.text }}>
+          <Text className="mb-2 text-base font-bold" style={{ color: UI.text }}>
             {t.actions}
           </Text>
 
@@ -731,12 +793,13 @@ export default function WildDashboard() {
           </View>
         </View>
 
+        {/* Bottom CTA */}
         <Pressable
           onPress={() => router.push("/(wild)/trips/create" as const)}
           className="mt-6 rounded-2xl px-4 py-4 active:opacity-90"
           style={{ backgroundColor: UI.blue }}
         >
-          <Text className="text-center text-white font-semibold">
+          <Text className="text-center text-white font-semibold text-base">
             {lang === "ta" ? "புதிய பயணம் தொடங்கு" : "Start New Trip"}
           </Text>
         </Pressable>
