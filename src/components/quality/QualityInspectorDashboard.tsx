@@ -1,53 +1,45 @@
+// src/components/quality/QualityInspectorDashboard.tsx
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Platform, Pressable, ScrollView, Text, View } from "react-native";
-import {
-  SafeAreaView,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import QcListScreen from "./QcListScreen";
+import { useAppDispatch, useAppSelector } from "../../store/hooks";
+import { fetchQcMe, selectInspector as selectQcInspector } from "../../store/qualityAuth/qualityAuth.slice";
 import QcScannerScreen from "./QcScannerScreen";
-import QcScanViewDetailsScreen from "./QcScanViewDetailsScreen";
+
+import { getQcFillQueue, type QcFillQueuedItem } from "../../utils/qcFillQueue";
 
 export type Division = "WILD" | "AQUA" | "MARICULTURE";
 
 export type InspectorInfo = {
   name: string;
-
-  // ✅ now support both name + id forms
   state_id?: number;
   district_id?: number;
   state_name?: string;
   district_name?: string;
-
-  id: string; // display id (checker_code or qc id)
-  divisionLabel: string;
-};
-
-export type CompletedInspection = {
   id: string;
-  statusBadge: "Approved" | "Rejected";
-  inspectedDate: string;
-  tag?: string;
-  title: string;
-  farmer: string;
-  quantity: string;
-  waterTemp?: string;
-  phLevel?: string;
-  grade?: string;
-  qualityGrade: string;
+  divisionLabel: string;
 };
 
 type Props = {
   division: Division;
   inspector: InspectorInfo;
   totalInspections: number;
-  completed: CompletedInspection[];
+  completed: any[];
   onViewInspection: (id: string) => void;
 };
 
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+function todayYmd(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
 function formatZone(i: InspectorInfo) {
-  // ✅ BEST: show names if backend provides them
   const dName = (i.district_name || "").trim();
   const sName = (i.state_name || "").trim();
 
@@ -55,7 +47,6 @@ function formatZone(i: InspectorInfo) {
   if (sName) return sName;
   if (dName) return dName;
 
-  // fallback: show ids so at least something appears
   const dId = typeof i.district_id === "number" ? String(i.district_id) : "";
   const sId = typeof i.state_id === "number" ? String(i.state_id) : "";
 
@@ -66,30 +57,117 @@ function formatZone(i: InspectorInfo) {
   return "—";
 }
 
-export default function QualityInspectorDashboard({
-  division,
-  inspector,
-  totalInspections,
-  completed,
-  onViewInspection,
-}: Props) {
+type TabKey = "scanner" | "checked" | "pending" | "rejected";
+
+function getQcResultUpper(p: any): string {
+  const v = p?.qc_result ?? p?.qcResult ?? p?.qc_status ?? p?.qcStatus ?? p?.status ?? "";
+  return String(v || "").toUpperCase();
+}
+
+function isRejectedPayload(p: any): boolean {
+  const r = getQcResultUpper(p);
+  return r === "REJECT" || r === "REJECTED" || !!p?.reject_reason;
+}
+
+export default function QualityInspectorDashboard({ division, inspector }: Props) {
   const insets = useSafeAreaInsets();
   const theme = useMemo(() => getTheme(division), [division]);
 
-  const [tab, setTab] = useState<"scanner" | "completed" | "scan_view">(
-    "scanner",
-  );
+  const dispatch = useAppDispatch();
+  const qc = useAppSelector(selectQcInspector);
+
+  useEffect(() => {
+    if (!qc?.checker_code) dispatch(fetchQcMe());
+  }, [dispatch, qc?.checker_code]);
+
+  const mergedInspector: InspectorInfo = useMemo(() => {
+    const name = inspector?.name || qc?.checker_name || "Inspector";
+    const id = inspector?.id || qc?.checker_code || "";
+    return {
+      ...inspector,
+      name,
+      id,
+      state_id: inspector.state_id ?? qc?.state_id,
+      district_id: inspector.district_id ?? qc?.district_id,
+      state_name: inspector.state_name ?? qc?.state_name,
+      district_name: inspector.district_name ?? qc?.district_name,
+    };
+  }, [inspector, qc]);
+
+  const [tab, setTab] = useState<TabKey>("scanner");
   const [lang, setLang] = useState<"en" | "ta">("en");
 
-  const completedCount = completed.length;
+  // ✅ NEW: shared selected date for all list tabs
+  const [selectedDate, setSelectedDate] = useState<string>(() => todayYmd());
 
-  const zoneText = useMemo(() => formatZone(inspector), [inspector]);
+  const zoneText = useMemo(() => formatZone(mergedInspector), [mergedInspector]);
+
+  const [counts, setCounts] = useState({ total: 0, checked: 0, pending: 0, rejected: 0 });
+
+  const refreshCounts = async () => {
+    try {
+      const q: QcFillQueuedItem[] = await getQcFillQueue();
+      const divisionItems = q.filter(
+        (x) => String(x.payload?.division || "").toUpperCase() === String(division).toUpperCase()
+      );
+
+      let pending = 0;
+      let checked = 0;
+      let rejected = 0;
+
+      for (const x of divisionItems) {
+        const p = x.payload || {};
+        const rej = isRejectedPayload(p);
+
+        // ✅ Pending = local not-synced ONLY (editable/deletable)
+        if (!x.synced) {
+          pending += 1;
+          continue;
+        }
+
+        // ✅ Synced items split into rejected vs checked
+        if (rej) rejected += 1;
+        else checked += 1;
+      }
+
+      setCounts({
+        total: divisionItems.length,
+        checked,
+        pending,
+        rejected,
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    refreshCounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [division]);
+
+  useEffect(() => {
+    refreshCounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  // ✅ keep counts updated while user edits/deletes/resyncs inside list screens
+  useEffect(() => {
+    let alive = true;
+    const t = setInterval(() => {
+      if (!alive) return;
+      refreshCounts();
+    }, 1200);
+
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [division]);
 
   return (
-    <SafeAreaView
-      style={{ flex: 1, backgroundColor: "#030712" }}
-      edges={["top"]}
-    >
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#030712" }} edges={["top"]}>
       {/* ===== Header ===== */}
       <View
         style={{
@@ -101,14 +179,7 @@ export default function QualityInspectorDashboard({
           borderBottomColor: "rgba(255,255,255,0.06)",
         }}
       >
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 10,
-          }}
-        >
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             <View
               style={{
@@ -122,20 +193,12 @@ export default function QualityInspectorDashboard({
                 justifyContent: "center",
               }}
             >
-              <Ionicons
-                name="shield-checkmark-outline"
-                size={22}
-                color="#fff"
-              />
+              <Ionicons name="shield-checkmark-outline" size={22} color="#fff" />
             </View>
 
             <View style={{ marginTop: -2 }}>
-              <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>
-                Quality{"\n"}Inspector
-              </Text>
-              <Text style={{ color: "rgba(255,255,255,0.55)" }}>
-                {inspector.divisionLabel}
-              </Text>
+              <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>Quality{"\n"}Inspector</Text>
+              <Text style={{ color: "rgba(255,255,255,0.55)" }}>{mergedInspector.divisionLabel}</Text>
             </View>
           </View>
 
@@ -154,11 +217,7 @@ export default function QualityInspectorDashboard({
               marginTop: -2,
             }}
           >
-            <Text
-              style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900" }}
-            >
-              EN
-            </Text>
+            <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900" }}>EN</Text>
 
             <View
               style={{
@@ -182,19 +241,12 @@ export default function QualityInspectorDashboard({
               />
             </View>
 
-            <Text
-              style={{ color: "rgba(255,255,255,0.75)", fontWeight: "900" }}
-            >
-              தமிழ்
-            </Text>
+            <Text style={{ color: "rgba(255,255,255,0.75)", fontWeight: "900" }}>தமிழ்</Text>
           </Pressable>
         </View>
       </View>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 24, flexGrow: 1 }}
-      >
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24, flexGrow: 1 }}>
         {/* ===== Banner ===== */}
         <View
           style={{
@@ -207,106 +259,63 @@ export default function QualityInspectorDashboard({
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <View style={{ flex: 1 }}>
-              <Text
-                style={{
-                  color: "white",
-                  fontSize: 28,
-                  fontWeight: "900",
-                  letterSpacing: -0.2,
-                }}
-              >
-                {inspector.name}
+              <Text style={{ color: "white", fontSize: 28, fontWeight: "900", letterSpacing: -0.2 }}>
+                {mergedInspector.name}
               </Text>
 
-              {/* ✅ zone now shows names (district_name, state_name) */}
-              <Text
-                style={{
-                  color: "rgba(255,255,255,0.92)",
-                  marginTop: 3,
-                  fontSize: 13,
-                }}
-              >
-                {lang === "en" ? "Quality Inspector" : "தர ஆய்வாளர்"} •{" "}
-                {zoneText}
+              <Text style={{ color: "rgba(255,255,255,0.92)", marginTop: 3, fontSize: 13 }}>
+                {lang === "en" ? "Quality Inspector" : "தர ஆய்வாளர்"} • {zoneText}
               </Text>
 
-              <Text
-                style={{
-                  color: "rgba(255,255,255,0.85)",
-                  marginTop: 2,
-                  fontSize: 12.5,
-                }}
-              >
-                {lang === "en" ? "ID" : "ஐடி"}: {inspector.id}
+              <Text style={{ color: "rgba(255,255,255,0.85)", marginTop: 2, fontSize: 12.5 }}>
+                {lang === "en" ? "ID" : "ஐடி"}: {mergedInspector.id}
               </Text>
             </View>
 
-            <View
-              style={{
-                width: 128,
-                borderRadius: 18,
-                backgroundColor: "rgba(255,255,255,0.18)",
-                borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.12)",
-                paddingVertical: 10,
-                paddingHorizontal: 10,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text
-                style={{
-                  color: "white",
-                  fontSize: 30,
-                  fontWeight: "900",
-                  lineHeight: 32,
-                }}
-              >
-                {totalInspections}
-              </Text>
-              <Text
-                style={{
-                  color: "rgba(255,255,255,0.88)",
-                  fontWeight: "900",
-                  textAlign: "center",
-                  fontSize: 12,
-                }}
-              >
-                {lang === "en" ? "Total Inspections" : "மொத்த ஆய்வுகள்"}
-              </Text>
+            {/* ✅ LOCAL counts */}
+            <View style={{ width: 150, gap: 8 }}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <StatBox label={lang === "en" ? "Total" : "மொத்தம்"} value={counts.total} bg="#3E86E0" />
+                <StatBox label={lang === "en" ? "Checked" : "சோதித்தது"} value={counts.checked} bg="#34A987" />
+              </View>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <StatBox label={lang === "en" ? "Pending" : "நிலுவை"} value={counts.pending} bg="#D29B3B" />
+                <StatBox label={lang === "en" ? "Rejected" : "நிராகரி"} value={counts.rejected} bg="#CF5A5A" />
+              </View>
             </View>
           </View>
         </View>
 
         {/* ===== Tabs ===== */}
-        <View
-          style={{
-            backgroundColor: "#071228",
-            borderBottomWidth: 1,
-            borderBottomColor: "rgba(255,255,255,0.06)",
-          }}
-        >
+        <View style={{ backgroundColor: "#071228", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" }}>
           <View style={{ flexDirection: "row" }}>
             <MiniTab
               active={tab === "scanner"}
-              label={lang === "en" ? "Scanner" : "ஸ்கேனர்"}
+              label={lang === "en" ? "Scan" : "ஸ்கேன்"}
               icon="scan-outline"
               activeColor={theme.scannerActive}
               onPress={() => setTab("scanner")}
             />
             <MiniTab
-              active={tab === "completed"}
-              label={`${lang === "en" ? "Completed" : "நிறைவு"} (${completedCount})`}
-              icon="checkmark-done-outline"
+              active={tab === "checked"}
+              label={lang === "en" ? "Checked" : "சோதித்தது"}
+              icon="checkmark-circle-outline"
               activeColor={theme.completedActive}
-              onPress={() => setTab("completed")}
+              onPress={() => setTab("checked")}
             />
             <MiniTab
-              active={tab === "scan_view"}
-              label={lang === "en" ? "Scan & View" : "ஸ்கேன் & காண்க"}
-              icon="document-text-outline"
-              activeColor={theme.scannerActive}
-              onPress={() => setTab("scan_view")}
+              active={tab === "pending"}
+              label={lang === "en" ? "Pending" : "நிலுவையில்"}
+              icon="time-outline"
+              activeColor={theme.pendingActive}
+              onPress={() => setTab("pending")}
+            />
+            <MiniTab
+              active={tab === "rejected"}
+              label={lang === "en" ? "Rejected" : "நிராகரிப்பு"}
+              icon="close-circle-outline"
+              activeColor={theme.rejectedActive}
+              onPress={() => setTab("rejected")}
             />
           </View>
         </View>
@@ -314,154 +323,43 @@ export default function QualityInspectorDashboard({
         {/* ===== Content ===== */}
         <View style={{ paddingHorizontal: 16, paddingVertical: 14 }}>
           {tab === "scanner" ? (
-            <QcScannerScreen division={division} lang={lang} />
-          ) : tab === "completed" ? (
-            <>
-              <Text style={{ color: "white", fontSize: 22, fontWeight: "900" }}>
-                {lang === "en" ? "Completed Inspections" : "நிறைவு ஆய்வுகள்"}
-              </Text>
+            <QcScannerScreen
+              division={division}
+              lang={lang}
+              onAfterSubmit={(qcResult) => {
+                const r = String(qcResult || "").toUpperCase();
 
-              <View style={{ marginTop: 12, gap: 14 }}>
-                {completed.map((c) => (
-                  <Card key={c.id}>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        justifyContent: "space-between",
-                        gap: 10,
-                      }}
-                    >
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          gap: 10,
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <Pill
-                          text={c.statusBadge}
-                          tone={
-                            c.statusBadge === "Approved"
-                              ? "approved"
-                              : "rejected"
-                          }
-                        />
-                        {!!c.tag && <Pill text={c.tag} tone="tag" />}
-                      </View>
+                // Pending tab is for NOT-SYNCED local failures (editable/deletable)
+                if (r === "REJECT") setTab("rejected");
+                else setTab("checked");
 
-                      <View style={{ alignItems: "flex-end" }}>
-                        <Text style={{ color: "rgba(255,255,255,0.55)" }}>
-                          Inspected:
-                        </Text>
-                        <Text
-                          style={{
-                            color: "rgba(255,255,255,0.85)",
-                            fontWeight: "800",
-                          }}
-                        >
-                          {c.inspectedDate}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <Text
-                      style={{
-                        color: "white",
-                        fontSize: 22,
-                        fontWeight: "900",
-                        marginTop: 12,
-                      }}
-                    >
-                      {c.title}
-                    </Text>
-
-                    <Text
-                      style={{ color: "rgba(255,255,255,0.7)", marginTop: 6 }}
-                    >
-                      Farmer: {c.farmer}
-                    </Text>
-
-                    {division === "AQUA" ? (
-                      <>
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            marginTop: 14,
-                            gap: 12,
-                          }}
-                        >
-                          <Info label="Quantity" value={c.quantity || "—"} />
-                          <Info label="Water Temp" value={c.waterTemp ?? "—"} />
-                        </View>
-
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            marginTop: 14,
-                            gap: 12,
-                          }}
-                        >
-                          <Info label="pH Level" value={c.phLevel ?? "—"} />
-                          <Info label="Grade" value={c.grade ?? "—"} />
-                        </View>
-
-                        <View style={{ marginTop: 14 }}>
-                          <Text style={{ color: "rgba(255,255,255,0.55)" }}>
-                            Quality
-                          </Text>
-                          <Text
-                            style={{
-                              color: "#34D399",
-                              fontWeight: "900",
-                              fontSize: 16,
-                              marginTop: 4,
-                            }}
-                          >
-                            {c.qualityGrade || "—"}
-                          </Text>
-                        </View>
-                      </>
-                    ) : (
-                      <View style={{ marginTop: 14, gap: 12 }}>
-                        <FieldRow label="Quantity" value={c.quantity || "—"} />
-                        <FieldRow label="Grade" value={c.grade ?? "—"} />
-                        <FieldRow
-                          label="Quality"
-                          value={c.qualityGrade || "—"}
-                          valueColor="#34D399"
-                        />
-                      </View>
-                    )}
-
-                    <Pressable
-                      onPress={() => onViewInspection(c.id)}
-                      style={{
-                        marginTop: 16,
-                        paddingVertical: 12,
-                        borderRadius: 16,
-                        backgroundColor: "rgba(255,255,255,0.08)",
-                        borderWidth: 1,
-                        borderColor: "rgba(255,255,255,0.10)",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: "white",
-                          fontWeight: "900",
-                          fontSize: 15,
-                        }}
-                      >
-                        View
-                      </Text>
-                    </Pressable>
-                  </Card>
-                ))}
-              </View>
-            </>
+                refreshCounts();
+              }}
+            />
+          ) : tab === "checked" ? (
+            <QcListScreen
+              division={division}
+              lang={lang}
+              status="checked"
+              selectedDate={selectedDate}
+              onChangeDate={setSelectedDate}
+            />
+          ) : tab === "pending" ? (
+            <QcListScreen
+              division={division}
+              lang={lang}
+              status="pending"
+              selectedDate={selectedDate}
+              onChangeDate={setSelectedDate}
+            />
           ) : (
-            <QcScanViewDetailsScreen division={division} lang={lang} />
+            <QcListScreen
+              division={division}
+              lang={lang}
+              status="rejected"
+              selectedDate={selectedDate}
+              onChangeDate={setSelectedDate}
+            />
           )}
         </View>
       </ScrollView>
@@ -469,7 +367,28 @@ export default function QualityInspectorDashboard({
   );
 }
 
-/* ---------- small components ---------- */
+function StatBox({ label, value, bg }: { label: string; value: number; bg: string }) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        borderRadius: 18,
+        backgroundColor: bg,
+        paddingVertical: 11,
+        alignItems: "center",
+        justifyContent: "center",
+        shadowColor: "#000",
+        shadowOpacity: 0.28,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 8,
+      }}
+    >
+      <Text style={{ color: "white", fontSize: 20, fontWeight: "900" }}>{value}</Text>
+      <Text style={{ color: "rgba(255,255,255,0.92)", fontWeight: "900", fontSize: 11 }}>{label}</Text>
+    </View>
+  );
+}
 
 function MiniTab({
   active,
@@ -485,159 +404,23 @@ function MiniTab({
   onPress: () => void;
 }) {
   return (
-    <Pressable
-      onPress={onPress}
-      style={{
-        flex: 1,
-        paddingVertical: 10,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
+    <Pressable onPress={onPress} style={{ flex: 1, paddingVertical: 10, alignItems: "center", justifyContent: "center" }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Ionicons
-          name={icon}
-          size={17}
-          color={active ? activeColor : "rgba(255,255,255,0.55)"}
-        />
-        <Text
-          numberOfLines={1}
-          style={{
-            color: active ? activeColor : "rgba(255,255,255,0.55)",
-            fontWeight: "900",
-            fontSize: 14,
-          }}
-        >
+        <Ionicons name={icon} size={17} color={active ? activeColor : "rgba(255,255,255,0.55)"} />
+        <Text numberOfLines={1} style={{ color: active ? activeColor : "rgba(255,255,255,0.55)", fontWeight: "900", fontSize: 14 }}>
           {label}
         </Text>
       </View>
-      <View
-        style={{
-          marginTop: 8,
-          height: 3,
-          width: "100%",
-          backgroundColor: active ? activeColor : "transparent",
-        }}
-      />
+
+      <View style={{ marginTop: 8, height: 3, width: "100%", backgroundColor: active ? activeColor : "transparent" }} />
     </Pressable>
-  );
-}
-
-function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <View
-      style={{
-        borderRadius: 26,
-        padding: 16,
-        backgroundColor: "#071228",
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.10)",
-      }}
-    >
-      {children}
-    </View>
-  );
-}
-
-function Pill({
-  text,
-  tone,
-}: {
-  text: string;
-  tone: "tag" | "approved" | "rejected";
-}) {
-  const bg =
-    tone === "approved"
-      ? "rgba(16, 185, 129, 0.16)"
-      : tone === "rejected"
-        ? "rgba(244, 63, 94, 0.16)"
-        : "rgba(99, 102, 241, 0.16)";
-
-  const fg =
-    tone === "approved"
-      ? "#34D399"
-      : tone === "rejected"
-        ? "#FB7185"
-        : "#A5B4FC";
-
-  return (
-    <View
-      style={{
-        paddingVertical: 7,
-        paddingHorizontal: 12,
-        borderRadius: 999,
-        backgroundColor: bg,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.10)",
-      }}
-    >
-      <Text style={{ color: fg, fontWeight: "900" }}>{text}</Text>
-    </View>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={{ flex: 1 }}>
-      <Text style={{ color: "rgba(255,255,255,0.45)" }}>{label}</Text>
-      <Text
-        style={{
-          color: "white",
-          fontWeight: "900",
-          marginTop: 4,
-          fontSize: 16,
-        }}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function FieldRow({
-  label,
-  value,
-  valueColor,
-}: {
-  label: string;
-  value: string;
-  valueColor?: string;
-}) {
-  return (
-    <View>
-      <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>
-        {label}
-      </Text>
-      <Text
-        style={{
-          color: valueColor ?? "white",
-          fontWeight: "900",
-          marginTop: 4,
-          fontSize: 16,
-        }}
-      >
-        {value}
-      </Text>
-    </View>
   );
 }
 
 function getTheme(division: Division) {
   if (division === "AQUA")
-    return {
-      bannerFrom: "#1D4ED8",
-      scannerActive: "#3b82f6",
-      completedActive: "#34D399",
-    };
+    return { bannerFrom: "#1D4ED8", scannerActive: "#3b82f6", completedActive: "#34D399", pendingActive: "#FBBF24", rejectedActive: "#F87171" };
   if (division === "MARICULTURE")
-    return {
-      bannerFrom: "#A855F7",
-      scannerActive: "#3b82f6",
-      completedActive: "#34D399",
-    };
-  return {
-    bannerFrom: "#0EA5A4",
-    scannerActive: "#3b82f6",
-    completedActive: "#34D399",
-  };
+    return { bannerFrom: "#A855F7", scannerActive: "#3b82f6", completedActive: "#34D399", pendingActive: "#FBBF24", rejectedActive: "#F87171" };
+  return { bannerFrom: "#0EA5A4", scannerActive: "#3b82f6", completedActive: "#34D399", pendingActive: "#FBBF24", rejectedActive: "#F87171" };
 }

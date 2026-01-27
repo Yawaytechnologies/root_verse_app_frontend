@@ -1,3 +1,4 @@
+// app/(wild)/trips/new-request.tsx  (or wherever your file is)
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { router } from "expo-router";
 import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
@@ -63,6 +64,7 @@ const i18n = {
     errMethod: "Select fishing method",
     errLanding: "Select nearest station",
     errPlanned: "Select planned trip date & time",
+    errOwner: "Owner not loaded yet. Please wait / check login.",
     sent: "Trip request sent ✅",
     status: "Status",
 
@@ -71,6 +73,8 @@ const i18n = {
     pending: "Pending sync",
     apiFailDummy: "API failed — saved locally (dummy).",
     synced: "Synced ✅",
+    meLoading: "Loading owner info...",
+    meError: "Owner info fetch failed",
   },
   ta: {
     title: "புதிய பயணம் கோரிக்கை",
@@ -112,6 +116,7 @@ const i18n = {
     errMethod: "மீன்பிடி முறையை தேர்வு செய்யவும்",
     errLanding: "அருகிலுள்ள நிலையத்தை தேர்வு செய்யவும்",
     errPlanned: "பயண தேதி & நேரம் தேர்வு செய்யவும்",
+    errOwner: "Owner load ஆகலை. கொஞ்சம் wait / login check பண்ணுங்க.",
     sent: "பயண கோரிக்கை அனுப்பப்பட்டது ✅",
     status: "நிலை",
 
@@ -120,6 +125,8 @@ const i18n = {
     pending: "Pending sync",
     apiFailDummy: "API தோல்வி — உள்ளூரில் சேமிக்கப்பட்டது (dummy).",
     synced: "Sync ஆனது ✅",
+    meLoading: "Owner info load ஆகுது...",
+    meError: "Owner info fetch fail",
   },
 };
 
@@ -199,6 +206,7 @@ function PickerSheet({
   );
 }
 
+/* ---------------- HELPERS ---------------- */
 function toISO(dt: Date) {
   return dt.toISOString();
 }
@@ -218,7 +226,6 @@ function formatDateTime(dt: Date) {
   hr = hr === 0 ? 12 : hr;
   return `${yyyy}-${mm}-${dd} ${String(hr).padStart(2, "0")}:${min} ${ampm}`;
 }
-
 function onlyDecimal(v: string) {
   let s = (v || "").replace(/[^0-9.]/g, "");
   const firstDot = s.indexOf(".");
@@ -245,8 +252,88 @@ function mapMethodToApi(label: string) {
   if (l.includes("gill")) return "gillnet";
   return "trawling";
 }
+function isNetworkishError(msg: string) {
+  const m = (msg || "").toLowerCase();
+  return m.includes("network") || m.includes("failed to fetch") || m.includes("timeout") || m.includes("socket") || m.includes("econn");
+}
 
-/* ---------------- OFFLINE QUEUE (Trips) - FIXED ---------------- */
+/* ---------------- ME ( /api/me ) CACHE + FETCH ---------------- */
+const API_BASE = "https://rootverse-backend-5qoo.onrender.com";
+const ME_CACHE_KEY = "RV_ME_CACHE_V1";
+
+type MeCache = {
+  ownerName: string;
+  registrationNo: string;
+  ownerCode: string; // OWN-0001
+};
+
+async function readMeCache(): Promise<MeCache | null> {
+  try {
+    const raw = await AsyncStorage.getItem(ME_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const ownerName = String(parsed.ownerName || "").trim();
+    const registrationNo = String(parsed.registrationNo || "").trim();
+    const ownerCode = String(parsed.ownerCode || "").trim();
+
+    if (!ownerName && !registrationNo && !ownerCode) return null;
+    return { ownerName, registrationNo, ownerCode };
+  } catch {
+    return null;
+  }
+}
+
+async function writeMeCache(data: MeCache) {
+  try {
+    await AsyncStorage.setItem(ME_CACHE_KEY, JSON.stringify(data));
+  } catch {}
+}
+
+async function fetchMeFromApi(): Promise<MeCache> {
+  const token = await AsyncStorage.getItem("auth_token");
+
+  const res = await fetch(`${API_BASE}/api/me`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`ME API failed (${res.status}): ${text || res.statusText}`);
+  }
+
+  const json: any = await res.json();
+  const u = json?.user ?? json?.data ?? json ?? {};
+
+  const ownerName = String(u?.username ?? u?.owner_name ?? u?.name ?? "").trim();
+
+  // ✅ owner code (OWN-0001) is stored in your rootverse_users.owner_id
+  const ownerCode = String(u?.owner_id ?? u?.owner_code ?? "").trim();
+
+  // ✅ you showed govt_id earlier; use that as reg no if that’s your requirement
+  const registrationNo = String(
+    u?.govt_id ?? u?.registration_no ?? u?.reg_no ?? u?.registrationNo ?? u?.vessel_reg_no ?? ""
+  ).trim();
+
+  return { ownerName, ownerCode, registrationNo };
+}
+
+function makeTripName(regNo: string) {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${regNo || "REG"}/${y}${m}${day}_${hh}${mi}`;
+}
+
+/* ---------------- OFFLINE QUEUE (Trips) ---------------- */
 const TRIP_QUEUE_KEY = "RV_TRIP_QUEUE_V1";
 
 type TripApiPayload = {
@@ -258,7 +345,10 @@ type TripApiPayload = {
   ice: number;
   total: number;
   qr_count: number;
-  owner_code: string;
+
+  // ✅ allow null if saved before /me loaded
+  owner_code: string | null;
+
   count: number;
 };
 
@@ -298,6 +388,23 @@ async function getTripQueueCount() {
   return items.length;
 }
 
+async function patchOwnerCodeInTripQueue(ownerCode: string) {
+  const code = String(ownerCode || "").trim();
+  if (!code) return 0;
+
+  const items = await loadTripQueue();
+  let patched = 0;
+
+  const next = items.map((it) => {
+    if (it.payload?.owner_code) return it;
+    patched++;
+    return { ...it, payload: { ...it.payload, owner_code: code } };
+  });
+
+  if (patched > 0) await saveTripQueue(next);
+  return patched;
+}
+
 async function flushTripQueue(send: (payload: TripApiPayload) => Promise<any>) {
   const items = await loadTripQueue();
   if (!items.length) return { sent: 0, left: 0 };
@@ -318,27 +425,28 @@ async function flushTripQueue(send: (payload: TripApiPayload) => Promise<any>) {
   await saveTripQueue([]);
   return { sent, left: 0 };
 }
-/* ------------------------------------------------------------ */
 
+/* ---------------- SCREEN ---------------- */
 export default function NewTripRequest() {
   const dispatch = useAppDispatch();
 
   const [lang, setLang] = useState<Lang>("ta");
   const t = i18n[lang];
 
-  const ownerName = "Sriharan";
-  const registrationNo = "TN02F5678";
-  const ownerCode = "OWN-0001";
+  // ✅ values from /api/me (with cache fallback)
+  const [ownerName, setOwnerName] = useState("");
+  const [registrationNo, setRegistrationNo] = useState("");
+  const [ownerCode, setOwnerCode] = useState("");
 
-  const [tripName] = useState(() => {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    const hh = String(d.getHours()).padStart(2, "0");
-    const mi = String(d.getMinutes()).padStart(2, "0");
-    return `${registrationNo}/${y}${m}${day}_${hh}${mi}`;
-  });
+  const [meLoading, setMeLoading] = useState(false);
+  const [meError, setMeError] = useState<string | null>(null);
+
+  // ✅ Trip name depends on registrationNo (async)
+  const [tripName, setTripName] = useState(() => makeTripName("REG"));
+  useEffect(() => {
+    if (!registrationNo) return;
+    setTripName(makeTripName(registrationNo));
+  }, [registrationNo]);
 
   const [method, setMethod] = useState("");
   const [nearStation, setNearStation] = useState("");
@@ -375,7 +483,91 @@ export default function NewTripRequest() {
   const methodRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
   const stationRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
 
-  // ✅ auto flush: on mount + on network change
+  const flushingRef = useRef(false);
+
+  // ✅ 1) Load /me cache immediately (works offline)
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const cached = await readMeCache();
+      if (!alive || !cached) return;
+
+      if (cached.ownerName) setOwnerName(cached.ownerName);
+      if (cached.registrationNo) setRegistrationNo(cached.registrationNo);
+      if (cached.ownerCode) setOwnerCode(cached.ownerCode);
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // ✅ 2) Track network status + update pending count
+  useEffect(() => {
+    let alive = true;
+
+    const refreshCount = async () => {
+      const c = await getTripQueueCount();
+      if (alive) setPendingCount(c);
+    };
+
+    refreshCount();
+
+    NetInfo.fetch().then((s) => {
+      const online = !!s.isConnected && (s.isInternetReachable ?? true);
+      if (alive) setIsOnline(online);
+    });
+
+    const unsub = NetInfo.addEventListener((state) => {
+      const online = !!state.isConnected && (state.isInternetReachable ?? true);
+      if (!alive) return;
+      setIsOnline(online);
+      refreshCount();
+    });
+
+    return () => {
+      alive = false;
+      unsub();
+    };
+  }, []);
+
+  // ✅ 3) When online, fetch /api/me (then patch queued trips owner_code)
+  useEffect(() => {
+    let alive = true;
+    if (!isOnline) return;
+
+    (async () => {
+      setMeLoading(true);
+      setMeError(null);
+      try {
+        const fresh = await fetchMeFromApi();
+        if (!alive) return;
+
+        setOwnerName(fresh.ownerName);
+        setRegistrationNo(fresh.registrationNo);
+        setOwnerCode(fresh.ownerCode);
+
+        await writeMeCache(fresh);
+
+        if (fresh.ownerCode) {
+          await patchOwnerCodeInTripQueue(fresh.ownerCode);
+          const c = await getTripQueueCount();
+          if (alive) setPendingCount(c);
+        }
+      } catch (e: any) {
+        if (!alive) return;
+        setMeError(String(e?.message || e));
+      } finally {
+        if (alive) setMeLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [isOnline]);
+
+  // ✅ 4) Auto flush queue when online AND ownerCode available
   useEffect(() => {
     let alive = true;
 
@@ -385,47 +577,53 @@ export default function NewTripRequest() {
     };
 
     const doFlush = async () => {
+      if (!isOnline) return;
+      if (!ownerCode) return; // wait until /me loads
+      if (flushingRef.current) return;
+
+      flushingRef.current = true;
       setSyncing(true);
       try {
-        const res = await flushTripQueue(async (payload) => {
+        // make sure queued items have owner_code before sending
+        await patchOwnerCodeInTripQueue(ownerCode);
+
+        await flushTripQueue(async (payload) => {
+          // if some queued payload still has no owner_code, block it (keep in queue)
+          if (!payload.owner_code) throw new Error("owner_code missing (waiting for /me)");
           await dispatch(createTripThunk(payload as any)).unwrap();
         });
 
         await refreshCount();
-
-        // optional toast
-        // if (res.sent > 0) Alert.alert(t.synced, `Uploaded ${res.sent} trip(s).`);
       } finally {
+        flushingRef.current = false;
         if (alive) setSyncing(false);
       }
     };
 
-    refreshCount();
-
-    // ✅ flush immediately if already online
-    NetInfo.fetch().then((s) => {
-      const online = !!s.isConnected && (s.isInternetReachable ?? true); // ✅ null => true
-      if (alive) setIsOnline(online);
-      if (online) doFlush();
-    });
-
-    const unsub = NetInfo.addEventListener((state) => {
-      const online = !!state.isConnected && (state.isInternetReachable ?? true); // ✅ null => true
-      if (!alive) return;
-      setIsOnline(online);
-      if (online) doFlush();
-    });
+    doFlush();
 
     return () => {
       alive = false;
-      unsub();
     };
-  }, [dispatch]);
+  }, [dispatch, isOnline, ownerCode]);
 
   const submit = async () => {
     if (!method) return Alert.alert(t.title, t.errMethod);
     if (!nearStation) return Alert.alert(t.title, t.errLanding);
     if (!plannedDT) return Alert.alert(t.title, t.errPlanned);
+
+    // if online but owner not loaded, try one more time; else fallback to queue
+    let ownerFinal = String(ownerCode || "").trim();
+    if (isOnline && !ownerFinal) {
+      try {
+        const fresh = await fetchMeFromApi();
+        ownerFinal = String(fresh.ownerCode || "").trim();
+        setOwnerName(fresh.ownerName);
+        setRegistrationNo(fresh.registrationNo);
+        setOwnerCode(fresh.ownerCode);
+        await writeMeCache(fresh);
+      } catch {}
+    }
 
     const apiPayload: TripApiPayload = {
       fishing_method: mapMethodToApi(method),
@@ -438,12 +636,15 @@ export default function NewTripRequest() {
       total: Number(totalCost.toFixed(2)),
 
       qr_count: Number(qrCount || 0),
-      owner_code: ownerCode,
+
+      // ✅ allow null offline; will be patched later
+      owner_code: ownerFinal || null,
+
       count: crewCount,
     };
 
-    // ✅ OFFLINE => queue + dummy + go back
-    if (!isOnline) {
+    // ✅ OFFLINE (or owner not available) => queue + dummy
+    if (!isOnline || !ownerFinal) {
       await enqueueTrip(apiPayload);
       const c = await getTripQueueCount();
       setPendingCount(c);
@@ -451,9 +652,9 @@ export default function NewTripRequest() {
       createTripDummy({
         tripId: tripName,
         tripName,
-        ownerName,
-        ownerCode,
-        registrationNo,
+        ownerName: ownerName || "—",
+        ownerCode: ownerFinal || "—",
+        registrationNo: registrationNo || "—",
         method,
         landingCenter: nearStation,
         locationCode: "",
@@ -473,7 +674,7 @@ export default function NewTripRequest() {
       } as any);
 
       router.replace("/(wild)/trips" as const);
-      Alert.alert(t.title, t.savedOffline);
+      Alert.alert(t.title, !isOnline ? t.savedOffline : t.errOwner);
       return;
     }
 
@@ -483,13 +684,12 @@ export default function NewTripRequest() {
       const created = await dispatch(createTripThunk(apiPayload as any)).unwrap();
 
       router.replace("/(wild)/trips" as const);
-      Alert.alert(t.sent, `${t.status}: ${created.approval_status}\n${t.totalCost}: ${money(totalCost)}`);
+      Alert.alert(t.sent, `${t.status}: ${created?.approval_status ?? "PENDING"}\n${t.totalCost}: ${money(totalCost)}`);
     } catch (e: any) {
       const msg = String(e?.message || e);
-      const m = msg.toLowerCase();
-      const networkish = m.includes("network") || m.includes("failed to fetch") || m.includes("timeout");
 
-      if (networkish) {
+      if (isNetworkishError(msg)) {
+        // network failed => queue + dummy
         await enqueueTrip(apiPayload);
         const c = await getTripQueueCount();
         setPendingCount(c);
@@ -497,9 +697,9 @@ export default function NewTripRequest() {
         createTripDummy({
           tripId: tripName,
           tripName,
-          ownerName,
-          ownerCode,
-          registrationNo,
+          ownerName: ownerName || "—",
+          ownerCode: ownerFinal || "—",
+          registrationNo: registrationNo || "—",
           method,
           landingCenter: nearStation,
           locationCode: "",
@@ -523,12 +723,13 @@ export default function NewTripRequest() {
         return;
       }
 
+      // non-network error => still dummy (your current pattern)
       createTripDummy({
         tripId: tripName,
         tripName,
-        ownerName,
-        ownerCode,
-        registrationNo,
+        ownerName: ownerName || "—",
+        ownerCode: ownerFinal || "—",
+        registrationNo: registrationNo || "—",
         method,
         landingCenter: nearStation,
         locationCode: "",
@@ -556,8 +757,20 @@ export default function NewTripRequest() {
 
   return (
     <View className="flex-1 bg-[#fbf6f1]">
-      <PickerSheet title={t.fishingMethod} value={method} options={FISHING_METHODS} onSelect={setMethod} sheetRef={methodRef} />
-      <PickerSheet title={t.landingCenter} value={nearStation} options={LANDING_CENTERS} onSelect={setNearStation} sheetRef={stationRef} />
+      <PickerSheet
+        title={t.fishingMethod}
+        value={method}
+        options={FISHING_METHODS}
+        onSelect={setMethod}
+        sheetRef={methodRef}
+      />
+      <PickerSheet
+        title={t.landingCenter}
+        value={nearStation}
+        options={LANDING_CENTERS}
+        onSelect={setNearStation}
+        sheetRef={stationRef}
+      />
 
       <ScrollView contentContainerClassName="p-4 pb-10">
         {/* Header */}
@@ -572,6 +785,20 @@ export default function NewTripRequest() {
               </Text>
               {syncing ? <Text className="text-[11px] text-[#7a6f66]"> • {t.syncing}</Text> : null}
             </View>
+
+            {meLoading ? (
+              <View className="mt-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2">
+                <Text className="text-xs font-semibold text-blue-800">{t.meLoading}</Text>
+              </View>
+            ) : null}
+
+            {meError ? (
+              <View className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+                <Text className="text-xs font-semibold text-rose-800">
+                  {t.meError}: {meError}
+                </Text>
+              </View>
+            ) : null}
 
             {pendingCount > 0 ? (
               <View className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
@@ -590,16 +817,17 @@ export default function NewTripRequest() {
           </Pressable>
         </View>
 
+        {/* Owner Card */}
         <Card className="p-4">
           <View className="flex-row justify-between">
             <View>
               <Label>{t.ownerName}:</Label>
-              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">{ownerName}</Text>
-              <Text className="mt-1 text-[11px] text-[#7a6f66]">Owner Code: {ownerCode}</Text>
+              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">{ownerName || "—"}</Text>
+              <Text className="mt-1 text-[11px] text-[#7a6f66]">Owner Code: {ownerCode || "—"}</Text>
             </View>
             <View>
               <Label>{t.regNo}:</Label>
-              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">{registrationNo}</Text>
+              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">{registrationNo || "—"}</Text>
             </View>
           </View>
         </Card>

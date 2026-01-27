@@ -48,7 +48,8 @@
           "cameraPermission": "Allow RootVerse to access your camera to scan QR / barcodes."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,

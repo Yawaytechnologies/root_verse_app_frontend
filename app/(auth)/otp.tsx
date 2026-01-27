@@ -24,13 +24,12 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-
 import { loginWithPhone } from "../../src/store/auth/login.slice";
 import { fetchMe } from "../../src/store/auth/me.slice";
 import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
 
-// ✅ Quality demo (sets code so quality/_layout.tsx can fetch inspector)
-// import { setCheckerCode } from "../../src/store/qualityAuth/qualityAuth.slice";
+// ✅ QC: clear old inspector + fetch new inspector after login (token-based)
+import { clearQc, fetchQcMe } from "../../src/store/qualityAuth/qualityAuth.slice";
 
 const { height: SCREEN_H } = Dimensions.get("window");
 
@@ -44,7 +43,7 @@ export default function OtpScreen() {
     : params.phone_no;
 
   const dispatch = useAppDispatch();
-  const login = useAppSelector((s) => (s as any).login); // keep if your reducer key is login
+  const login = useAppSelector((s) => (s as any).login);
 
   const [otp, setOtp] = useState("");
   const [sec, setSec] = useState(30);
@@ -104,7 +103,7 @@ export default function OtpScreen() {
   useEffect(() => {
     formProgress.value = withDelay(
       250,
-      withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) }),
+      withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) })
     );
   }, []);
 
@@ -126,36 +125,24 @@ export default function OtpScreen() {
   }, [sec]);
 
   const routeByStatus = (statusRaw: any, rootRaw: any) => {
-    const status = String(statusRaw || "")
-      .trim()
-      .toUpperCase();
-    const rootType = String(rootRaw || "")
-      .trim()
-      .toUpperCase();
+    const status = String(statusRaw || "").trim().toUpperCase();
+    const rootType = String(rootRaw || "").trim().toUpperCase();
 
     if (status === "PENDING_APPROVAL")
       return router.replace("/(auth)/pending" as any);
     if (status === "REJECTED") return router.replace("/(auth)/rejected" as any);
 
-    // ✅ INSPECTOR (hub)
     if (rootType.includes("QUALITY_CHECKER"))
       return router.replace("/quality" as any);
 
-    // ✅ Owners
     if (rootType.includes("WILD_CAPTURE"))
       return router.replace("/(wild)/dashboard" as any);
     if (rootType.includes("AQUACULTURE"))
       return router.replace("/(aqua)/dashboard" as any);
     if (rootType.includes("MARICULTURE"))
       return router.replace("/mariculture" as any);
-    if (rootType.includes("QUALITY_CHECKER"))
-      return router.replace("/quality" as any);
 
-    Alert.alert(
-      "Routing error",
-      `Unknown rootverse_type: ${rootType || "EMPTY"}`,
-    );
-    return;
+    Alert.alert("Routing error", `Unknown rootverse_type: ${rootType || "EMPTY"}`);
   };
 
   const onVerify = async () => {
@@ -168,10 +155,9 @@ export default function OtpScreen() {
 
     setLoading(true);
     try {
-      // ✅ unwrap gives actual returned JSON (not action object)
+      // ✅ login (token should be overwritten here)
       const raw: any = await dispatch(loginWithPhone(phone_no)).unwrap();
 
-      // handle wrapped responses
       const p = raw?.data ?? raw;
       const u = p?.user ?? p?.data?.user ?? p?.data ?? p;
 
@@ -180,7 +166,7 @@ export default function OtpScreen() {
         u?.status,
         p?.verification_status,
         u?.verification_status,
-        login?.status,
+        login?.status
       );
 
       let rootType = pickFirst(
@@ -188,10 +174,9 @@ export default function OtpScreen() {
         u?.rootverse_type,
         p?.rootverseType,
         u?.rootverseType,
-        login?.rootverse_type,
+        login?.rootverse_type
       );
 
-      // ✅ if login response doesn't give it, fetch /me
       if (!rootType) {
         const me: any = await dispatch(fetchMe()).unwrap();
         rootType = pickFirst(me?.rootverse_type, me?.rootverseType);
@@ -202,31 +187,23 @@ export default function OtpScreen() {
         return;
       }
 
-      // ✅ if backend later returns QUALITY_CHECKER, route to /quality
-      // (optional: setCheckerCode if backend returns code)
-      // if (String(rootType).toUpperCase().includes("QUALITY_CHECKER")) {
-      //   const code = pickFirst(p?.checker_code, u?.checker_code);
-      //   if (code) dispatch(setCheckerCode(String(code)));
-      // }
+      // ✅ KEY FIX: if QC logs in, clear old QC + fetch new QC details for this token
+      if (String(rootType).toUpperCase().includes("QUALITY_CHECKER")) {
+        dispatch(clearQc());
+        // Don't block routing forever; but try to fetch once right now
+        await dispatch(fetchQcMe()).unwrap().catch(() => {});
+      }
 
       routeByStatus(status, rootType);
     } catch (e: any) {
       const msg = String(e?.message || e || "Login blocked");
       const m = msg.toLowerCase();
 
-      if (
-        m.includes("pending") ||
-        m.includes("approval") ||
-        m.includes("not approved")
-      ) {
-        Alert.alert(
-          "Waiting for approval",
-          "Admin has not approved your account yet.",
-        );
+      if (m.includes("pending") || m.includes("approval") || m.includes("not approved")) {
+        Alert.alert("Waiting for approval", "Admin has not approved your account yet.");
         return router.replace("/(auth)/pending" as any);
       }
-      if (m.includes("reject"))
-        return router.replace("/(auth)/rejected" as any);
+      if (m.includes("reject")) return router.replace("/(auth)/rejected" as any);
 
       if (m.includes("not found") || m.includes("no user")) {
         Alert.alert("Not registered", "Please register first.");
@@ -321,9 +298,7 @@ export default function OtpScreen() {
                   <TextInput
                     ref={otpRef}
                     value={otp}
-                    onChangeText={(v) =>
-                      setOtp(v.replace(/\D/g, "").slice(0, 6))
-                    }
+                    onChangeText={(v) => setOtp(v.replace(/\D/g, "").slice(0, 6))}
                     placeholder="Enter OTP"
                     placeholderTextColor="#64748b"
                     keyboardType="number-pad"
@@ -339,8 +314,8 @@ export default function OtpScreen() {
                       otp.length === 0
                         ? "bg-slate-700"
                         : otpOk
-                          ? "bg-emerald-400"
-                          : "bg-rose-400"
+                        ? "bg-emerald-400"
+                        : "bg-rose-400"
                     }`}
                   />
                 </View>
@@ -352,7 +327,9 @@ export default function OtpScreen() {
 
                   <Pressable onPress={onResend} disabled={sec > 0}>
                     <Text
-                      className={`text-[11px] font-semibold ${sec > 0 ? "text-slate-500" : "text-emerald-300"}`}
+                      className={`text-[11px] font-semibold ${
+                        sec > 0 ? "text-slate-500" : "text-emerald-300"
+                      }`}
                     >
                       Resend
                     </Text>
@@ -378,7 +355,9 @@ export default function OtpScreen() {
                   <Pressable
                     disabled={!canVerify}
                     onPress={onVerify}
-                    className={`rounded-3xl overflow-hidden ${!canVerify || loading ? "opacity-60" : "opacity-100"}`}
+                    className={`rounded-3xl overflow-hidden ${
+                      !canVerify || loading ? "opacity-60" : "opacity-100"
+                    }`}
                   >
                     <LinearGradient
                       colors={["#34d399", "#10b981", "#06b6d4"]}

@@ -8,7 +8,6 @@ export type Trip = {
   planned_at: string;
   arrival_at: string | null;
 
-  // backend returns strings in response sometimes; keep as string here to be safe
   diesel: string;
   ice: string;
   qr_count: number;
@@ -28,14 +27,12 @@ export type TripCreatePayload = {
   planned_at: string;
   arrival_at: string | null;
 
-  // ✅ BACKEND EXPECTS NUMBER
   diesel: number;
   ice: number;
   total: number;
 
   qr_count: number;
 
-  // ✅ REQUIRED
   owner_code: string;
   count: number;
 };
@@ -47,11 +44,22 @@ type ApiWrapped<T> = {
   data?: T;
 };
 
-// ✅ HARDCODED BASE URL (no .env)
-const BASE_URL = "https://rootverse-backend-5qoo.onrender.com";
+const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+
+function normalizeBaseUrl(raw?: string) {
+  if (!raw) throw new Error("Missing EXPO_PUBLIC_API_BASE_URL in .env");
+
+  let u = raw.replace(/\/+$/, ""); // remove trailing slashes
+
+  // If user mistakenly sets BASE_URL = ".../api" or ".../api/"
+  // normalize back to domain root because our paths include "/api/..."
+  u = u.replace(/\/api$/i, "");
+
+  return u;
+}
 
 function baseUrl() {
-  return BASE_URL.replace(/\/+$/, "");
+  return normalizeBaseUrl(BASE_URL);
 }
 
 function isWrapped<T>(x: any): x is ApiWrapped<T> {
@@ -74,11 +82,27 @@ function unwrapOrThrow<T>(payload: any): T {
   return payload as T;
 }
 
+function qs(params: Record<string, any>) {
+  const parts = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== "")
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+  return parts.length ? `?${parts.join("&")}` : "";
+}
+
+function extractHtmlPre(text: string) {
+  const m = text.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+  if (!m) return null;
+  return m[1].replace(/<[^>]+>/g, "").trim();
+}
+
+function stripHtml(text: string) {
+  return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const url = `${baseUrl()}${path.startsWith("/") ? "" : "/"}${path}`;
 
   console.log("[tripApi] Request:", init.method || "GET", url);
-  if (init.body) console.log("[tripApi] Body:", init.body);
 
   const res = await fetch(url, {
     ...init,
@@ -94,24 +118,26 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
     json = text ? JSON.parse(text) : null;
   } catch {
-    // non-json
+    // non-json (html/text)
   }
 
   if (!res.ok) {
-    const msg =
-      json?.message ||
-      json?.error ||
-      (typeof text === "string" && text.trim()
-        ? text
-        : `Request failed (${res.status})`);
-    throw new Error(msg);
+    const fromJson = json?.message || json?.error;
+    if (fromJson) throw new Error(fromJson);
+
+    const pre = text ? extractHtmlPre(text) : null;
+    if (pre) throw new Error(pre);
+
+    if (text && text.trim().startsWith("<")) throw new Error(stripHtml(text));
+
+    throw new Error(text?.trim() ? text.trim() : `Request failed (${res.status})`);
   }
 
   return unwrapOrThrow<T>(json);
 }
 
 export const tripApi = {
-  // ✅ CREATE (singular)
+  // ✅ CREATE
   createTrip: (payload: TripCreatePayload, token?: string) =>
     request<Trip>("/api/trip", {
       method: "POST",
@@ -119,15 +145,27 @@ export const tripApi = {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     }),
 
-  // ✅ LIST (singular in your backend)
+  // ✅ LIST ALL (not owner filtered)
   fetchTrips: (token?: string) =>
     request<Trip[]>("/api/trip", {
       method: "GET",
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     }),
 
-  // ✅ GET ONE TRIP BY NUMERIC "id"
-  // Example: https://rootverse-backend-5qoo.onrender.com/api/trip/52
+  // ✅ LIST BY OWNER (THIS is what you need)
+  // FULL URL => BASE + /api/trip/owner/:owner_code
+  fetchTripsByOwnerCode: (owner_code: string, token?: string, approval_status?: string | "ALL") =>
+    request<Trip[]>(
+      `/api/trip/owner/${encodeURIComponent(owner_code)}${qs({
+        approval_status: approval_status && approval_status !== "ALL" ? approval_status : undefined,
+      })}`,
+      {
+        method: "GET",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      }
+    ),
+
+  // ✅ GET ONE by numeric id
   getTripById: (id: number | string, token?: string) =>
     request<Trip>(`/api/trip/${encodeURIComponent(String(id))}`, {
       method: "GET",
