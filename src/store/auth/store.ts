@@ -9,16 +9,20 @@ import tripsReducer from "../../features/trip/tripSlice";
 import catchLogReducer from "../../services/wild/catchLog.slice";
 import filledQrReducer from "../../services/wild/filledQr.slice";
 
-// ---- auth slices (inside this folder) ----
+// ---- auth slices ----
+import qualityAuthReducer from "../qualityAuth/qualityAuth.slice";
 import locationReducer from "./location.slice";
 import loginReducer from "./login.slice";
 import meReducer from "./me.slice";
 import registrationReducer from "./registration.slice";
 
-// ---- quality ---- ✅ ADD
+// ---- quality ----
+import qcFillReducer from "../quality/qcFill.slice"; // ✅ ADD
 import qrDetailsReducer from "../quality/qrDetails.slice";
+import qualityCheckerReducer from "../qualityChecker/qualityChecker.slice";
+import qcOverviewReducer from "../quality/qcOverview.slice";
 
-// ---- ui slice ----
+// ---- ui ----
 import themeReducer from "../theme.slice";
 
 export const store = configureStore({
@@ -37,8 +41,14 @@ export const store = configureStore({
     login: loginReducer,
     me: meReducer,
 
+    // ✅ QC auth
+    qualityAuth: qualityAuthReducer,
+    qualityChecker: qualityCheckerReducer,
+
     // ✅ quality
     qrDetails: qrDetailsReducer,
+    qcFill: qcFillReducer, // ✅ ADD
+    qcOverview: qcOverviewReducer, // ✅ ADD
 
     // ui
     theme: themeReducer,

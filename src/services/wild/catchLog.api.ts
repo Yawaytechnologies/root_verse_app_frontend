@@ -34,10 +34,13 @@ export type CatchLogPayload = {
   longitude?: number;
 };
 
-export async function apiCheckQrStatus(crateId: string): Promise<QrStatusResponse> {
-  const data = await httpJson<any>(`/api/qrs/${encodeURIComponent(crateId)}`, {
-    method: "GET",
-  });
+export async function apiCheckQrStatus(
+  crateId: string,
+): Promise<QrStatusResponse> {
+  const data = await httpJson<any>(
+    `https://rootverse-backend-5qoo.onrender.com/api/qrs/${encodeURIComponent(crateId)}`,
+    { method: "GET" },
+  );
 
   return {
     crateId: data?.crateId || crateId,

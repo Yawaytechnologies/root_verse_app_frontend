@@ -85,7 +85,7 @@ const TRIP_CACHE_PREFIX = "rv_approved_trips_cache_owner_"; // + ownerCode
 const i18n = {
   ta: {
     title: "பிடிப்பு பதிவு",
-    sub: "Vessel + Approved Trip + Fish → பல QR ஸ்கேன் → Auto Date/Time → Photo → Save ✅",
+    sub: "Vessel + Approved Trip + Fish → பல QR ஸ்கேன் → Auto Date/Time → Photo → Save",
     step: (n: number) => `படி ${n}/4`,
     next: "அடுத்து",
     back: "மீண்டும்",
@@ -124,7 +124,7 @@ const i18n = {
     time: "நேரம்",
     autoHint: "Save அழுத்தும் நேரத்தில் Date/Time auto ஆக capture ஆகும்.",
 
-    saved: "சேமிக்கப்பட்டது ✅",
+    saved: "சேமிக்கப்பட்டது ",
     offlineSaved:
       "இணையம் இல்லை. Local-ல் save பண்ணிட்டோம். Net வந்தவுடன் auto sync ஆகும்.",
     syncing: "Syncing pending...",
@@ -140,7 +140,7 @@ const i18n = {
   },
   en: {
     title: "Catch Log",
-    sub: "Vessel + Approved Trip + Fish → Scan multiple QRs → Auto Date/Time → Photo → Save ✅",
+    sub: "Vessel + Approved Trip + Fish → Scan multiple QRs → Auto Date/Time → Photo → Save ",
     step: (n: number) => `Step ${n}/4`,
     next: "Next",
     back: "Back",
@@ -172,14 +172,14 @@ const i18n = {
     camDenied: "Camera permission denied",
     grantCam: "Grant camera access",
 
-    addPhoto: "📸 Capture Photo",
+    addPhoto: "Capture Photo",
 
     dateTime: "Date & Time (Auto)",
     date: "Date",
     time: "Time",
     autoHint: "Date/Time will be captured automatically when you press Save.",
 
-    saved: "Saved ✅",
+    saved: "Saved ",
     offlineSaved: "No internet. Saved locally. Will auto-sync when network returns.",
     syncing: "Syncing pending...",
     pending: "Pending sync",

@@ -63,7 +63,11 @@ function baseUrl() {
 }
 
 function isWrapped<T>(x: any): x is ApiWrapped<T> {
-  return x && typeof x === "object" && ("success" in x || "data" in x || "message" in x);
+  return (
+    x &&
+    typeof x === "object" &&
+    ("success" in x || "data" in x || "message" in x)
+  );
 }
 
 function unwrapOrThrow<T>(payload: any): T {
