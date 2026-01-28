@@ -5,11 +5,15 @@ import { Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import QcListScreen from "./QcListScreen";
-import { useAppDispatch, useAppSelector } from "../../store/hooks";
-import { fetchQcMe, selectInspector as selectQcInspector } from "../../store/qualityAuth/qualityAuth.slice";
 import QcScannerScreen from "./QcScannerScreen";
 
-import { getQcFillQueue, type QcFillQueuedItem } from "../../utils/qcFillQueue";
+import { useAppDispatch, useAppSelector } from "../../store/hooks";
+import {
+  fetchQcMe,
+  selectInspector as selectQcInspector,
+} from "../../store/qualityAuth/qualityAuth.slice";
+
+import { getQcStatsForDate, type QcStats } from "../../utils/qcFillQueue";
 
 export type Division = "WILD" | "AQUA" | "MARICULTURE";
 
@@ -59,16 +63,6 @@ function formatZone(i: InspectorInfo) {
 
 type TabKey = "scanner" | "checked" | "pending" | "rejected";
 
-function getQcResultUpper(p: any): string {
-  const v = p?.qc_result ?? p?.qcResult ?? p?.qc_status ?? p?.qcStatus ?? p?.status ?? "";
-  return String(v || "").toUpperCase();
-}
-
-function isRejectedPayload(p: any): boolean {
-  const r = getQcResultUpper(p);
-  return r === "REJECT" || r === "REJECTED" || !!p?.reject_reason;
-}
-
 export default function QualityInspectorDashboard({ division, inspector }: Props) {
   const insets = useSafeAreaInsets();
   const theme = useMemo(() => getTheme(division), [division]);
@@ -97,61 +91,40 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   const [tab, setTab] = useState<TabKey>("scanner");
   const [lang, setLang] = useState<"en" | "ta">("en");
 
-  // ✅ NEW: shared selected date for all list tabs
+  // ✅ shared selected date for all list tabs + stats
   const [selectedDate, setSelectedDate] = useState<string>(() => todayYmd());
 
   const zoneText = useMemo(() => formatZone(mergedInspector), [mergedInspector]);
 
-  const [counts, setCounts] = useState({ total: 0, checked: 0, pending: 0, rejected: 0 });
+  const [counts, setCounts] = useState({
+    total: 0,
+    checked: 0,
+    pending: 0,
+    rejected: 0,
+  });
 
-  const refreshCounts = async () => {
+  const refreshCounts = async (forcedDate?: string) => {
     try {
-      const q: QcFillQueuedItem[] = await getQcFillQueue();
-      const divisionItems = q.filter(
-        (x) => String(x.payload?.division || "").toUpperCase() === String(division).toUpperCase()
-      );
-
-      let pending = 0;
-      let checked = 0;
-      let rejected = 0;
-
-      for (const x of divisionItems) {
-        const p = x.payload || {};
-        const rej = isRejectedPayload(p);
-
-        // ✅ Pending = local not-synced ONLY (editable/deletable)
-        if (!x.synced) {
-          pending += 1;
-          continue;
-        }
-
-        // ✅ Synced items split into rejected vs checked
-        if (rej) rejected += 1;
-        else checked += 1;
-      }
-
+      const date = forcedDate || selectedDate || todayYmd();
+      const s: QcStats = await getQcStatsForDate(division, date);
       setCounts({
-        total: divisionItems.length,
-        checked,
-        pending,
-        rejected,
+        total: s.total,
+        checked: s.checked,
+        pending: s.pending,
+        rejected: s.rejected,
       });
     } catch {
       // ignore
     }
   };
 
+  // ✅ refresh stats when division/date changes
   useEffect(() => {
     refreshCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [division]);
+  }, [division, selectedDate]);
 
-  useEffect(() => {
-    refreshCounts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
-
-  // ✅ keep counts updated while user edits/deletes/resyncs inside list screens
+  // ✅ optional: keep stats alive (sync retries / background updates)
   useEffect(() => {
     let alive = true;
     const t = setInterval(() => {
@@ -164,7 +137,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
       clearInterval(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [division]);
+  }, [division, selectedDate]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#030712" }} edges={["top"]}>
@@ -179,7 +152,14 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
           borderBottomColor: "rgba(255,255,255,0.06)",
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+          }}
+        >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             <View
               style={{
@@ -197,8 +177,12 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
             </View>
 
             <View style={{ marginTop: -2 }}>
-              <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>Quality{"\n"}Inspector</Text>
-              <Text style={{ color: "rgba(255,255,255,0.55)" }}>{mergedInspector.divisionLabel}</Text>
+              <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>
+                Quality{"\n"}Inspector
+              </Text>
+              <Text style={{ color: "rgba(255,255,255,0.55)" }}>
+                {mergedInspector.divisionLabel}
+              </Text>
             </View>
           </View>
 
@@ -217,7 +201,9 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               marginTop: -2,
             }}
           >
-            <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900" }}>EN</Text>
+            <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900" }}>
+              EN
+            </Text>
 
             <View
               style={{
@@ -241,12 +227,17 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               />
             </View>
 
-            <Text style={{ color: "rgba(255,255,255,0.75)", fontWeight: "900" }}>தமிழ்</Text>
+            <Text style={{ color: "rgba(255,255,255,0.75)", fontWeight: "900" }}>
+              தமிழ்
+            </Text>
           </Pressable>
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24, flexGrow: 1 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 24, flexGrow: 1 }}
+      >
         {/* ===== Banner ===== */}
         <View
           style={{
@@ -259,20 +250,51 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: "white", fontSize: 28, fontWeight: "900", letterSpacing: -0.2 }}>
+              <Text
+                style={{
+                  color: "white",
+                  fontSize: 28,
+                  fontWeight: "900",
+                  letterSpacing: -0.2,
+                }}
+              >
                 {mergedInspector.name}
               </Text>
 
-              <Text style={{ color: "rgba(255,255,255,0.92)", marginTop: 3, fontSize: 13 }}>
+              <Text
+                style={{
+                  color: "rgba(255,255,255,0.92)",
+                  marginTop: 3,
+                  fontSize: 13,
+                }}
+              >
                 {lang === "en" ? "Quality Inspector" : "தர ஆய்வாளர்"} • {zoneText}
               </Text>
 
-              <Text style={{ color: "rgba(255,255,255,0.85)", marginTop: 2, fontSize: 12.5 }}>
+              <Text
+                style={{
+                  color: "rgba(255,255,255,0.85)",
+                  marginTop: 2,
+                  fontSize: 12.5,
+                }}
+              >
                 {lang === "en" ? "ID" : "ஐடி"}: {mergedInspector.id}
+              </Text>
+
+              {/* ✅ show what date stats represent */}
+              <Text
+                style={{
+                  color: "rgba(255,255,255,0.85)",
+                  marginTop: 6,
+                  fontSize: 12.5,
+                  fontWeight: "900",
+                }}
+              >
+                {lang === "en" ? "Date" : "தேதி"}: {selectedDate}
               </Text>
             </View>
 
-            {/* ✅ LOCAL counts */}
+            {/* ✅ DATE-SYNCED counts */}
             <View style={{ width: 150, gap: 8 }}>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <StatBox label={lang === "en" ? "Total" : "மொத்தம்"} value={counts.total} bg="#3E86E0" />
@@ -287,7 +309,13 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
         </View>
 
         {/* ===== Tabs ===== */}
-        <View style={{ backgroundColor: "#071228", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" }}>
+        <View
+          style={{
+            backgroundColor: "#071228",
+            borderBottomWidth: 1,
+            borderBottomColor: "rgba(255,255,255,0.06)",
+          }}
+        >
           <View style={{ flexDirection: "row" }}>
             <MiniTab
               active={tab === "scanner"}
@@ -327,13 +355,17 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               division={division}
               lang={lang}
               onAfterSubmit={(qcResult) => {
+                // ✅ after scan, force today so stats/list show the new record
+                const tdy = todayYmd();
+                setSelectedDate(tdy);
+
                 const r = String(qcResult || "").toUpperCase();
 
-                // Pending tab is for NOT-SYNCED local failures (editable/deletable)
-                if (r === "REJECT") setTab("rejected");
+                if (r === "HOLD") setTab("pending");
+                else if (r === "REJECT") setTab("rejected");
                 else setTab("checked");
 
-                refreshCounts();
+                refreshCounts(tdy);
               }}
             />
           ) : tab === "checked" ? (
@@ -342,7 +374,10 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               lang={lang}
               status="checked"
               selectedDate={selectedDate}
-              onChangeDate={setSelectedDate}
+              onChangeDate={(d) => {
+                setSelectedDate(d);
+                refreshCounts(d);
+              }}
             />
           ) : tab === "pending" ? (
             <QcListScreen
@@ -350,7 +385,10 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               lang={lang}
               status="pending"
               selectedDate={selectedDate}
-              onChangeDate={setSelectedDate}
+              onChangeDate={(d) => {
+                setSelectedDate(d);
+                refreshCounts(d);
+              }}
             />
           ) : (
             <QcListScreen
@@ -358,7 +396,10 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               lang={lang}
               status="rejected"
               selectedDate={selectedDate}
-              onChangeDate={setSelectedDate}
+              onChangeDate={(d) => {
+                setSelectedDate(d);
+                refreshCounts(d);
+              }}
             />
           )}
         </View>
@@ -404,23 +445,67 @@ function MiniTab({
   onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={{ flex: 1, paddingVertical: 10, alignItems: "center", justifyContent: "center" }}>
+    <Pressable
+      onPress={onPress}
+      style={{
+        flex: 1,
+        paddingVertical: 10,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Ionicons name={icon} size={17} color={active ? activeColor : "rgba(255,255,255,0.55)"} />
-        <Text numberOfLines={1} style={{ color: active ? activeColor : "rgba(255,255,255,0.55)", fontWeight: "900", fontSize: 14 }}>
+        <Ionicons
+          name={icon}
+          size={17}
+          color={active ? activeColor : "rgba(255,255,255,0.55)"}
+        />
+        <Text
+          numberOfLines={1}
+          style={{
+            color: active ? activeColor : "rgba(255,255,255,0.55)",
+            fontWeight: "900",
+            fontSize: 14,
+          }}
+        >
           {label}
         </Text>
       </View>
 
-      <View style={{ marginTop: 8, height: 3, width: "100%", backgroundColor: active ? activeColor : "transparent" }} />
+      <View
+        style={{
+          marginTop: 8,
+          height: 3,
+          width: "100%",
+          backgroundColor: active ? activeColor : "transparent",
+        }}
+      />
     </Pressable>
   );
 }
 
 function getTheme(division: Division) {
   if (division === "AQUA")
-    return { bannerFrom: "#1D4ED8", scannerActive: "#3b82f6", completedActive: "#34D399", pendingActive: "#FBBF24", rejectedActive: "#F87171" };
+    return {
+      bannerFrom: "#1D4ED8",
+      scannerActive: "#3b82f6",
+      completedActive: "#34D399",
+      pendingActive: "#FBBF24",
+      rejectedActive: "#F87171",
+    };
   if (division === "MARICULTURE")
-    return { bannerFrom: "#A855F7", scannerActive: "#3b82f6", completedActive: "#34D399", pendingActive: "#FBBF24", rejectedActive: "#F87171" };
-  return { bannerFrom: "#0EA5A4", scannerActive: "#3b82f6", completedActive: "#34D399", pendingActive: "#FBBF24", rejectedActive: "#F87171" };
+    return {
+      bannerFrom: "#A855F7",
+      scannerActive: "#3b82f6",
+      completedActive: "#34D399",
+      pendingActive: "#FBBF24",
+      rejectedActive: "#F87171",
+    };
+  return {
+    bannerFrom: "#0EA5A4",
+    scannerActive: "#3b82f6",
+    completedActive: "#34D399",
+    pendingActive: "#FBBF24",
+    rejectedActive: "#F87171",
+  };
 }
