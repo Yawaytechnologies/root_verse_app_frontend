@@ -102,7 +102,7 @@ const i18n = {
     chooseTrip: "Approved Trip தேர்வு செய்",
 
     species: "மீன் வகை",
-    chooseSpecies: "மீன் வகை தேர்வு செய்",
+    chooseSpecies: "மீன் வகை தேர்வு செய்யவும்",
 
     scanTitle: "QR ஸ்கேன்",
     scanHint: "Vessel + Trip + Fish தேர்வு செய்த பிறகு QR ஸ்கேன் செய்யலாம்",
@@ -239,11 +239,11 @@ function SelectField({
 }) {
   return (
     <Pressable onPress={onPress} className="active:opacity-80">
-      <Text className={`text-xs ${UI.muted}`}>{label}</Text>
-      <Text className={`mt-1 text-base ${value ? UI.text : "text-[#b1a59a]"}`}>
+      <Text className={`text-sm ${UI.muted}`}>{label}</Text>
+      <Text className={`mt-1 text-lg ${value ? UI.text : "text-[#b1a59a]"}`}>
         {value || placeholder}
       </Text>
-      <Text className="mt-1 text-[11px] text-[#b1a59a]">{hint}</Text>
+      <Text className="mt-1 text-xs text-[#b1a59a]">{hint}</Text>
     </Pressable>
   );
 }
@@ -282,12 +282,12 @@ function PickerSheetObj<T extends PickerItem>({
     >
       <BottomSheetView style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
         <View className="flex-row items-center justify-between">
-          <Text className={`text-base font-bold ${UI.text}`}>{title}</Text>
+          <Text className={`text-lg font-bold ${UI.text}`}>{title}</Text>
           <Pressable
             onPress={() => sheetRef.current?.dismiss()}
             className="rounded-full px-3 py-2 active:opacity-80"
           >
-            <Text style={{ color: UI.accent }} className="text-sm font-semibold">
+            <Text style={{ color: UI.accent }} className="text-base font-semibold">
               Done
             </Text>
           </Pressable>
@@ -300,7 +300,7 @@ function PickerSheetObj<T extends PickerItem>({
             value={q}
             onChangeText={setQ}
             placeholder={searchPlaceholder}
-            className={`text-base ${UI.text}`}
+            className={`text-lg ${UI.text}`}
           />
         </View>
 
@@ -320,7 +320,7 @@ function PickerSheetObj<T extends PickerItem>({
                     : `${UI.border} bg-white`
                 }`}
               >
-                <Text className={`text-sm font-semibold ${UI.text}`}>
+                <Text className={`text-base font-semibold ${UI.text}`}>
                   {item.label}
                 </Text>
               </Pressable>
@@ -380,14 +380,11 @@ function normalizeOwnerCode(code: string) {
 }
 
 function padOwnFromDbId(ownerDbId: number) {
-  // Fallback (works only if your system uses db id numbering for OWN code)
-  // Example: id=51 -> OWN-0051
   if (!ownerDbId || ownerDbId <= 0) return "";
   return `OWN-${String(ownerDbId).padStart(4, "0")}`;
 }
 
 function deepFindOwnCode(obj: any): string {
-  // Find any string that looks like OWN-xxxx inside nested response
   try {
     const seen = new WeakSet<object>();
     const q: any[] = [obj];
@@ -723,16 +720,13 @@ export default function CreateCatchLog() {
       let json: any = null;
       try {
         json = text ? JSON.parse(text) : null;
-      } catch {
-        // backend returned html/plain text
-      }
+      } catch {}
 
       if (!res.ok) {
         console.log("[OWNER FETCH FAIL]", res.status, url, text);
         return null;
       }
 
-      // support: {data:{...}} OR {data:[{...}]} OR {...}
       let src: any = json?.data ?? json;
       if (Array.isArray(src)) src = src[0];
 
@@ -747,7 +741,6 @@ export default function CreateCatchLog() {
         return null;
       }
 
-      // ✅ robust owner code extraction (fix for your oc: '')
       const ocDirect =
         src?.owner_code ??
         src?.ownerCode ??
@@ -852,7 +845,6 @@ export default function CreateCatchLog() {
       const list = normalizeList(json);
       setVessels(list);
 
-      // cache for offline
       await writeVesselCache(ownerDbId, list);
     } finally {
       setVesselLoading(false);
@@ -893,7 +885,6 @@ export default function CreateCatchLog() {
         return;
       }
 
-      // Some backends store status as APPROVED / Approved / approved.
       const candidates = ["approved", "APPROVED", "Approved"];
 
       let final: any[] = [];
@@ -901,7 +892,6 @@ export default function CreateCatchLog() {
         const r = await fetchTripsByStatus(owner_code, st);
         if (!r.ok) continue;
 
-        // Filter approved if backend returns mixed
         const approvedOnly = r.list.filter((x: any) => {
           const s = String(x?.approval_status ?? x?.approvalStatus ?? "").toLowerCase();
           return !s ? true : s === "approved";
@@ -913,7 +903,6 @@ export default function CreateCatchLog() {
           break;
         }
 
-        // If ok but empty, keep checking other status candidates
         console.log("[TRIP OK BUT EMPTY]", { owner_code, statusTried: st });
         final = approvedOnly;
       }
@@ -1030,11 +1019,9 @@ export default function CreateCatchLog() {
       const oid = online ? await ensureOwnerId() : await readOwnerCacheByUser(userId);
       if (!oid) return;
 
-      // OFFLINE: cached vessels
       const cachedV = await readVesselCache(oid);
       if (cachedV.length > 0) setVessels(cachedV);
 
-      // ONLINE: refresh
       if (online) await fetchOwnerVessels(oid);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1052,17 +1039,14 @@ export default function CreateCatchLog() {
         return;
       }
 
-      // 1) prefer state ownerCode
       let oc = normalizeOwnerCode(ownerCode);
 
-      // 2) else cache
       if (!oc) {
         const cached = await readOwnerCodeCacheByUser(userId);
         oc = normalizeOwnerCode(cached);
         if (oc) setOwnerCode(oc);
       }
 
-      // 3) else online fetch owner (to get owner_code)
       if (!oc && isOnline) {
         const loaded = await loadOwnerFromLogin();
         oc = normalizeOwnerCode(String(loaded?.code || ""));
@@ -1074,11 +1058,9 @@ export default function CreateCatchLog() {
         return;
       }
 
-      // OFFLINE: cached trips
       const cachedTrips = await readTripCache(oc);
       if (cachedTrips.length > 0) setTrips(cachedTrips);
 
-      // ONLINE: refresh from API
       if (isOnline) await fetchApprovedTrips(oc);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1295,7 +1277,6 @@ export default function CreateCatchLog() {
       fishId: fishId!,
       fishName: fishName || undefined,
 
-      // IMPORTANT: send vessel CODE in rvVesselId (catchLog.api.ts updated)
       rvVesselId: selectedVesselCode,
       ownerId: isOnline ? ownerFinal! : ownerFinal || 0,
 
@@ -1314,7 +1295,6 @@ export default function CreateCatchLog() {
       qrKind: x.kind,
     }));
 
-    // OFFLINE queue all
     if (!isOnline) {
       for (const p of payloads) await enqueueCatchLog(p as any);
       const c = await getQueueCount();
@@ -1328,7 +1308,6 @@ export default function CreateCatchLog() {
       return;
     }
 
-    // ONLINE: network fallback -> queue remaining
     let ok = 0;
     let queued = 0;
 
@@ -1394,45 +1373,45 @@ export default function CreateCatchLog() {
         <Card className="p-4">
           <View className="flex-row items-start justify-between">
             <View>
-              <Text className={`text-lg font-bold ${UI.text}`}>{t.title}</Text>
-              <Text className={`mt-1 text-sm ${UI.muted}`}>{t.sub}</Text>
+              <Text className={`text-xl font-bold ${UI.text}`}>{t.title}</Text>
+              <Text className={`mt-1 text-base ${UI.muted}`}>{t.sub}</Text>
             </View>
 
             <Pressable
               onPress={() => setLang((x) => (x === "ta" ? "en" : "ta"))}
               className={`rounded-full border ${UI.border} bg-[#fbf6f1] px-3 py-2 active:opacity-80`}
             >
-              <Text className={`text-xs font-semibold ${UI.text}`}>{t.langBtn}</Text>
+              <Text className={`text-sm font-semibold ${UI.text}`}>{t.langBtn}</Text>
             </Pressable>
           </View>
 
           <View className="mt-3">
-            <Text className={`text-xs ${UI.muted}`}>{t.scannedList}</Text>
-            <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>
+            <Text className={`text-sm ${UI.muted}`}>{t.scannedList}</Text>
+            <Text className={`mt-1 text-lg font-extrabold ${UI.text}`}>
               {qrCount ? t.scanCount(qrCount) : "—"}
             </Text>
           </View>
 
           <View className={`mt-3 rounded-xl border ${UI.chipBorder} ${UI.chipBg} px-3 py-2`}>
-            <Text className={`text-xs font-semibold ${UI.text}`}>{t.step(step)}</Text>
+            <Text className={`text-sm font-semibold ${UI.text}`}>{t.step(step)}</Text>
           </View>
 
           <View className="mt-3">
-            <Text className={`text-[11px] ${UI.muted}`}>
+            <Text className={`text-xs ${UI.muted}`}>
               Owner(DB id):{" "}
               <Text className="font-bold" style={{ color: ownerId ? "#1f7a3f" : "#b45309" }}>
                 {ownerId ? String(ownerId) : ownerLoading ? t.loadingOwner : "not loaded"}
               </Text>
             </Text>
 
-            <Text className={`text-[11px] ${UI.muted}`}>
+            <Text className={`text-xs ${UI.muted}`}>
               Owner Code:{" "}
               <Text className="font-bold" style={{ color: ownerCode ? "#1f7a3f" : "#b45309" }}>
                 {ownerCode ? ownerCode : ownerLoading ? t.loadingOwner : "not loaded"}
               </Text>
             </Text>
 
-            <Text className={`text-[11px] ${UI.muted}`}>
+            <Text className={`text-xs ${UI.muted}`}>
               Network:{" "}
               <Text className="font-bold" style={{ color: isOnline ? "#1f7a3f" : "#b45309" }}>
                 {isOnline ? "ONLINE" : "OFFLINE"}
@@ -1442,7 +1421,7 @@ export default function CreateCatchLog() {
 
             {pendingCount > 0 ? (
               <View className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
-                <Text className="text-xs font-semibold text-amber-800">
+                <Text className="text-sm font-semibold text-amber-800">
                   {t.pending}: {pendingCount} {isOnline ? "" : "(offline)"}
                 </Text>
               </View>
@@ -1509,7 +1488,7 @@ export default function CreateCatchLog() {
                 onPress={() => vesselRef.current?.present()}
               />
               {!vesselLoading && vesselOptions.length === 0 ? (
-                <Text className="mt-2 text-[11px] text-rose-600">{t.noVessels}</Text>
+                <Text className="mt-2 text-xs text-rose-600">{t.noVessels}</Text>
               ) : null}
             </FieldCard>
 
@@ -1522,10 +1501,10 @@ export default function CreateCatchLog() {
                 onPress={() => tripRef.current?.present()}
               />
               {!tripLoading && tripOptions.length === 0 ? (
-                <Text className="mt-2 text-[11px] text-rose-600">{t.noTrips}</Text>
+                <Text className="mt-2 text-xs text-rose-600">{t.noTrips}</Text>
               ) : null}
               {selectedVesselDbId ? (
-                <Text className="mt-2 text-[11px] text-[#7a6f66]">
+                <Text className="mt-2 text-xs text-[#7a6f66]">
                   Trips are shown from approved trips of this owner.
                 </Text>
               ) : null}
@@ -1555,7 +1534,7 @@ export default function CreateCatchLog() {
               }}
               disabled={vesselLoading || tripLoading || fishLoading}
             >
-              <Text className="text-center text-white text-base font-extrabold">
+              <Text className="text-center text-white text-lg font-extrabold">
                 {t.next}
               </Text>
             </Pressable>
@@ -1568,19 +1547,19 @@ export default function CreateCatchLog() {
             <Card className="p-4">
               <View className="flex-row items-center gap-2">
                 <Ionicons name="qr-code-outline" size={20} color={UI.accent} />
-                <Text className={`text-sm font-extrabold ${UI.text}`}>
+                <Text className={`text-base font-extrabold ${UI.text}`}>
                   {t.scanTitle}
                 </Text>
               </View>
 
-              <Text className={`mt-1 text-[11px] ${UI.muted}`}>
+              <Text className={`mt-1 text-sm ${UI.muted}`}>
                 {scanEnabled ? t.scanReady : t.scanHint}
               </Text>
 
               <View className="mt-3 overflow-hidden rounded-2xl border border-[#ead7c8] bg-black">
                 {!cameraPerm?.granted ? (
                   <View className="p-4">
-                    <Text className="text-white text-sm font-semibold">
+                    <Text className="text-white text-base font-semibold">
                       {t.camDenied}
                     </Text>
                     <Pressable
@@ -1588,7 +1567,7 @@ export default function CreateCatchLog() {
                       className="mt-3 rounded-2xl px-4 py-3 active:opacity-80"
                       style={{ backgroundColor: UI.accent }}
                     >
-                      <Text className="text-center text-white font-extrabold">
+                      <Text className="text-center text-white font-extrabold text-base">
                         {t.grantCam}
                       </Text>
                     </Pressable>
@@ -1609,7 +1588,7 @@ export default function CreateCatchLog() {
 
               <View className="mt-3">
                 <View className="flex-row items-center justify-between">
-                  <Text className={`text-sm font-extrabold ${UI.text}`}>
+                  <Text className={`text-base font-extrabold ${UI.text}`}>
                     {t.scannedList} • {t.scanCount(qrCount)}
                   </Text>
 
@@ -1618,7 +1597,7 @@ export default function CreateCatchLog() {
                       onPress={clearQrs}
                       className="rounded-full border border-[#ead7c8] bg-white px-3 py-2 active:opacity-80"
                     >
-                      <Text className={`text-xs font-semibold ${UI.text}`}>
+                      <Text className={`text-sm font-semibold ${UI.text}`}>
                         {t.clearAll}
                       </Text>
                     </Pressable>
@@ -1627,7 +1606,7 @@ export default function CreateCatchLog() {
 
                 {qrCount === 0 ? (
                   <View className={`mt-2 rounded-xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}>
-                    <Text className={`text-xs ${UI.muted}`}>{t.errQr}</Text>
+                    <Text className={`text-sm ${UI.muted}`}>{t.errQr}</Text>
                   </View>
                 ) : (
                   <View className="mt-2 gap-2">
@@ -1637,16 +1616,16 @@ export default function CreateCatchLog() {
                         className={`flex-row items-center justify-between rounded-xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}
                       >
                         <View className="flex-1">
-                          <Text className={`text-xs font-semibold ${UI.text}`} numberOfLines={1}>
+                          <Text className={`text-sm font-semibold ${UI.text}`} numberOfLines={1}>
                             {x.id}
                           </Text>
-                          <Text className={`mt-1 text-[11px] ${UI.muted}`}>Type: {x.kind}</Text>
+                          <Text className={`mt-1 text-xs ${UI.muted}`}>Type: {x.kind}</Text>
                         </View>
                         <Pressable
                           onPress={() => removeQr(x.id)}
                           className="ml-3 rounded-full bg-rose-100 px-3 py-1 active:opacity-80"
                         >
-                          <Text className="text-xs font-semibold text-rose-700">{t.remove}</Text>
+                          <Text className="text-sm font-semibold text-rose-700">{t.remove}</Text>
                         </Pressable>
                       </View>
                     ))}
@@ -1659,9 +1638,9 @@ export default function CreateCatchLog() {
             <Card className="p-4">
               <View className="flex-row items-center gap-2">
                 <Ionicons name="navigate-outline" size={20} color={UI.accent} />
-                <Text className={`text-sm font-extrabold ${UI.text}`}>Live Location</Text>
+                <Text className={`text-base font-extrabold ${UI.text}`}>Live Location</Text>
               </View>
-              <Text className={`mt-1 text-[11px] ${UI.muted}`}>
+              <Text className={`mt-1 text-sm ${UI.muted}`}>
                 {locLoading
                   ? "Getting location..."
                   : locError
@@ -1677,7 +1656,7 @@ export default function CreateCatchLog() {
                 className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-4 active:opacity-80`}
                 onPress={() => setStep(1)}
               >
-                <Text className={`text-center ${UI.text} text-base font-extrabold`}>{t.back}</Text>
+                <Text className={`text-center ${UI.text} text-lg font-extrabold`}>{t.back}</Text>
               </Pressable>
 
               <Pressable
@@ -1686,7 +1665,7 @@ export default function CreateCatchLog() {
                 onPress={() => setStep(3)}
                 disabled={qrCount === 0}
               >
-                <Text className="text-center text-white text-base font-extrabold">{t.next}</Text>
+                <Text className="text-center text-white text-lg font-extrabold">{t.next}</Text>
               </Pressable>
             </View>
           </View>
@@ -1698,19 +1677,19 @@ export default function CreateCatchLog() {
             <Card className="p-4">
               <View className="flex-row items-center gap-2">
                 <Ionicons name="time-outline" size={20} color={UI.accent} />
-                <Text className={`text-sm font-extrabold ${UI.text}`}>{t.dateTime}</Text>
+                <Text className={`text-base font-extrabold ${UI.text}`}>{t.dateTime}</Text>
               </View>
 
               <View className={`mt-3 rounded-xl border ${UI.border} bg-[#fbf6f1] px-3 py-3`}>
-                <Text className={`text-xs ${UI.muted}`}>{t.date}</Text>
-                <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>{fmtDate(nowPreview)}</Text>
+                <Text className={`text-sm ${UI.muted}`}>{t.date}</Text>
+                <Text className={`mt-1 text-lg font-extrabold ${UI.text}`}>{fmtDate(nowPreview)}</Text>
 
                 <View className="mt-3 h-[1px] bg-[#ead7c8]" />
 
-                <Text className={`mt-3 text-xs ${UI.muted}`}>{t.time}</Text>
-                <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>{fmtTime(nowPreview)}</Text>
+                <Text className={`mt-3 text-sm ${UI.muted}`}>{t.time}</Text>
+                <Text className={`mt-1 text-lg font-extrabold ${UI.text}`}>{fmtTime(nowPreview)}</Text>
 
-                <Text className={`mt-2 text-[11px] ${UI.muted}`}>{t.autoHint}</Text>
+                <Text className={`mt-2 text-xs ${UI.muted}`}>{t.autoHint}</Text>
               </View>
             </Card>
 
@@ -1719,7 +1698,7 @@ export default function CreateCatchLog() {
                 className={`flex-1 rounded-2xl border ${UI.border} bg-white px-4 py-4 active:opacity-80`}
                 onPress={() => setStep(2)}
               >
-                <Text className={`text-center ${UI.text} text-base font-extrabold`}>{t.back}</Text>
+                <Text className={`text-center ${UI.text} text-lg font-extrabold`}>{t.back}</Text>
               </Pressable>
 
               <Pressable
@@ -1727,7 +1706,7 @@ export default function CreateCatchLog() {
                 style={{ backgroundColor: UI.accent }}
                 onPress={() => setStep(4)}
               >
-                <Text className="text-center text-white text-base font-extrabold">{t.next}</Text>
+                <Text className="text-center text-white text-lg font-extrabold">{t.next}</Text>
               </Pressable>
             </View>
           </View>
@@ -1739,7 +1718,7 @@ export default function CreateCatchLog() {
             <Card className="p-4">
               <View className="flex-row items-center gap-2">
                 <Ionicons name="camera-outline" size={20} color={UI.accent} />
-                <Text className={`text-sm font-extrabold ${UI.text}`}>{t.addPhoto}</Text>
+                <Text className={`text-base font-extrabold ${UI.text}`}>{t.addPhoto}</Text>
               </View>
 
               <Pressable
@@ -1747,7 +1726,7 @@ export default function CreateCatchLog() {
                 className="mt-3 rounded-2xl border px-4 py-3 active:opacity-90"
                 style={{ borderColor: UI.accent, backgroundColor: "#fff3e7" }}
               >
-                <Text className="text-center font-semibold" style={{ color: UI.accent }}>
+                <Text className="text-center font-semibold text-base" style={{ color: UI.accent }}>
                   {t.addPhoto}
                 </Text>
               </Pressable>
@@ -1759,14 +1738,14 @@ export default function CreateCatchLog() {
                       key={uri}
                       className={`flex-row items-center justify-between rounded-xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}
                     >
-                      <Text className={`flex-1 text-xs ${UI.text}`} numberOfLines={1}>
+                      <Text className={`flex-1 text-sm ${UI.text}`} numberOfLines={1}>
                         Photo {idx + 1}
                       </Text>
                       <Pressable
                         onPress={() => removeImage(uri)}
                         className="ml-3 rounded-full bg-rose-100 px-3 py-1 active:opacity-80"
                       >
-                        <Text className="text-xs font-semibold text-rose-700">{t.remove}</Text>
+                        <Text className="text-sm font-semibold text-rose-700">{t.remove}</Text>
                       </Pressable>
                     </View>
                   ))}
@@ -1780,7 +1759,7 @@ export default function CreateCatchLog() {
                 onPress={() => setStep(3)}
                 disabled={posting || ownerLoading || vesselLoading || tripLoading}
               >
-                <Text className={`text-center ${UI.text} text-base font-extrabold`}>{t.back}</Text>
+                <Text className={`text-center ${UI.text} text-lg font-extrabold`}>{t.back}</Text>
               </Pressable>
 
               <Pressable
@@ -1789,7 +1768,7 @@ export default function CreateCatchLog() {
                 onPress={save}
                 disabled={posting || ownerLoading || qrCount === 0}
               >
-                <Text className="text-center text-white text-base font-extrabold">
+                <Text className="text-center text-white text-lg font-extrabold">
                   {posting ? (lang === "ta" ? "சேமிக்கிறது..." : "Saving...") : `${t.save} (${qrCount})`}
                 </Text>
               </Pressable>
