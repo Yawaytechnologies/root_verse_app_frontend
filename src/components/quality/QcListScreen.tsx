@@ -16,6 +16,8 @@ import {
   removeQcFillById,
   upsertQcFillDraft,
   type QcFillQueuedItem,
+  deriveTabFromPayload,
+  type TabStatus as DerivedTabStatus,
 } from "../../utils/qcFillQueue";
 
 import { FullRow, TwoColRow, type Division, type Lang } from "./QualityUI";
@@ -34,7 +36,7 @@ type ListItem = {
 };
 
 function upper(v: any) {
-  return String(v || "").toUpperCase();
+  return String(v ?? "").trim().toUpperCase();
 }
 
 function pad2(n: number) {
@@ -50,39 +52,33 @@ function toYmdLocal(ts: number): string {
 }
 
 function formatDmy(ymd: string): string {
-  // ymd: YYYY-MM-DD -> DD-MM-YYYY
   const [y, m, d] = String(ymd || "").split("-");
   if (!y || !m || !d) return ymd;
   return `${d}-${m}-${y}`;
 }
 
-function getQcResult(p: any) {
-  const v =
-    p?.qc_result ??
-    p?.qcResult ??
-    p?.qc_status ??
-    p?.qcStatus ??
-    p?.status ??
-    "";
-  return upper(v);
+function unwrapPayload(p: any) {
+  if (!p) return p;
+  if (p?.payload && typeof p.payload === "object") return p.payload;
+  return p;
 }
 
-function isRejected(p: any) {
-  const r = getQcResult(p);
-  return r === "REJECT" || r === "REJECTED" || !!p?.reject_reason;
+function getResultForDisplay(payload: any) {
+  const p = unwrapPayload(payload);
+
+  const r = upper(p?.qc_result ?? p?.qcResult ?? p?.result);
+  if (r) return r;
+
+  const s = upper(p?.qc_status ?? p?.qcStatus ?? p?.status);
+  if (s === "CHECKED") return "PASS";
+  if (s === "HOLD") return "HOLD";
+  if (s === "REJECTED") return "REJECT";
+
+  return "";
 }
 
-// ✅ Checked means "submitted to server" AND not rejected
-function isChecked(p: any, synced: boolean) {
-  return !!synced && !isRejected(p);
-}
-
-// ✅ Pending means "not submitted to server yet" (editable/deletable)
-function isPending(_p: any, synced: boolean) {
-  return !synced;
-}
-
-function getImages(p: any): string[] {
+function getImages(p0: any): string[] {
+  const p = unwrapPayload(p0);
   const imgs =
     p?.inspection_images ||
     p?.pond_images ||
@@ -94,7 +90,6 @@ function getImages(p: any): string[] {
 
 /** ===== Render all form fields safely ===== */
 const HIDE_KEYS = new Set([
-  // meta / internal
   "_local",
   "server_qr",
   "raw",
@@ -102,13 +97,11 @@ const HIDE_KEYS = new Set([
   "qr",
   "updatedQr",
 
-  // ids shown elsewhere or not useful in UI
   "checker_code",
   "checkerCode",
   "quality_checker_id",
   "qualityCheckerId",
 
-  // division/result shown already
   "division",
   "qc_result",
   "qcResult",
@@ -116,16 +109,11 @@ const HIDE_KEYS = new Set([
   "qcStatus",
   "status",
 
-  // images shown separately
   "crate_images",
   "inspection_images",
   "pond_images",
   "pond_condition_images",
   "images",
-
-  // (you said keep it, so NOT hiding is_damaged)
-  // "is_damaged",
-  // "isDamaged",
 ]);
 
 function isUriLike(s: string) {
@@ -157,8 +145,8 @@ function formatValue(v: any): string {
   }
 }
 
-function getFormEntries(payload: any): Array<{ label: string; value: string }> {
-  const p = payload || {};
+function getFormEntries(payload0: any): Array<{ label: string; value: string }> {
+  const p = unwrapPayload(payload0) || {};
   const entries: Array<{ label: string; value: string }> = [];
 
   Object.entries(p).forEach(([k, v]) => {
@@ -233,6 +221,21 @@ function fmtMonthTitle(d: Date) {
   return `${m} ${d.getFullYear()}`;
 }
 
+/** ✅ backend enum list (used in edit for REJECT) */
+const REJECT_REASONS = [
+  "TEMP_ABUSE",
+  "SPOILAGE_ODOR",
+  "CONTAMINATION",
+  "DAMAGED_PACKAGING",
+  "MIXED_SPECIES",
+  "WRONG_LABEL",
+  "UNDER_SIZE",
+  "UNKNOWN_ORIGIN",
+  "OTHER",
+] as const;
+
+type RejectReason = (typeof REJECT_REASONS)[number];
+
 export default function QcListScreen({
   division,
   lang,
@@ -244,20 +247,19 @@ export default function QcListScreen({
   lang: Lang;
   status: TabStatus;
 
-  // ✅ calendar props from parent
   selectedDate: string; // YYYY-MM-DD
   onChangeDate: (ymd: string) => void;
 }) {
   const [items, setItems] = useState<ListItem[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // ✅ selected item shown inline (no modal)
   const [selected, setSelected] = useState<ListItem | null>(null);
 
-  // ✅ edit state (only for pending)
+  // ✅ edit state (for ANY unsynced item, even in rejected tab)
   const [editMode, setEditMode] = useState(false);
   const [editResult, setEditResult] = useState("");
   const [editRemarks, setEditRemarks] = useState("");
+  const [editRejectReason, setEditRejectReason] = useState<RejectReason | "">("");
 
   // ✅ calendar modal
   const [calOpen, setCalOpen] = useState(false);
@@ -265,7 +267,6 @@ export default function QcListScreen({
     monthStart(ymdToDate(selectedDate))
   );
 
-  // keep month view in sync when selectedDate changes
   useEffect(() => {
     setCalMonth(monthStart(ymdToDate(selectedDate)));
   }, [selectedDate]);
@@ -276,43 +277,49 @@ export default function QcListScreen({
       const q = await getQcFillQueue();
 
       const ymd = String(selectedDate || "").trim();
+      const divU = upper(division);
 
       const list = (q as QcFillQueuedItem[])
-        .filter((x) => upper(x.payload?.division) === upper(division))
         .filter((x) => {
-          const p = x.payload;
-          if (status === "checked") return isChecked(p, x.synced);
-          if (status === "rejected") return !!x.synced && isRejected(p);
-          return isPending(p, x.synced);
+          const p = unwrapPayload(x.payload);
+          const d =
+            upper((x as any)?.division) ||
+            upper(p?.division) ||
+            upper(p?._local?.division);
+          return !divU || d === divU;
         })
-        // ✅ Date filter here
+        .filter((x) => {
+          const tab = deriveTabFromPayload(x.payload) as DerivedTabStatus;
+          return tab === status;
+        })
         .filter((x) => {
           if (!ymd) return true;
-          const t = x.synced ? x.syncedAt || x.createdAt : x.createdAt;
-          return toYmdLocal(t) === ymd;
+          const eventAt = x.synced ? x.syncedAt || x.createdAt : x.createdAt;
+          return toYmdLocal(eventAt) === ymd;
         })
-        .sort(
-          (a, b) => (b.syncedAt || b.createdAt) - (a.syncedAt || a.createdAt)
-        )
+        .sort((a, b) => (b.syncedAt || b.createdAt) - (a.syncedAt || a.createdAt))
         .map((x) => {
           const eventAt = x.synced ? x.syncedAt || x.createdAt : x.createdAt;
+          const p = unwrapPayload(x.payload);
 
           return {
             id: x.id,
             qrCode: x.qrCode,
-            createdAt: eventAt, // display
+            createdAt: eventAt,
             eventAt,
             synced: x.synced,
             syncedAt: x.syncedAt,
             payload: x.payload,
             lastError:
-              (x as any)?.lastError || (x as any)?.payload?._local?.last_error,
+              (x as any)?.lastError ||
+              p?._local?.last_error ||
+              p?._local?.lastError ||
+              undefined,
           };
         });
 
       setItems(list);
 
-      // if selected no longer exists, close details
       if (selected) {
         const still = list.find((i) => i.id === selected.id);
         if (!still) setSelected(null);
@@ -330,11 +337,20 @@ export default function QcListScreen({
   // preload edit values when selecting
   useEffect(() => {
     if (!selected) return;
+
+    const p = unwrapPayload(selected.payload);
     setEditMode(false);
-    setEditResult(getQcResult(selected.payload) || "");
-    setEditRemarks(
-      String(selected.payload?.remarks || selected.payload?.qc_remarks || "")
-    );
+
+    const r = getResultForDisplay(p);
+    setEditResult(r || "");
+
+    setEditRemarks(String(p?.qc_remarks || p?.remarks || ""));
+
+    const rr = upper(p?.reject_reason);
+    const found = (REJECT_REASONS as readonly string[]).includes(rr)
+      ? (rr as RejectReason)
+      : "";
+    setEditRejectReason(found);
   }, [selected]);
 
   const onDelete = async () => {
@@ -348,15 +364,48 @@ export default function QcListScreen({
   const onSaveEdit = async () => {
     if (!selected) return;
 
-    if (status !== "pending" || selected.synced) return;
+    // ✅ allow edit only for unsynced (any tab)
+    if (selected.synced) return;
+
+    const nextResult = upper(editResult);
+    if (nextResult !== "PASS" && nextResult !== "HOLD" && nextResult !== "REJECT") {
+      Alert.alert("Invalid Result", "Result must be PASS / HOLD / REJECT");
+      return;
+    }
+
+    // ✅ if REJECT, require enum reject_reason
+    if (nextResult === "REJECT") {
+      if (!editRejectReason) {
+        Alert.alert("Reject Reason required", "Select a reject reason");
+        return;
+      }
+    }
+
+    const prev = unwrapPayload(selected.payload) || {};
 
     const nextPayload = {
-      ...(selected.payload || {}),
-      qc_result: upper(editResult || selected.payload?.qc_result),
-      remarks: editRemarks,
+      ...(prev || {}),
       division,
+
+      qc_result: nextResult,
+      // keep qc_status in payload if you are using it elsewhere
+      qc_status:
+        nextResult === "PASS"
+          ? "CHECKED"
+          : nextResult === "HOLD"
+          ? "HOLD"
+          : "REJECTED",
+
+      // ✅ backend expects qc_remarks (your modal uses qc_remarks)
+      qc_remarks: editRemarks?.trim() || null,
+      // keep old key also if any code reads it
+      remarks: editRemarks?.trim() || null,
+
+      // ✅ only for REJECT else null
+      reject_reason: nextResult === "REJECT" ? editRejectReason : null,
+
       _local: {
-        ...(selected.payload?._local || {}),
+        ...(prev?._local || {}),
         last_error: null,
         last_error_at: null,
       },
@@ -382,31 +431,26 @@ export default function QcListScreen({
     return selected ? getFormEntries(selected.payload) : [];
   }, [selected]);
 
-  // calendar grid
   const calCells = useMemo(() => {
     const start = monthStart(calMonth);
     const total = daysInMonth(start);
-    const firstDow = start.getDay(); // 0..6
+    const firstDow = start.getDay();
     const cells: Array<{ day?: number; ymd?: string }> = [];
 
-    // blanks
     for (let i = 0; i < firstDow; i++) cells.push({});
 
-    // days
     for (let d = 1; d <= total; d++) {
       const dt = new Date(start.getFullYear(), start.getMonth(), d);
       cells.push({ day: d, ymd: toYmdLocal(dt.getTime()) });
     }
 
-    // pad to full weeks
     while (cells.length % 7 !== 0) cells.push({});
-
     return cells;
   }, [calMonth]);
 
   return (
     <View style={{ marginTop: 12, flex: 1 }}>
-      {/* ✅ Title left + Calendar right */}
+      {/* Title left + Calendar right */}
       <View
         style={{
           flexDirection: "row",
@@ -451,6 +495,11 @@ export default function QcListScreen({
         {items.map((it) => {
           const active = selected?.id === it.id;
 
+          const dispResult = getResultForDisplay(it.payload) || "—";
+          const qcStatus = String(
+            unwrapPayload(it.payload)?.qc_status || unwrapPayload(it.payload)?.qcStatus || "—"
+          );
+
           return (
             <View key={it.id} style={{ marginBottom: 10 }}>
               <Pressable
@@ -475,7 +524,12 @@ export default function QcListScreen({
                 </Text>
 
                 <Text style={{ color: "rgba(255,255,255,0.65)", marginTop: 4 }}>
-                  Result: {getQcResult(it.payload) || "—"}
+                  Result: {dispResult}
+                </Text>
+
+                {/* ✅ show sync status always */}
+                <Text style={{ color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
+                  Sync: {it.synced ? "Submitted" : "Pending"}
                 </Text>
 
                 {!!it.lastError && !it.synced && (
@@ -502,7 +556,7 @@ export default function QcListScreen({
                 </Text>
               </Pressable>
 
-              {/* ✅ INLINE DETAILS (no modal) */}
+              {/* INLINE DETAILS */}
               {active && (
                 <View
                   style={{
@@ -516,31 +570,24 @@ export default function QcListScreen({
                 >
                   <TwoColRow
                     left={{ label: "Division", value: division }}
-                    right={{
-                      label: "Result",
-                      value: getQcResult(it.payload) || "—",
-                    }}
+                    right={{ label: "Result", value: dispResult }}
                   />
 
                   <TwoColRow
-                    left={{
-                      label: "QC Status",
-                      value: String(
-                        it.payload?.qc_status || it.payload?.qcStatus || "—"
-                      ),
-                    }}
-                    right={{
-                      label: "Sync",
-                      value: it.synced ? "Submitted" : "Pending",
-                    }}
+                    left={{ label: "QC Status", value: qcStatus }}
+                    right={{ label: "Sync", value: it.synced ? "Submitted" : "Pending" }}
                   />
 
                   <FullRow
                     label="Remarks"
-                    value={it.payload?.remarks || it.payload?.qc_remarks || "—"}
+                    value={
+                      unwrapPayload(it.payload)?.qc_remarks ||
+                      unwrapPayload(it.payload)?.remarks ||
+                      "—"
+                    }
                   />
 
-                  {/* ✅ FORM DETAILS: ALL side-by-side */}
+                  {/* FORM DETAILS */}
                   <View style={{ marginTop: 12 }}>
                     <Text
                       style={{
@@ -585,8 +632,8 @@ export default function QcListScreen({
                     </ScrollView>
                   )}
 
-                  {/* ✅ ONLY FOR PENDING (inline edit/delete) */}
-                  {status === "pending" && !it.synced && (
+                  {/* ✅ EDIT/DELETE FOR ANY UNSYNCED ITEM (ALL TABS) */}
+                  {!it.synced && (
                     <>
                       {!editMode ? (
                         <Pressable
@@ -620,7 +667,7 @@ export default function QcListScreen({
                               fontWeight: "900",
                             }}
                           >
-                            Edit Pending
+                            Edit Local Record
                           </Text>
 
                           <Text
@@ -649,6 +696,48 @@ export default function QcListScreen({
                               fontWeight: "900",
                             }}
                           />
+
+                          {upper(editResult) === "REJECT" && (
+                            <>
+                              <Text
+                                style={{
+                                  color: "rgba(255,255,255,0.65)",
+                                  marginTop: 10,
+                                }}
+                              >
+                                Reject Reason (ENUM)
+                              </Text>
+                              <TextInput
+                                value={editRejectReason}
+                                onChangeText={(v) =>
+                                  setEditRejectReason(upper(v) as RejectReason | "")
+                                }
+                                placeholder="TEMP_ABUSE"
+                                placeholderTextColor="rgba(255,255,255,0.35)"
+                                autoCapitalize="characters"
+                                style={{
+                                  marginTop: 6,
+                                  borderRadius: 12,
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 10,
+                                  backgroundColor: "rgba(0,0,0,0.35)",
+                                  borderWidth: 1,
+                                  borderColor: "rgba(255,255,255,0.12)",
+                                  color: "white",
+                                  fontWeight: "900",
+                                }}
+                              />
+                              <Text
+                                style={{
+                                  color: "rgba(255,255,255,0.45)",
+                                  marginTop: 6,
+                                  fontWeight: "800",
+                                }}
+                              >
+                                Allowed: {REJECT_REASONS.join(", ")}
+                              </Text>
+                            </>
+                          )}
 
                           <Text
                             style={{
@@ -752,7 +841,6 @@ export default function QcListScreen({
               borderColor: "rgba(255,255,255,0.10)",
             }}
           >
-            {/* Header */}
             <View
               style={{
                 flexDirection: "row",
@@ -794,7 +882,6 @@ export default function QcListScreen({
               </Pressable>
             </View>
 
-            {/* DOW */}
             <View style={{ flexDirection: "row", marginTop: 12 }}>
               {DOW.map((d) => (
                 <View key={d} style={{ flex: 1, alignItems: "center" }}>
@@ -805,7 +892,6 @@ export default function QcListScreen({
               ))}
             </View>
 
-            {/* Grid */}
             <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 8 }}>
               {calCells.map((c, idx) => {
                 const isSel = !!c.ymd && c.ymd === selectedDate;
@@ -844,7 +930,6 @@ export default function QcListScreen({
               })}
             </View>
 
-            {/* Footer */}
             <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
               <Pressable
                 onPress={() => {
