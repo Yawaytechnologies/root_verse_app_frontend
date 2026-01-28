@@ -16,7 +16,22 @@ import { ImageList, Input, Label, ReadOnly, TwoCol, Select } from "./common";
 
 export type QCStatus = "CHECKED" | "HOLD" | "REJECTED";
 export type QcResult = "PASS" | "HOLD" | "REJECT";
-export type QualityGrade = "A" | "B" | "C"; // ✅ no REJECTED
+export type QualityGrade = "A" | "B" | "C";
+
+// ✅ MUST MATCH BACKEND ENUM EXACTLY
+export const REJECT_REASONS = [
+  "TEMP_ABUSE",
+  "SPOILAGE_ODOR",
+  "CONTAMINATION",
+  "DAMAGED_PACKAGING",
+  "MIXED_SPECIES",
+  "WRONG_LABEL",
+  "UNDER_SIZE",
+  "UNKNOWN_ORIGIN",
+  "OTHER",
+] as const;
+
+export type RejectReason = (typeof REJECT_REASONS)[number];
 
 export type WildFormState = {
   // keep hidden for backend compatibility
@@ -33,7 +48,10 @@ export type WildFormState = {
   size: "SMALL" | "MEDIUM" | "LARGE";
   damage: "NONE" | "MINOR" | "MODERATE" | "SEVERE";
 
-  reject_reason: string; // medium textarea
+  // ✅ enum-only (dropdown), empty when not reject
+  reject_reason: RejectReason | "";
+
+  // ✅ remarks for extra free text
   remarks: string;
 
   images: string[];
@@ -168,7 +186,7 @@ export default function WildInspectionModal({
     if (!form.size) return { ok: false, msg: "Size required" };
     if (!form.damage) return { ok: false, msg: "Damage required" };
 
-    if (isReject && !form.reject_reason.trim())
+    if (isReject && !form.reject_reason)
       return { ok: false, msg: "Reject reason required" };
 
     return { ok: true, msg: "" };
@@ -209,7 +227,9 @@ export default function WildInspectionModal({
       damage: form.damage,
       is_damaged: form.damage !== "NONE",
 
-      reject_reason: isReject ? form.reject_reason.trim() : null,
+      // ✅ EXACT ENUM VALUE OR NULL
+      reject_reason: isReject ? form.reject_reason || null : null,
+
       qc_remarks: form.remarks?.trim() || null,
 
       inspected_at: capturedAtIso || null,
@@ -224,7 +244,6 @@ export default function WildInspectionModal({
           {/* HEADER */}
           <View className="px-4 py-4 border-b border-white/10">
             <View className="flex-row items-start justify-between">
-              {/* LEFT */}
               <View className="flex-1 pr-3">
                 <Text className="text-white font-extrabold text-lg">
                   Wild Quality Inspection
@@ -302,7 +321,7 @@ export default function WildInspectionModal({
                   value={(form.qc_result || "") as QcResult | ""}
                   onValueChange={(v) => {
                     setFormField("qc_result", v);
-                    setFormField("qc_status", mapResultToStatus(v)); // hidden mapping
+                    setFormField("qc_status", mapResultToStatus(v));
                     if (v !== "REJECT") setFormField("reject_reason", "");
                   }}
                   items={["PASS", "HOLD", "REJECT"] as const}
@@ -323,7 +342,7 @@ export default function WildInspectionModal({
               </View>
             </TwoCol>
 
-            {/* ✅ Weight + Temp side-by-side (your ask) */}
+            {/* Weight + Temp */}
             <TwoCol>
               <View className="flex-1">
                 <Label>Weight (kg)</Label>
@@ -349,7 +368,7 @@ export default function WildInspectionModal({
               </View>
             </TwoCol>
 
-            {/* ✅ BELOW: Size + Damage side-by-side (your ask) */}
+            {/* Size + Damage */}
             <TwoCol>
               <View className="flex-1">
                 <Label>Size</Label>
@@ -381,17 +400,17 @@ export default function WildInspectionModal({
               </View>
             </TwoCol>
 
-            {/* Reject Reason medium textarea */}
+            {/* ✅ Reject Reason Dropdown (enum) */}
             <Label>Reject Reason</Label>
-            <Input
-              value={form.reject_reason}
-              onChangeText={(v) => setFormField("reject_reason", v)}
-              placeholder={isReject ? "Enter reason" : "Only when QC Result = REJECT"}
+            <Select<RejectReason>
+              value={(form.reject_reason || "") as RejectReason | ""}
+              onValueChange={(v) => setFormField("reject_reason", v)}
+              items={REJECT_REASONS}
               disabled={readOnly || submitLoading || !isReject}
-              multiline
-              numberOfLines={3}
+              placeholder={isReject ? "Select" : "Only when QC Result = REJECT"}
             />
 
+            {/* Remarks (free text) */}
             <Label>Remarks</Label>
             <Input
               value={form.remarks}
@@ -402,7 +421,7 @@ export default function WildInspectionModal({
               disabled={readOnly || submitLoading}
             />
 
-            {/* Images buttons side-by-side */}
+            {/* Images */}
             <TwoCol>
               <View className="flex-1">
                 <Label>Capture</Label>
