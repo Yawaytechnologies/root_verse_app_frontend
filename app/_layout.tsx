@@ -24,23 +24,27 @@ import { TraceProvider } from "../src/data/wild/trace.store";
 import { initI18n } from "../src/components/aqua/i18n/i18n";
 
 export default function RootLayout() {
-  // Just init i18n in background. DON'T block rendering.
   useEffect(() => {
     initI18n().catch((e) => console.warn("i18n init failed:", e));
   }, []);
 
   return (
     <Provider store={store}>
-      <GestureHandlerRootView style={{ flex: 1 }}>
+      <GestureHandlerRootView style={{ flex: 1, backgroundColor: "black" }}>
         <SafeAreaProvider>
           <BottomSheetModalProvider>
             <LanguageProvider>
               <TraceProvider>
-                <View style={{ flex: 1 }}>
-                  <Stack screenOptions={{ headerShown: false }} />
+                <View style={{ flex: 1, backgroundColor: "black" }}>
+                  <Stack
+                    screenOptions={{
+                      headerShown: false,
+                      contentStyle: { backgroundColor: "black" }, // ✅ kills white flash
+                      animation: "fade", // optional, smoother
+                    }}
+                  />
                 </View>
 
-                {/* ✅ Toast OUTSIDE Stack so it can overlay everything */}
                 <Toast topOffset={Platform.OS === "web" ? 20 : 60} />
               </TraceProvider>
             </LanguageProvider>
