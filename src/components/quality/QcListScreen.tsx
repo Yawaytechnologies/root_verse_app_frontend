@@ -100,6 +100,13 @@ const HIDE_KEYS = new Set([
   "pond_images",
   "pond_condition_images",
   "images",
+
+  // ✅ hide inspected time field coming from payload
+  "inspected_at",
+  "inspectedAt",
+  "inspected_at_time",
+  "inspectedAtTime",
+  "inspected at",
 ]);
 
 function isUriLike(s: string) {
@@ -197,7 +204,6 @@ const CAL = {
   cardBg: "#0b1630",
   cardTop: "rgba(255,255,255,0.04)",
   border: "rgba(255,255,255,0.10)",
-  textDim: "rgba(255,255,255,0.65)",
   textSoft: "rgba(255,255,255,0.55)",
 
   btnBg: "rgba(255,255,255,0.07)",
@@ -240,7 +246,6 @@ export default function QcListScreen({
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<ListItem | null>(null);
 
-  // ✅ Dates with inspections (so calendar can show dots)
   const [markedDays, setMarkedDays] = useState<Record<string, number>>({});
 
   const [calOpen, setCalOpen] = useState(false);
@@ -251,6 +256,7 @@ export default function QcListScreen({
   }, [selectedDate]);
 
   const todayYmd = useMemo(() => toYmdLocal(Date.now()), []);
+  const todayMonthStart = useMemo(() => monthStart(new Date()), []);
 
   const load = async () => {
     try {
@@ -258,7 +264,6 @@ export default function QcListScreen({
       const q = await getQcFillQueue();
       const ymd = String(selectedDate || "").trim();
 
-      // base filter: division + current tab
       const base = (q as QcFillQueuedItem[])
         .filter((x) => upper(x.payload?.division) === upper(division))
         .filter((x) => {
@@ -268,22 +273,18 @@ export default function QcListScreen({
           return tab === "pending";
         });
 
-      // ✅ build marked days map (for the calendar dots)
       const perDay: Record<string, number> = {};
       base.forEach((x) => {
-        const eventAt =
-          (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
+        const eventAt = (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
         const k = toYmdLocal(eventAt);
         perDay[k] = (perDay[k] || 0) + 1;
       });
       setMarkedDays(perDay);
 
-      // now filter by selected date for list
       const list = base
         .filter((x) => {
           if (!ymd) return true;
-          const eventAt =
-            (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
+          const eventAt = (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
           return toYmdLocal(eventAt) === ymd;
         })
         .sort((a, b) => {
@@ -292,8 +293,7 @@ export default function QcListScreen({
           return bT - aT;
         })
         .map((x) => {
-          const eventAt =
-            (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
+          const eventAt = (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
 
           return {
             id: x.id,
@@ -354,6 +354,11 @@ export default function QcListScreen({
     return cells;
   }, [calMonth]);
 
+  const canGoNextMonth = useMemo(() => {
+    const next = monthStart(addMonths(calMonth, 1));
+    return next.getTime() <= todayMonthStart.getTime();
+  }, [calMonth, todayMonthStart]);
+
   return (
     <View style={{ marginTop: 12, flex: 1 }}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
@@ -385,8 +390,6 @@ export default function QcListScreen({
       <ScrollView style={{ marginTop: 12 }} contentContainerStyle={{ paddingBottom: 30 }}>
         {items.map((it) => {
           const active = selected?.id === it.id;
-
-          // ✅ Pending (HOLD) must always show Edit/Delete
           const allowEditDelete = it.tab === "pending";
 
           return (
@@ -520,7 +523,7 @@ export default function QcListScreen({
         })}
       </ScrollView>
 
-      {/* ✅ Center Calendar Modal (new UI) */}
+      {/* ✅ Center Calendar Modal */}
       <Modal visible={calOpen} transparent animationType="fade" onRequestClose={() => setCalOpen(false)}>
         <View
           style={{
@@ -531,13 +534,11 @@ export default function QcListScreen({
             padding: 16,
           }}
         >
-          {/* tap outside */}
           <Pressable
             onPress={() => setCalOpen(false)}
             style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
           />
 
-          {/* card */}
           <View
             style={{
               width: "100%",
@@ -554,7 +555,6 @@ export default function QcListScreen({
               elevation: 18,
             }}
           >
-            {/* top bar */}
             <View
               style={{
                 paddingHorizontal: 14,
@@ -593,9 +593,7 @@ export default function QcListScreen({
               </Pressable>
             </View>
 
-            {/* content */}
             <View style={{ padding: 14 }}>
-              {/* month nav */}
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                 <Pressable
                   onPress={() => setCalMonth((p) => addMonths(p, -1))}
@@ -618,26 +616,16 @@ export default function QcListScreen({
                   <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>
                     {fmtMonthTitle(calMonth)}
                   </Text>
-
-                  {/* legend */}
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 8 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <View style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: "rgba(34,197,94,0.95)" }} />
-                      <Text style={{ color: CAL.textSoft, fontWeight: "800", fontSize: 12 }}>Today</Text>
-                    </View>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <View style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: "rgba(59,130,246,0.95)" }} />
-                      <Text style={{ color: CAL.textSoft, fontWeight: "800", fontSize: 12 }}>Selected</Text>
-                    </View>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <View style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.70)" }} />
-                      <Text style={{ color: CAL.textSoft, fontWeight: "800", fontSize: 12 }}>Has data</Text>
-                    </View>
-                  </View>
                 </View>
 
                 <Pressable
-                  onPress={() => setCalMonth((p) => addMonths(p, 1))}
+                  onPress={() => {
+                    if (!canGoNextMonth) {
+                      Alert.alert("Locked", "Future dates are locked.");
+                      return;
+                    }
+                    setCalMonth((p) => addMonths(p, 1));
+                  }}
                   style={{
                     width: 44,
                     height: 44,
@@ -647,6 +635,7 @@ export default function QcListScreen({
                     borderColor: CAL.btnBorder,
                     alignItems: "center",
                     justifyContent: "center",
+                    opacity: canGoNextMonth ? 1 : 0.35,
                   }}
                   hitSlop={10}
                 >
@@ -654,7 +643,6 @@ export default function QcListScreen({
                 </Pressable>
               </View>
 
-              {/* dow */}
               <View style={{ flexDirection: "row", marginTop: 14 }}>
                 {DOW.map((d) => (
                   <View key={d} style={{ flex: 1, alignItems: "center" }}>
@@ -665,19 +653,23 @@ export default function QcListScreen({
                 ))}
               </View>
 
-              {/* grid */}
               <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 10 }}>
                 {calCells.map((c, idx) => {
                   const isSel = !!c.ymd && c.ymd === selectedDate;
                   const isToday = !!c.ymd && c.ymd === todayYmd;
                   const count = c.ymd ? (markedDays[c.ymd] || 0) : 0;
+                  const isFuture = !!c.ymd && c.ymd > todayYmd;
 
                   return (
-                    <View key={idx} style={{ width: "14.2857%", padding: 6 }}>
+                    <View key={idx} style={{ width: "14.2857%", padding: 6, opacity: isFuture ? 0.35 : 1 }}>
                       {c.day ? (
                         <Pressable
                           onPress={() => {
                             if (!c.ymd) return;
+                            if (c.ymd > todayYmd) {
+                              Alert.alert("Locked", "Future dates are locked.");
+                              return;
+                            }
                             onChangeDate(c.ymd);
                             setCalOpen(false);
                           }}
@@ -689,19 +681,12 @@ export default function QcListScreen({
                             justifyContent: "center",
                             backgroundColor: isSel ? CAL.selBg : CAL.dayBg,
                             borderWidth: 1.2,
-                            borderColor: isSel
-                              ? CAL.selBorder
-                              : isToday
-                              ? CAL.todayBorder
-                              : CAL.dayBorder,
+                            borderColor: isSel ? CAL.selBorder : isToday ? CAL.todayBorder : CAL.dayBorder,
                           }}
                           hitSlop={10}
                         >
-                          <Text style={{ color: "white", fontWeight: "900", fontSize: 14 }}>
-                            {c.day}
-                          </Text>
+                          <Text style={{ color: "white", fontWeight: "900", fontSize: 14 }}>{c.day}</Text>
 
-                          {/* bottom dot = has data */}
                           {!isSel && count > 0 && (
                             <View
                               style={{
@@ -715,7 +700,6 @@ export default function QcListScreen({
                             />
                           )}
 
-                          {/* today dot (stronger, green) */}
                           {isToday && !isSel && (
                             <View
                               style={{
@@ -737,7 +721,6 @@ export default function QcListScreen({
                 })}
               </View>
 
-              {/* footer buttons */}
               <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
                 <Pressable
                   onPress={() => {

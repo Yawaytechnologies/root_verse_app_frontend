@@ -1,4 +1,4 @@
-// app/(wild)/catch/catchDetails.tsx  (adjust path if different)
+// app/(wild)/catch-logs/details.tsx
 import React, { useEffect, useState } from "react";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import {
@@ -20,7 +20,10 @@ import { useLanguage } from "../../../src/data/wild/lang.store";
 
 // ✅ Redux
 import { useAppDispatch, useAppSelector } from "../../../src/store/hooks";
-import { fetchFilledByCode } from "../../../src/services/wild/filledQr.slice";
+import {
+  fetchFilledByCode,
+  clearFilledState,
+} from "../../../src/services/wild/filledQr.slice";
 
 /** -------------------- THEME -------------------- */
 const UI = {
@@ -39,40 +42,42 @@ type Lang = "ta" | "en";
 
 const i18n: Record<Lang, any> = {
   ta: {
-    title: "ஸ்கேன் & விவரங்கள் பார்க்க",
+    title: "ஸ்கேன் & பிடிப்பு பதிவு விவரங்கள் பார்க்க",
     qrId: "QR ஐடி",
-    qrPh: "ஸ்கேன் அல்லது பதிவு செய்க (உதா: RV-VESSEL-000633)",
+    qrPh: "ஸ்கேன் அல்லது பதிவு செய்க (உதா: RV-FISH-001478)",
     noQrTitle: "QR ஐடி இல்லை",
     noQrSub: "QR ஐடியை பதிவு செய்யவும் அல்லது கீழே ஸ்கேன் செய்யவும்.",
     loading: "தேடுகிறது...",
     noDataTitle: "தரவு இல்லை",
+
     catchTitle: "பிடிப்பு பதிவு விவரங்கள்",
+    qrCode: "QR குறியீடு",
     fish: "மீன்",
-    weight: "எடை",
-    kg: "கி.கி",
-    swipeHint: "படங்களை பார்க்க இடம்/வலம் ஸ்வைப் செய்யவும்",
     date: "தேதி",
     time: "நேரம்",
+    swipeHint: "படங்களை பார்க்க இடம்/வலம் ஸ்வைப் செய்யவும்",
+
     search: "தேடு",
     camPermissionTitle: "Camera permission",
     camPermissionMsg: "Camera permission is required to scan QR.",
     scanHint: "QR ஐ ஸ்க்வேர்க்குள் காட்டவும்",
   },
   en: {
-    title: "Scan & View Details",
+    title: "Scan & View Catch Log Details",
     qrId: "QR ID",
-    qrPh: "Scan or type (ex: RV-vessel-000633)",
+    qrPh: "Scan or type (ex: RV-FISH-001478)",
     noQrTitle: "No QR selected",
     noQrSub: "Type a QR ID or scan below.",
     loading: "Loading...",
     noDataTitle: "No data found",
+
     catchTitle: "Catch Log Details",
+    qrCode: "QR Code",
     fish: "Fish",
-    weight: "Weight",
-    kg: "kg",
-    swipeHint: "Swipe left/right to view images",
     date: "Date",
     time: "Time",
+    swipeHint: "Swipe left/right to view images",
+
     search: "Search",
     camPermissionTitle: "Camera permission",
     camPermissionMsg: "Camera permission is required to scan QR.",
@@ -93,6 +98,111 @@ function extractCode(value: string) {
     return last.trim();
   }
   return raw;
+}
+
+/** ---- format helpers (clean date + AM/PM time) ---- */
+function formatDateClean(v: any) {
+  const raw = String(v || "").trim();
+  if (!raw) return "";
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+
+  return d.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatTimeAmPm(v: any) {
+  const raw = String(v || "").trim();
+  if (!raw) return "";
+
+  if (raw.includes("T")) {
+    const d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+    }
+    return raw;
+  }
+
+  const parts = raw.split(":");
+  const hh = Number(parts[0]);
+  const mm = Number(parts[1] ?? "0");
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return raw;
+
+  const ampm = hh >= 12 ? "PM" : "AM";
+  const h12 = hh % 12 === 0 ? 12 : hh % 12;
+  const mm2 = String(mm).padStart(2, "0");
+  const h2 = String(h12).padStart(2, "0");
+  return `${h2}:${mm2} ${ampm}`;
+}
+
+/** ---- image extraction (supports 1 or many, max 5) ---- */
+function cleanUrl(u: any) {
+  return String(u || "")
+    .replace(/%22/g, "")
+    .replace(/^"+|"+$/g, "")
+    .trim();
+}
+
+function urlsFromAny(v: any): string[] {
+  if (!v) return [];
+  if (Array.isArray(v)) return v.map(cleanUrl).filter(Boolean);
+
+  const s = cleanUrl(v);
+  if (!s) return [];
+
+  // try JSON array in string
+  if (s.startsWith("[")) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr)) return arr.map(cleanUrl).filter(Boolean);
+    } catch {}
+  }
+
+  // comma-separated urls
+  if (s.includes("http") && s.includes(",")) {
+    return s
+      .split(",")
+      .map((x) => cleanUrl(x))
+      .filter(Boolean);
+  }
+
+  return [s];
+}
+
+function pickSubmittedImages(qr: any): string[] {
+  // ONLY top-level fields (not owner.profile_picture_url etc)
+  const candidates = [
+    qr?.image_urls,
+    qr?.images,
+    qr?.photos,
+
+    qr?.image_url,        // main catch image
+    qr?.fish_image_url,   // extra fish image if exists
+    qr?.pond_condition_url,
+    qr?.damage_image_url,
+  ];
+
+  let out: string[] = [];
+  for (const c of candidates) out = out.concat(urlsFromAny(c));
+
+  // unique + keep order
+  const seen = new Set<string>();
+  const uniq = out.filter((u) => {
+    const key = u;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  // user says total five → show up to 5
+  return uniq.slice(0, 5);
 }
 
 /** -------------------- small components -------------------- */
@@ -229,7 +339,7 @@ export default function CatchDetails() {
 
   const qr = apiData?.qr || null;
 
-  // ✅ After data loads, show only catch (hide search + scanner)
+  // ✅ After data loads, hide search + scanner
   const hideSearchAndScanner = !!qr;
 
   const ensureCamera = async () => {
@@ -260,6 +370,12 @@ export default function CatchDetails() {
     setTimeout(() => setScannedOnce(false), 1200);
   };
 
+  // ✅ IMPORTANT: open page again => start from beginning (scanner default)
+  useEffect(() => {
+    dispatch(clearFilledState());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     (async () => {
       if (!hideSearchAndScanner) await ensureCamera();
@@ -272,11 +388,18 @@ export default function CatchDetails() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial]);
 
+  // ✅ ONLY: QR Code + Fish + Date + Time + Submitted Images (max 5)
+  const qrCodeValue = String(qr?.code || qrId || "");
+  const fishName = String(qr?.fish_name || qr?.fish?.fish_name || "");
+  const cleanDate = formatDateClean(qr?.date);
+  const cleanTime = formatTimeAmPm(qr?.time);
+  const submittedImages = qr ? pickSubmittedImages(qr) : [];
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: UI.bg }} edges={["left", "right"]}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* Header: ONLY back button */}
+      {/* Header */}
       <View
         style={{
           backgroundColor: "#fff",
@@ -298,7 +421,7 @@ export default function CatchDetails() {
         </View>
       </View>
 
-      {/* Search bar (NO scan button) */}
+      {/* Search bar */}
       {!hideSearchAndScanner ? (
         <View className="px-4 mt-4">
           <View className="rounded-2xl border bg-white px-3 py-2" style={{ borderColor: UI.border }}>
@@ -337,7 +460,6 @@ export default function CatchDetails() {
         </View>
       ) : null}
 
-      {/* Content */}
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 26, paddingTop: 14 }}>
         {/* Status card */}
         {!qrId ? (
@@ -363,7 +485,6 @@ export default function CatchDetails() {
             </View>
           </Card>
         ) : apiError || !qr ? (
-          // ✅ IMPORTANT: DO NOT show apiError text in UI
           <Card>
             <View className="p-4">
               <Text className="text-[15px] font-extrabold" style={{ color: UI.text }}>
@@ -373,7 +494,7 @@ export default function CatchDetails() {
           </Card>
         ) : null}
 
-        {/* Square Scanner below the status card */}
+        {/* Scanner */}
         {!hideSearchAndScanner ? (
           <View className="mt-4 items-center">
             <View
@@ -397,7 +518,7 @@ export default function CatchDetails() {
           </View>
         ) : null}
 
-        {/* Catch details ONLY */}
+        {/* ✅ QR + Fish + Date + Time + Submitted Images */}
         {qr ? (
           <View className="gap-4 mt-4">
             <Card>
@@ -408,15 +529,13 @@ export default function CatchDetails() {
                   className="mt-3 rounded-2xl border p-3"
                   style={{ borderColor: UI.border, backgroundColor: UI.chipBg }}
                 >
-                  <InfoRow k={t.fish} v={qr.fish_name || qr.fish?.fish_name || ""} />
-                  <InfoRow k={t.weight} v={`${qr.weight || ""} ${t.kg}`} />
-                  <InfoRow k={t.date} v={String(qr.date || "")} />
-                  <InfoRow k={t.time} v={String(qr.time || "")} last />
+                  <InfoRow k={t.qrCode} v={qrCodeValue} />
+                  <InfoRow k={t.fish} v={fishName} />
+                  <InfoRow k={t.date} v={cleanDate} />
+                  <InfoRow k={t.time} v={cleanTime} last />
 
-                  <SquareImageCarousel
-                    images={qr.image_url ? [String(qr.image_url).replace(/%22/g, "")] : []}
-                    hint={t.swipeHint}
-                  />
+                  {/* ✅ show submitted images (max 5) */}
+                  <SquareImageCarousel images={submittedImages} hint={t.swipeHint} />
                 </View>
               </View>
             </Card>

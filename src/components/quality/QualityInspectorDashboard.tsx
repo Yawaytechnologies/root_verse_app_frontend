@@ -157,7 +157,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#030712" }} edges={["top"]}>
-      {/* Top header */}
       <View
         style={{
           paddingTop: Platform.OS === "android" ? Math.max(insets.top, 2) : 2,
@@ -193,7 +192,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
             </View>
           </View>
 
-          {/* Language toggle */}
           <Pressable
             onPress={() => setLang((p) => (p === "en" ? "ta" : "en"))}
             style={{
@@ -239,7 +237,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24, flexGrow: 1 }}>
-        {/* Banner */}
         <View
           style={{
             backgroundColor: theme.bannerFrom,
@@ -263,6 +260,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
                 {lang === "en" ? "ID" : "ஐடி"}: {mergedInspector.id}
               </Text>
 
+              {/* ✅ ALWAYS show date (including scanner tab) */}
               <Text style={{ color: "rgba(255,255,255,0.85)", marginTop: 6, fontSize: 12.5 }}>
                 Date: {selectedDate}
               </Text>
@@ -281,7 +279,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
           </View>
         </View>
 
-        {/* Tabs */}
         <View style={{ backgroundColor: "#071228", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" }}>
           <View style={{ flexDirection: "row" }}>
             <MiniTab
@@ -324,6 +321,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
             <QcScannerScreen
               division={division}
               lang={lang as any}
+              selectedDate={selectedDate}
               editDraft={editDraft}
               onEditDraftConsumed={() => setEditDraft(null)}
               onAfterSubmit={() => {
@@ -372,8 +370,8 @@ function StatBox({ label, value, bg }: { label: string; value: number; bg: strin
         flex: 1,
         borderRadius: 18,
         backgroundColor: bg,
-        paddingVertical: 10,          // slightly smaller
-        paddingHorizontal: 6,         // helps label fit
+        paddingVertical: 10,
+        paddingHorizontal: 6,
         alignItems: "center",
         justifyContent: "center",
         shadowColor: "#000",
@@ -383,9 +381,7 @@ function StatBox({ label, value, bg }: { label: string; value: number; bg: strin
         elevation: 8,
       }}
     >
-      <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>
-        {value}
-      </Text>
+      <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>{value}</Text>
 
       <Text
         numberOfLines={1}
@@ -393,8 +389,8 @@ function StatBox({ label, value, bg }: { label: string; value: number; bg: strin
         style={{
           color: "rgba(255,255,255,0.92)",
           fontWeight: "900",
-          fontSize: 9.5,              // ✅ reduced label size
-          lineHeight: 11,             // ✅ prevents going down
+          fontSize: 9.5,
+          lineHeight: 11,
           marginTop: 2,
           textAlign: "center",
           ...(Platform.OS === "android" ? ({ includeFontPadding: false } as any) : null),
@@ -406,16 +402,6 @@ function StatBox({ label, value, bg }: { label: string; value: number; bg: strin
   );
 }
 
-
-
-/**
- * ✅ FIX:
- * - Icon stays as-is (left)
- * - Tamil label aligns LEFT (textAlign:left)
- * - NO wrap (numberOfLines=1)
- * - NO dots (ellipsizeMode="clip")
- * - Smaller Tamil font so it fits, avoids dropping down
- */
 function MiniTab({
   active,
   label,

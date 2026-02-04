@@ -1,13 +1,5 @@
-// src/components/quality/QcScannerScreen.tsx
-import React, { useEffect, useRef, useState } from "react";
-import {
-  Alert,
-  Animated,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import React, { useEffect, useRef, useState, useMemo } from "react";
+import { Alert, Animated, Pressable, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions } from "expo-camera";
 
@@ -47,6 +39,9 @@ import {
 type Props = {
   division: Division;
   lang: Lang;
+
+  selectedDate?: string;
+
   onAfterSubmit?: (qcResult: "PASS" | "HOLD" | "REJECT" | string) => void;
 
   editDraft?: { qrCode: string; payload: any } | null;
@@ -58,6 +53,13 @@ function upper(x: any) {
 }
 function normCode(raw: string) {
   return String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+function todayYmd(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
 function extractQcResult(res: any, fallbackPayload: any): string {
@@ -116,37 +118,29 @@ function getFormQcResult(payload: any): string {
   return r;
 }
 
-/**
- * ✅ 4-corner bracket overlay (pill ends)
- * Looks like your reference: L-shaped corners only, not full border.
- */
 function CornerBrackets({
   size = 260,
-  corner = 22, // how long the bracket arms are
-  thickness = 4, // bracket thickness
+  corner = 22,
+  thickness = 4,
 }: {
   size?: number;
   corner?: number;
   thickness?: number;
 }) {
   const c = "rgba(46,125,255,0.95)";
-  const r = 999; // pill ends
+  const r = 999;
 
   return (
     <View style={{ width: size, height: size }}>
-      {/* TOP-LEFT */}
       <View style={{ position: "absolute", left: 0, top: 0, width: corner, height: thickness, backgroundColor: c, borderRadius: r }} />
       <View style={{ position: "absolute", left: 0, top: 0, width: thickness, height: corner, backgroundColor: c, borderRadius: r }} />
 
-      {/* TOP-RIGHT */}
       <View style={{ position: "absolute", right: 0, top: 0, width: corner, height: thickness, backgroundColor: c, borderRadius: r }} />
       <View style={{ position: "absolute", right: 0, top: 0, width: thickness, height: corner, backgroundColor: c, borderRadius: r }} />
 
-      {/* BOTTOM-LEFT */}
       <View style={{ position: "absolute", left: 0, bottom: 0, width: corner, height: thickness, backgroundColor: c, borderRadius: r }} />
       <View style={{ position: "absolute", left: 0, bottom: 0, width: thickness, height: corner, backgroundColor: c, borderRadius: r }} />
 
-      {/* BOTTOM-RIGHT */}
       <View style={{ position: "absolute", right: 0, bottom: 0, width: corner, height: thickness, backgroundColor: c, borderRadius: r }} />
       <View style={{ position: "absolute", right: 0, bottom: 0, width: thickness, height: corner, backgroundColor: c, borderRadius: r }} />
     </View>
@@ -156,6 +150,7 @@ function CornerBrackets({
 export default function QcScannerScreen({
   division,
   lang,
+  selectedDate,
   onAfterSubmit,
   editDraft,
   onEditDraftConsumed,
@@ -191,6 +186,27 @@ export default function QcScannerScreen({
     setAquaForm((p) => ({ ...p, [k]: v }));
   const setMariField = <K extends keyof MariFormState>(k: K, v: MariFormState[K]) =>
     setMariForm((p) => ({ ...p, [k]: v }));
+
+  // view-only scanner when selectedDate is not today (but NOT when editing a HOLD draft)
+  const viewOnlyByDate = useMemo(() => {
+    const sel = String(selectedDate || "").trim();
+    if (!sel) return false;
+    if (editDraft?.qrCode) return false;
+    return sel !== todayYmd();
+  }, [selectedDate, editDraft?.qrCode]);
+
+  const [warnedKey, setWarnedKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (!viewOnlyByDate) return;
+    const k = String(selectedDate || "UNKNOWN");
+    if (warnedKey === k) return;
+    setWarnedKey(k);
+
+    Alert.alert(
+      "Only can able to scan already submitted",
+      "Past/Future date selected. Scanner is view-only. Submission is disabled."
+    );
+  }, [viewOnlyByDate, selectedDate, warnedKey]);
 
   const scanLineY = useRef(new Animated.Value(0)).current;
 
@@ -267,21 +283,46 @@ export default function QcScannerScreen({
 
     setHasScanned(true);
     setScannedCode(c);
-    setModalOpen(true);
     setLocalTab(null);
 
     dispatch(resetQcFill());
     dispatch(clearCatchLog());
 
+    // If view-only mode: allow only already submitted.
     try {
       const q = await getQcFillQueue();
       const found = q.find((x) => normCode(x.qrCode) === c);
       if (found) {
         const tab = deriveTabFromPayload(found.payload);
-        applyPrefillFromPayload(c, found.payload, tab);
+
+        if (viewOnlyByDate && tab === "pending") {
+          Alert.alert(
+            "Only can able to scan already submitted",
+            "This QR is saved as HOLD draft (not submitted). Open it from Pending tab to edit/submit."
+          );
+          resetAll(800);
+          return;
+        }
+
+        if (tab === "checked" || tab === "rejected") {
+          applyPrefillFromPayload(c, found.payload, tab);
+        }
       }
     } catch {}
 
+    if (viewOnlyByDate) {
+      try {
+        await dispatch(fetchCatchLogByQr({ qrCode: c, mode: "FILLED_ONLY" })).unwrap();
+        setModalOpen(true);
+        return;
+      } catch {
+        Alert.alert("Only can able to scan already submitted", "This QR is not submitted.");
+        resetAll(800);
+        return;
+      }
+    }
+
+    setModalOpen(true);
     dispatch(fetchCatchLogByQr(c));
   };
 
@@ -338,17 +379,46 @@ export default function QcScannerScreen({
   const editingHoldDraft = localTab === "pending";
   const localFinal = localTab === "checked" || localTab === "rejected";
 
-  const readOnly = (localFinal || serverFilled) && !editingHoldDraft;
+  const readOnly = (viewOnlyByDate || localFinal || serverFilled) && !editingHoldDraft;
+
+  // ✅ SPECIES REQUIRED CHECK (fish_name OR fish_id must exist)
+  const speciesOk = useMemo(() => {
+    const fishName = String((catchLog as any)?.fish_name || "").trim();
+    const fishId = (catchLog as any)?.fish_id;
+    return !!fishId || !!fishName;
+  }, [catchLog]);
 
   const submit = async (payload: any) => {
     if (!scannedCode) {
       Alert.alert("Scan required", "Please scan a QR first");
       return;
     }
+
+    // view-only date mode blocks submit (unless editing HOLD draft)
+    if (viewOnlyByDate && !editingHoldDraft) {
+      Alert.alert("Already submitted", "Past/Future date selected. Submission is disabled.");
+      return;
+    }
+
     if (readOnly) {
       Alert.alert("Already submitted", "This QR is already filled.");
       return;
     }
+
+    // ✅ Block submit if QR details not loaded / species missing
+    if (catchLoading) {
+      Alert.alert("Wait", "QR details still loading. Please wait.");
+      return;
+    }
+    if (catchError) {
+      Alert.alert("Cannot submit", "QR details fetch failed. Please rescan and try again.");
+      return;
+    }
+    if (!catchLog || !speciesOk) {
+      Alert.alert("Cannot submit", "Species not loaded for this QR. Submission blocked.");
+      return;
+    }
+
     if (!inspector?.checker_code || !inspector?.id) {
       Alert.alert("Inspector missing", "QC inspector data not loaded");
       return;
@@ -486,7 +556,6 @@ export default function QcScannerScreen({
         QC Scanner ({division})
       </Text>
 
-      {/* Manual input (small) */}
       <View
         style={{
           marginTop: 10,
@@ -549,7 +618,6 @@ export default function QcScannerScreen({
         </Pressable>
       </View>
 
-      {/* OR divider */}
       <View
         style={{
           marginTop: 10,
@@ -570,13 +638,12 @@ export default function QcScannerScreen({
         <View style={{ flex: 1, height: 1, backgroundColor: "rgba(255,255,255,0.15)" }} />
       </View>
 
-      {/* Scanner container (reduced width) */}
       <View
         style={{
           alignSelf: "center",
           width: "92%",
           maxWidth: 380,
-          borderRadius: 24, // ✅ normal rounded container (NOT pill)
+          borderRadius: 24,
           overflow: "hidden",
           borderWidth: 1,
           borderColor: "rgba(255,255,255,0.10)",
@@ -600,7 +667,6 @@ export default function QcScannerScreen({
             }}
           />
 
-          {/* Overlay */}
           <View
             pointerEvents="none"
             style={{
@@ -610,11 +676,9 @@ export default function QcScannerScreen({
               justifyContent: "center",
             }}
           >
-            {/* ✅ Corner brackets only (no full border) */}
             <View style={{ width: 260, height: 260 }}>
-             <CornerBrackets size={260} corner={28} thickness={5} />
+              <CornerBrackets size={260} corner={28} thickness={5} />
 
-              {/* Scan line inside */}
               <Animated.View
                 style={{
                   position: "absolute",
@@ -628,7 +692,6 @@ export default function QcScannerScreen({
                 }}
               />
 
-              {/* subtle dark glass inside (optional, matches your reference) */}
               <View
                 style={{
                   position: "absolute",
@@ -646,7 +709,6 @@ export default function QcScannerScreen({
         </View>
       </View>
 
-      {/* Modals */}
       {division === "WILD" ? (
         <WildInspectionModal
           visible={modalOpen}

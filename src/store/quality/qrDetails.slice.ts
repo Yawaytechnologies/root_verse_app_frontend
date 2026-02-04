@@ -1,4 +1,3 @@
-// src/store/quality/qrDetails.slice.ts
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import { httpJson } from "../../services/http";
 import type { RootState } from "../auth/store";
@@ -6,6 +5,13 @@ import type { RootState } from "../auth/store";
 export type CatchLogDetails = {
   code: string;
   type: string;
+
+  /**
+   * Normalized status so UI can rely on it:
+   * - "FILLED" means already submitted/final
+   * - "NEW" means not submitted yet
+   * - fallback to other values if backend sends something unexpected
+   */
   status: string;
 
   vessel_name?: string | null;
@@ -37,11 +43,48 @@ const initialState: State = {
   error: null,
 };
 
+function upper(v: any) {
+  return String(v ?? "").trim().toUpperCase();
+}
+
+function normalizeQr(raw: string) {
+  return String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function normalizeStatus(q: any): string {
+  const rawStatus = upper(q?.status);
+
+  // Direct known statuses from API
+  if (rawStatus === "NEW") return "NEW";
+  if (rawStatus === "FILLED") return "FILLED";
+
+  // Often backends use qc_status/qc_result instead of status
+  const qcStatus = upper(q?.qc_status ?? q?.qcStatus);
+  const qcResult = upper(q?.qc_result ?? q?.qcResult);
+
+  // If QC fields exist, it's already processed/submitted.
+  // Treat as FILLED so UI blocks submission consistently.
+  if (qcStatus || qcResult) return "FILLED";
+
+  // Some APIs return these final states in status
+  const FINAL = new Set([
+    "CHECKED",
+    "APPROVED",
+    "SUBMITTED",
+    "COMPLETED",
+    "DONE",
+    "REJECTED",
+  ]);
+  if (FINAL.has(rawStatus)) return "FILLED";
+
+  return rawStatus || "UNKNOWN";
+}
+
 function mapToCatchLog(q: any): CatchLogDetails {
   return {
-    code: String(q?.code ?? ""),
+    code: normalizeQr(String(q?.code ?? "")),
     type: String(q?.type ?? ""),
-    status: String(q?.status ?? ""),
+    status: normalizeStatus(q),
 
     vessel_name: q?.vessel_name ?? q?.vessel?.vessel_name ?? null,
     fish_name: q?.fish_name ?? q?.fish?.fish_name ?? null,
@@ -55,20 +98,27 @@ function mapToCatchLog(q: any): CatchLogDetails {
   };
 }
 
-function normalizeQr(raw: string) {
-  return String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
-}
+type FetchArg =
+  | string
+  | {
+      qrCode: string;
+      /** AUTO = try FILLED then NEW, FILLED_ONLY = only /api/filled/:code */
+      mode?: "AUTO" | "FILLED_ONLY";
+    };
 
 // ✅ PRE-SUBMIT DETAILS FLOW:
 // 1) /api/filled/:code  (works after QC submit)
 // 2) /api/qrs/status/NEW/code/:code (works before submit)
 export const fetchCatchLogByQr = createAsyncThunk<
   CatchLogDetails,
-  string,
+  FetchArg,
   { rejectValue: string }
->("qrDetails/fetchCatchLogByQr", async (qrCode, { rejectWithValue }) => {
+>("qrDetails/fetchCatchLogByQr", async (arg, { rejectWithValue }) => {
   try {
-    const code = normalizeQr(qrCode);
+    const qrCode = typeof arg === "string" ? arg : arg?.qrCode;
+    const mode = typeof arg === "string" ? "AUTO" : arg?.mode ?? "AUTO";
+
+    const code = normalizeQr(qrCode || "");
     if (!code) return rejectWithValue("QR_CODE_REQUIRED");
 
     const tryFetch = async (path: string) => {
@@ -77,15 +127,19 @@ export const fetchCatchLogByQr = createAsyncThunk<
     };
 
     // 1) FILLED (read-only)
-    let q = await tryFetch(`/api/filled/${encodeURIComponent(code)}`).catch(
-      () => null
-    );
+    let q = await tryFetch(`/api/filled/${encodeURIComponent(code)}`).catch(() => null);
+
+    // If view-only mode: do NOT fallback to NEW
+    if (mode === "FILLED_ONLY") {
+      if (!q) return rejectWithValue("ONLY_SUBMITTED_ALLOWED");
+      return mapToCatchLog(q);
+    }
 
     // 2) NEW (pre-submit)
     if (!q) {
-      q = await tryFetch(
-        `/api/qrs/status/NEW/code/${encodeURIComponent(code)}`
-      ).catch(() => null);
+      q = await tryFetch(`/api/qrs/status/NEW/code/${encodeURIComponent(code)}`).catch(
+        () => null
+      );
     }
 
     if (!q) return rejectWithValue("QR not found");
@@ -128,9 +182,7 @@ export default slice.reducer;
 export const selectQrDetailsState = (state: RootState): State =>
   ((state as any).qrDetails as State) ?? initialState;
 
-export const selectCatchLog = (state: RootState) =>
-  selectQrDetailsState(state).data;
+export const selectCatchLog = (state: RootState) => selectQrDetailsState(state).data;
 export const selectCatchLogLoading = (state: RootState) =>
   selectQrDetailsState(state).loading;
-export const selectCatchLogError = (state: RootState) =>
-  selectQrDetailsState(state).error;
+export const selectCatchLogError = (state: RootState) => selectQrDetailsState(state).error;
