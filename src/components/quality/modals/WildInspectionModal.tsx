@@ -237,6 +237,9 @@ export default function WildInspectionModal({
     };
   };
 
+  // ✅ FIX QR HEADER CLIP: always show full QR with horizontal scroll
+  const codeToShow = String(scannedCode || data?.fish_code || data?.qr_code || "").trim();
+
   return (
     <Modal visible={visible} transparent animationType="fade">
       <View className="flex-1 bg-black/60 p-4 justify-center">
@@ -249,13 +252,43 @@ export default function WildInspectionModal({
                   Wild Quality Inspection
                 </Text>
 
-                <View className="mt-2 flex-row items-center">
+                <View
+                  style={{
+                    marginTop: 8,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    minWidth: 0, // ✅ IMPORTANT
+                  }}
+                >
                   <Ionicons
                     name="qr-code-outline"
                     size={16}
                     color="rgba(255,255,255,0.7)"
                   />
-                  <Text className="text-white/70 ml-2">{scannedCode}</Text>
+
+                  <Text style={{ color: "rgba(255,255,255,0.7)", fontWeight: "900" }}>
+                    QR:
+                  </Text>
+
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={{ flex: 1, minWidth: 0 }} // ✅ IMPORTANT
+                    contentContainerStyle={{ paddingRight: 12 }}
+                  >
+                    <Text
+                      selectable
+                      style={{
+                        color: "white",
+                        fontWeight: "900",
+                        fontSize: 14,
+                        letterSpacing: 0.3,
+                      }}
+                    >
+                      {codeToShow || "—"}
+                    </Text>
+                  </ScrollView>
                 </View>
 
                 {readOnly && (
@@ -305,7 +338,7 @@ export default function WildInspectionModal({
             <TwoCol>
               <View className="flex-1">
                 <Label>Fish Code</Label>
-                <ReadOnly value={scannedCode} />
+                <ReadOnly value={codeToShow || scannedCode || "—"} />
               </View>
               <View className="flex-1">
                 <Label>Species</Label>
