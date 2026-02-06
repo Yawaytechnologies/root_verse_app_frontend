@@ -21,6 +21,9 @@ export type RegistrationResponse = {
   owner_id?: string;
   state?: { id: number; name: string };
   district?: { id: number; name: string };
+  // optional (backend may/may not return)
+  location?: { id: number; name: string };
+
   state_name?: string;
   district_name?: string;
 };
@@ -39,7 +42,7 @@ const initialState: RegistrationState = {
 
 const REGISTER_PATH = "/api/owner";
 
-// ✅ must match your Postman screenshot
+// ✅ must match backend (multer field name)
 const FILE_FIELD = "profileImage";
 
 function getFilename(uri: string) {
@@ -64,8 +67,12 @@ export const registerUser = createAsyncThunk<
     address: string;
     rootverse_type: RootverseType;
     profile_image_uri: string;
+
     state_id: number;
     district_id: number;
+
+    // ✅ ADD THIS
+    location_id: number;
   },
   { rejectValue: string }
 >("registration/registerUser", async (payload, thunkAPI) => {
@@ -74,20 +81,32 @@ export const registerUser = createAsyncThunk<
     const phone_no = payload.phone_no.trim();
     const address = payload.address.trim();
 
-    if (!username || username.length < 2) return thunkAPI.rejectWithValue("Username too short");
-    if (!/^\d{10}$/.test(phone_no)) return thunkAPI.rejectWithValue("Phone must be 10 digits");
+    if (!username || username.length < 2)
+      return thunkAPI.rejectWithValue("Username too short");
+    if (!/^\d{10}$/.test(phone_no))
+      return thunkAPI.rejectWithValue("Phone must be 10 digits");
     if (!address) return thunkAPI.rejectWithValue("Address required");
+
     if (!payload.state_id) return thunkAPI.rejectWithValue("State required");
     if (!payload.district_id) return thunkAPI.rejectWithValue("District required");
-    if (!payload.profile_image_uri) return thunkAPI.rejectWithValue("Profile image required");
+
+    // ✅ REQUIRED FOR DB location_id
+    if (!payload.location_id) return thunkAPI.rejectWithValue("Location required");
+
+    if (!payload.profile_image_uri)
+      return thunkAPI.rejectWithValue("Profile image required");
 
     const form = new FormData();
     form.append("username", username);
     form.append("phone_no", phone_no);
     form.append("address", address);
     form.append("rootverse_type", payload.rootverse_type);
+
     form.append("state_id", String(payload.state_id));
     form.append("district_id", String(payload.district_id));
+
+    // ✅ THIS was missing -> DB got NULL
+    form.append("location_id", String(payload.location_id));
 
     // ✅ ImagePicker uri is fine (no base64)
     const uri = payload.profile_image_uri;
@@ -98,7 +117,9 @@ export const registerUser = createAsyncThunk<
 
     const data = await postFormData<RegistrationResponse>(REGISTER_PATH, form);
 
-    if (!data?.id) return thunkAPI.rejectWithValue("Invalid server response (missing id)");
+    if (!data?.id)
+      return thunkAPI.rejectWithValue("Invalid server response (missing id)");
+
     return data;
   } catch (e: any) {
     return thunkAPI.rejectWithValue(e?.message ?? "Registration failed");
@@ -122,10 +143,13 @@ const registrationSlice = createSlice({
         state.loading = true;
         state.error = null;
       })
-      .addCase(registerUser.fulfilled, (state, action: PayloadAction<RegistrationResponse>) => {
-        state.loading = false;
-        state.lastCreated = action.payload;
-      })
+      .addCase(
+        registerUser.fulfilled,
+        (state, action: PayloadAction<RegistrationResponse>) => {
+          state.loading = false;
+          state.lastCreated = action.payload;
+        }
+      )
       .addCase(registerUser.rejected, (state, action) => {
         state.loading = false;
         state.error =
