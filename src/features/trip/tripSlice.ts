@@ -1,7 +1,7 @@
 // src/features/trip/tripSlice.ts
 
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit";
-import type { RootState } from "../../store/store";
+import type { RootState } from "../../store/auth/store";
 import { tripApi, Trip, TripCreatePayload } from "../../services/wild/tripApi";
 
 type TripsState = {
@@ -35,7 +35,51 @@ export const createTrip = createAsyncThunk<Trip, TripCreatePayload, { state: Roo
   async (payload, thunkApi) => {
     try {
       const token = (thunkApi.getState() as any)?.auth?.token;
-      return await tripApi.createTrip(payload, token);
+
+      // ✅ Correct normalization:
+      // - near_station MUST be string (name)
+      // - location_id MUST be number (id)
+      // - vessel_id SHOULD be number (id) if provided
+      const vesselRaw = (payload as any).vessel_id;
+      const vesselParsed =
+        vesselRaw == null || vesselRaw === "" ? null : Number(vesselRaw);
+
+      const normalized: TripCreatePayload = {
+        ...payload,
+
+        near_station: String((payload as any).near_station ?? "").trim(), // ✅ NAME
+        location_id: Number((payload as any).location_id), // ✅ ID
+
+        ...(vesselParsed != null ? { vessel_id: vesselParsed } : {}),
+
+        diesel: Number((payload as any).diesel),
+        ice: Number((payload as any).ice),
+        total: Number((payload as any).total),
+
+        qr_count: Number((payload as any).qr_count),
+        count: Number((payload as any).count),
+
+        ...(payload.state_id != null ? { state_id: Number((payload as any).state_id) } : {}),
+        ...(payload.district_id != null ? { district_id: Number((payload as any).district_id) } : {}),
+      };
+
+      // 🔥 Safety checks (fail fast instead of silently saving wrong)
+      if (!normalized.near_station) throw new Error("near_station (name) missing");
+      if (!Number.isFinite(normalized.location_id) || normalized.location_id <= 0) {
+        throw new Error("location_id missing/invalid");
+      }
+
+      // ✅ vessel_id check only when present in payload
+      if (vesselRaw != null) {
+        if (!Number.isFinite(vesselParsed as number) || (vesselParsed as number) <= 0) {
+          throw new Error("vessel_id missing/invalid");
+        }
+      }
+
+      // Optional debug:
+      // console.log("CREATE TRIP PAYLOAD =>", JSON.stringify(normalized, null, 2));
+
+      return await tripApi.createTrip(normalized, token);
     } catch (e: any) {
       return thunkApi.rejectWithValue(e?.message || "Failed to create trip") as any;
     }
@@ -85,9 +129,9 @@ const tripsSlice = createSlice({
 
 export const { clearTripsError, addTripLocal } = tripsSlice.actions;
 
-export const selectTrips = (s: RootState) => s.trips.items;
-export const selectTripsLoading = (s: RootState) => s.trips.loading;
-export const selectTripsCreating = (s: RootState) => s.trips.creating;
-export const selectTripsError = (s: RootState) => s.trips.error;
+export const selectTrips = (s: RootState) => (s as any).trips.items;
+export const selectTripsLoading = (s: RootState) => (s as any).trips.loading;
+export const selectTripsCreating = (s: RootState) => (s as any).trips.creating;
+export const selectTripsError = (s: RootState) => (s as any).trips.error;
 
 export default tripsSlice.reducer;

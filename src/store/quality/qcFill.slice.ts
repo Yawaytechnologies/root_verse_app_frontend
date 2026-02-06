@@ -61,6 +61,7 @@ function toFile(uri: string, idx: number) {
 function appendScalar(form: FormData, key: string, value: any) {
   if (value === undefined || value === null) return;
   if (Array.isArray(value)) return;
+  if (typeof value === "object") return; // ✅ don't append objects
 
   if (typeof value === "boolean") form.append(key, value ? "true" : "false");
   else form.append(key, String(value));
@@ -83,7 +84,6 @@ export const submitQcFill = createAsyncThunk<
   SubmitArgs,
   { state: RootState; rejectValue: string }
 >("qcFill/submit", async ({ qrCode, payload }, { rejectWithValue, getState }) => {
-  // ✅ timeout so submit won't hang forever
   const controller = new AbortController();
   const timeoutMs = 25000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -125,15 +125,27 @@ export const submitQcFill = createAsyncThunk<
     ) as string[];
 
     const SKIP_KEYS = new Set([
+      // images
       "crate_images",
       "inspection_images",
       "pond_images",
       "pond_condition_images",
       "images",
+
+      // ids
       "checker_code",
       "checkerCode",
       "quality_checker_id",
       "qualityCheckerId",
+
+      // ✅ internal objects (don’t send)
+      "_local",
+      "server_qr",
+      "serverQr",
+      "raw",
+      "data",
+      "qr",
+      "updatedQr",
     ]);
 
     Object.entries(payload || {}).forEach(([k, v]) => {
@@ -172,11 +184,7 @@ export const submitQcFill = createAsyncThunk<
     }
 
     if (!res.ok) {
-      const msg =
-        raw?.message ||
-        raw?.error ||
-        raw?.msg ||
-        `QC_FILL_FAILED_${res.status}`;
+      const msg = raw?.message || raw?.error || raw?.msg || `QC_FILL_FAILED_${res.status}`;
       return rejectWithValue(msg);
     }
 
@@ -185,14 +193,11 @@ export const submitQcFill = createAsyncThunk<
     return {
       success: true,
       message: raw?.message || "QC filled",
-      qr: updatedQr, // ✅ normalized from many backend shapes
+      qr: updatedQr,
       raw,
     };
   } catch (e: any) {
-    // ✅ timeout / abort handling
-    if (e?.name === "AbortError") {
-      return rejectWithValue("NETWORK_TIMEOUT");
-    }
+    if (e?.name === "AbortError") return rejectWithValue("NETWORK_TIMEOUT");
     return rejectWithValue(e?.message || "QC_FILL_FAILED");
   } finally {
     clearTimeout(timer);

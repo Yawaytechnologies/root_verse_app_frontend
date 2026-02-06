@@ -6,6 +6,7 @@ const BASE_URL = "https://rootverse-backend-5qoo.onrender.com";
 async function safeRead(res: Response) {
   const ct = res.headers.get("content-type") || "";
   const text = await res.text();
+
   if (ct.includes("application/json")) {
     try {
       return { as: "json" as const, data: JSON.parse(text) };
@@ -13,8 +14,16 @@ async function safeRead(res: Response) {
       return { as: "text" as const, data: text };
     }
   }
+
   return { as: "text" as const, data: text };
 }
+
+type ApiQrResponse = {
+  success?: boolean;
+  qr?: any;
+  message?: string;
+  error?: string;
+};
 
 export const fetchFilledByCode = createAsyncThunk(
   "filledQr/fetchFilledByCode",
@@ -22,28 +31,38 @@ export const fetchFilledByCode = createAsyncThunk(
     const clean = String(code || "").trim();
     if (!clean) return rejectWithValue("QR ID is required");
 
-    const url = `${BASE_URL}/api/filled/${encodeURIComponent(clean)}`;
+    // ✅ UPDATED API
+    const url = `${BASE_URL}/api/qrs/status/NEW/code/${encodeURIComponent(clean)}`;
 
     try {
-      const res = await fetch(url, { method: "GET" });
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+
       const body = await safeRead(res);
 
       if (!res.ok) {
-        // show readable error instead of JSON parse crash
         const msg =
           body.as === "json"
-            ? (body.data?.message || body.data?.error || JSON.stringify(body.data))
+            ? body.data?.message || body.data?.error || JSON.stringify(body.data)
             : String(body.data || `Request failed (${res.status})`);
 
         return rejectWithValue(`API ${res.status}: ${msg}`);
       }
 
-      // expected: { success: true, qr: {...} }
       if (body.as !== "json") {
         return rejectWithValue("API did not return JSON");
       }
 
-      return body.data;
+      const data = body.data as ApiQrResponse;
+
+      // ✅ If API returns 200 but success is false / qr missing
+      if (data?.success !== true || !data?.qr) {
+        return rejectWithValue(data?.message || data?.error || "No data found");
+      }
+
+      return data;
     } catch (e: any) {
       return rejectWithValue(String(e?.message || e));
     }
