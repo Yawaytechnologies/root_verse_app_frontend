@@ -1,7 +1,14 @@
-// app/(wild)/trips/new-request.tsx  (or wherever your file is)
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { router } from "expo-router";
-import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import {
+  Alert,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
 
@@ -11,16 +18,20 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createTrip as createTripDummy } from "../../../src/data/wild/trips.dummy";
 import { useAppDispatch } from "../../../src/store/hooks";
 import { createTrip as createTripThunk } from "../../../src/features/trip/tripSlice";
+import type { TripCreatePayload } from "../../../src/services/wild/tripApi";
 
 type Lang = "ta" | "en";
 
-const FISHING_METHODS = ["Pole & Line", "Hook & Line", "Longline", "Gillnet", "Trawling"];
+// ✅ TOGGLE: if your backend expects state_id & district_id in request body, set true.
+// If backend does NOT need them, keep false.
+const INCLUDE_STATE_DISTRICT_IN_PAYLOAD = false;
 
-const LANDING_CENTERS = [
-  "Chennai Fishing Harbor",
-  "Nagapattinam Fishing Harbor",
-  "Thoothukudi Fishing Harbor",
-  "Ramanathapuram Fishing Harbor",
+const FISHING_METHODS = [
+  "Pole & Line",
+  "Hook & Line",
+  "Longline",
+  "Gillnet",
+  "Trawling",
 ];
 
 const i18n = {
@@ -30,10 +41,16 @@ const i18n = {
     offline: "Offline",
     ownerName: "Owner Name",
     regNo: "Registration No",
+
+    vessel: "Vessel",
+    errVessel: "Select vessel",
+
     tripDetails: "Trip Details",
     tripName: "Trip Name",
     fishingMethod: "Fishing Method",
-    landingCenter: "Nearest Station",
+    state: "State",
+    district: "District",
+    nearStation: "Nearest Station (Location)",
     tapToSelect: "Tap to select",
     select: "Select",
     plannedTripDT: "Planned Trip Date & Time",
@@ -62,19 +79,24 @@ const i18n = {
     submit: "Submit",
 
     errMethod: "Select fishing method",
-    errLanding: "Select nearest station",
+    errState: "Select state",
+    errDistrict: "Select district",
+    errLocation: "Select nearest station (location)",
     errPlanned: "Select planned trip date & time",
     errOwner: "Owner not loaded yet. Please wait / check login.",
     sent: "Trip request sent ✅",
     status: "Status",
 
-    savedOffline: "No internet. Saved locally. Will auto-sync when network returns.",
+    savedOffline:
+      "No internet. Saved locally. Will auto-sync when network returns.",
     syncing: "Syncing pending...",
     pending: "Pending sync",
     apiFailDummy: "API failed — saved locally (dummy).",
-    synced: "Synced ✅",
     meLoading: "Loading owner info...",
     meError: "Owner info fetch failed",
+
+    loading: "Loading...",
+    noData: "No data found",
   },
   ta: {
     title: "புதிய பயணம் கோரிக்கை",
@@ -82,16 +104,23 @@ const i18n = {
     offline: "இணையமில்லை",
     ownerName: "உரிமையாளர் பெயர்",
     regNo: "பதிவு எண்",
+
+    vessel: "வள்ளம் (Vessel)",
+    errVessel: "வள்ளத்தை தேர்வு செய்யவும்",
+
     tripDetails: "பயண விவரங்கள்",
     tripName: "பயண பெயர்",
     fishingMethod: "மீன்பிடி முறை",
-    landingCenter: "அருகிலுள்ள நிலையம்",
+    state: "மாநிலம்",
+    district: "மாவட்டம்",
+    nearStation: "அருகிலுள்ள நிலையம் (இடம்)",
     tapToSelect: "தேர்வு செய்ய தட்டுங்கள்",
     select: "தேர்வு செய்",
     plannedTripDT: "திட்டமிட்ட பயண தேதி & நேரம்",
     crewDetails: "குழு விவரங்கள்",
     crewMembers: "குழு உறுப்பினர்கள்",
-    crewHelp: "குறை / கூட்டு பட்டன்களை பயன்படுத்தவும் (குறைந்தபட்சம் 0)",
+    crewHelp:
+      "குறை / கூட்டு பட்டன்களை பயன்படுத்தவும் (குறைந்தபட்சம் 0)",
 
     qrCount: "QR எண்ணிக்கை",
     qrCountPH: "உதா: 10",
@@ -114,99 +143,53 @@ const i18n = {
     submit: "சமர்ப்பி",
 
     errMethod: "மீன்பிடி முறையை தேர்வு செய்யவும்",
-    errLanding: "அருகிலுள்ள நிலையத்தை தேர்வு செய்யவும்",
+    errState: "மாநிலம் தேர்வு செய்யவும்",
+    errDistrict: "மாவட்டம் தேர்வு செய்யவும்",
+    errLocation: "இடம் (Location) தேர்வு செய்யவும்",
     errPlanned: "பயண தேதி & நேரம் தேர்வு செய்யவும்",
     errOwner: "Owner load ஆகலை. கொஞ்சம் wait / login check பண்ணுங்க.",
     sent: "பயண கோரிக்கை அனுப்பப்பட்டது ✅",
     status: "நிலை",
 
-    savedOffline: "இணையம் இல்லை. Local-ல் save பண்ணிட்டோம். Net வந்தவுடன் auto sync ஆகும்.",
+    savedOffline:
+      "இணையம் இல்லை. Local-ல் save பண்ணிட்டோம். Net வந்தவுடன் auto sync ஆகும்.",
     syncing: "Syncing pending...",
     pending: "Pending sync",
     apiFailDummy: "API தோல்வி — உள்ளூரில் சேமிக்கப்பட்டது (dummy).",
-    synced: "Sync ஆனது ✅",
     meLoading: "Owner info load ஆகுது...",
     meError: "Owner info fetch fail",
+
+    loading: "Loading...",
+    noData: "Data இல்லை",
   },
 };
 
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <View className={`rounded-2xl border border-[#ead7c8] bg-white ${className}`}>{children}</View>;
+function Card({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <View
+      className={`rounded-2xl border border-[#ead7c8] bg-white ${className}`}
+    >
+      {children}
+    </View>
+  );
 }
 function Label({ children }: { children: React.ReactNode }) {
   return <Text className="text-xs text-[#7a6f66]">{children}</Text>;
 }
 function FieldBox({ children }: { children: React.ReactNode }) {
-  return <View className="mt-2 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">{children}</View>;
-}
-
-function PickerSheet({
-  title,
-  value,
-  options,
-  onSelect,
-  sheetRef,
-}: {
-  title: string;
-  value: string;
-  options: string[];
-  onSelect: (v: string) => void;
-  sheetRef: React.RefObject<BottomSheetModal>;
-}) {
-  const snapPoints = useMemo(() => ["45%", "75%"], []);
-  const [q, setQ] = useState("");
-
-  const filtered = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    if (!t) return options;
-    return options.filter((x) => x.toLowerCase().includes(t));
-  }, [q, options]);
-
   return (
-    <BottomSheetModal
-      ref={sheetRef}
-      snapPoints={snapPoints}
-      enablePanDownToClose
-      backgroundStyle={{ borderRadius: 24 }}
-      handleIndicatorStyle={{ opacity: 0.35 }}
-    >
-      <BottomSheetView style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
-        <View className="flex-row items-center justify-between">
-          <Text className="text-base font-bold text-[#2b2b2b]">{title}</Text>
-          <Pressable onPress={() => sheetRef.current?.dismiss()} className="rounded-full px-3 py-2 active:opacity-80">
-            <Text className="text-sm font-semibold text-[#a06b2a]">Done</Text>
-          </Pressable>
-        </View>
-
-        <View className="mt-3 rounded-xl border border-[#ead7c8] bg-[#fbf6f1] px-3 py-2">
-          <TextInput value={q} onChangeText={setQ} placeholder="Search..." className="text-base text-[#2b2b2b]" />
-        </View>
-
-        <ScrollView className="mt-3" keyboardShouldPersistTaps="handled">
-          {filtered.map((item) => {
-            const active = item === value;
-            return (
-              <Pressable
-                key={item}
-                onPress={() => {
-                  onSelect(item);
-                  sheetRef.current?.dismiss();
-                }}
-                className={`mb-2 rounded-xl border px-4 py-3 active:opacity-80 ${
-                  active ? "border-[#a06b2a] bg-[#fff3e7]" : "border-[#ead7c8] bg-white"
-                }`}
-              >
-                <Text className={`text-sm font-semibold ${active ? "text-[#7a4a12]" : "text-[#2b2b2b]"}`}>{item}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheetView>
-    </BottomSheetModal>
+    <View className="mt-2 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
+      {children}
+    </View>
   );
 }
 
-/* ---------------- HELPERS ---------------- */
 function toISO(dt: Date) {
   return dt.toISOString();
 }
@@ -229,9 +212,8 @@ function formatDateTime(dt: Date) {
 function onlyDecimal(v: string) {
   let s = (v || "").replace(/[^0-9.]/g, "");
   const firstDot = s.indexOf(".");
-  if (firstDot !== -1) {
+  if (firstDot !== -1)
     s = s.slice(0, firstDot + 1) + s.slice(firstDot + 1).replace(/\./g, "");
-  }
   return s;
 }
 function onlyInt(v: string) {
@@ -254,46 +236,49 @@ function mapMethodToApi(label: string) {
 }
 function isNetworkishError(msg: string) {
   const m = (msg || "").toLowerCase();
-  return m.includes("network") || m.includes("failed to fetch") || m.includes("timeout") || m.includes("socket") || m.includes("econn");
+  return (
+    m.includes("network") ||
+    m.includes("failed to fetch") ||
+    m.includes("timeout") ||
+    m.includes("socket") ||
+    m.includes("econn")
+  );
 }
 
-/* ---------------- ME ( /api/me ) CACHE + FETCH ---------------- */
+/* ---------------- API ---------------- */
 const API_BASE = "https://rootverse-backend-5qoo.onrender.com";
 const ME_CACHE_KEY = "RV_ME_CACHE_V1";
 
 type MeCache = {
   ownerName: string;
   registrationNo: string;
-  ownerCode: string; // OWN-0001
+  ownerCode: string;
+  ownerDbId: number;
 };
 
 async function readMeCache(): Promise<MeCache | null> {
   try {
     const raw = await AsyncStorage.getItem(ME_CACHE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return null;
-
-    const ownerName = String(parsed.ownerName || "").trim();
-    const registrationNo = String(parsed.registrationNo || "").trim();
-    const ownerCode = String(parsed.ownerCode || "").trim();
-
-    if (!ownerName && !registrationNo && !ownerCode) return null;
-    return { ownerName, registrationNo, ownerCode };
+    const p = JSON.parse(raw);
+    if (!p || typeof p !== "object") return null;
+    return {
+      ownerName: String(p.ownerName || "").trim(),
+      registrationNo: String(p.registrationNo || "").trim(),
+      ownerCode: String(p.ownerCode || "").trim(),
+      ownerDbId: Number(p.ownerDbId || 0),
+    };
   } catch {
     return null;
   }
 }
-
 async function writeMeCache(data: MeCache) {
   try {
     await AsyncStorage.setItem(ME_CACHE_KEY, JSON.stringify(data));
   } catch {}
 }
-
 async function fetchMeFromApi(): Promise<MeCache> {
   const token = await AsyncStorage.getItem("auth_token");
-
   const res = await fetch(`${API_BASE}/api/me`, {
     method: "GET",
     headers: {
@@ -311,16 +296,26 @@ async function fetchMeFromApi(): Promise<MeCache> {
   const u = json?.user ?? json?.data ?? json ?? {};
 
   const ownerName = String(u?.username ?? u?.owner_name ?? u?.name ?? "").trim();
-
-  // ✅ owner code (OWN-0001) is stored in your rootverse_users.owner_id
   const ownerCode = String(u?.owner_id ?? u?.owner_code ?? "").trim();
-
-  // ✅ you showed govt_id earlier; use that as reg no if that’s your requirement
   const registrationNo = String(
-    u?.govt_id ?? u?.registration_no ?? u?.reg_no ?? u?.registrationNo ?? u?.vessel_reg_no ?? ""
+    u?.govt_id ??
+      u?.registration_no ??
+      u?.reg_no ??
+      u?.registrationNo ??
+      u?.vessel_reg_no ??
+      ""
   ).trim();
 
-  return { ownerName, ownerCode, registrationNo };
+  const ownerDbIdRaw =
+    u?.id ??
+    u?.owner_db_id ??
+    u?.ownerId ??
+    u?.owner_dbid ??
+    u?.owner_db ??
+    0;
+  const ownerDbId = Number(ownerDbIdRaw || 0);
+
+  return { ownerName, ownerCode, registrationNo, ownerDbId };
 }
 
 function makeTripName(regNo: string) {
@@ -333,29 +328,200 @@ function makeTripName(regNo: string) {
   return `${regNo || "REG"}/${y}${m}${day}_${hh}${mi}`;
 }
 
-/* ---------------- OFFLINE QUEUE (Trips) ---------------- */
-const TRIP_QUEUE_KEY = "RV_TRIP_QUEUE_V1";
-
-type TripApiPayload = {
-  fishing_method: string;
-  near_station: string;
-  planned_at: string;
-  arrival_at: string | null;
-  diesel: number;
-  ice: number;
-  total: number;
-  qr_count: number;
-
-  // ✅ allow null if saved before /me loaded
-  owner_code: string | null;
-
-  count: number;
+/* ---------------- GEO TYPES ---------------- */
+type StateItem = { id: number; name: string; state_code?: string | null };
+type DistrictItem = {
+  id: number;
+  name: string;
+  district_code?: string | null;
+  state_id: number;
 };
+type LocationItem = {
+  id: number;
+  name: string;
+  location_code?: string | null;
+
+  district_id: number;
+  state_id: number;
+
+  district_name?: string;
+  state_name?: string;
+};
+
+type VesselItem = { id: number; name: string; code?: string | null };
+
+const VESSEL_CACHE_PREFIX = "RV_VESSELS_CACHE_OWNER_V1_";
+
+async function readVesselsCache(ownerDbId: number): Promise<VesselItem[] | null> {
+  try {
+    const raw = await AsyncStorage.getItem(`${VESSEL_CACHE_PREFIX}${ownerDbId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as VesselItem[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeVesselsCache(ownerDbId: number, items: VesselItem[]) {
+  try {
+    await AsyncStorage.setItem(
+      `${VESSEL_CACHE_PREFIX}${ownerDbId}`,
+      JSON.stringify(items)
+    );
+  } catch {}
+}
+
+async function safeJson(res: Response) {
+  const text = await res.text().catch(() => "");
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
+}
+function unwrapData<T>(payload: any): T {
+  if (!payload) return payload as T;
+  if (payload?.success === false)
+    throw new Error(payload?.message || payload?.error || "Request failed");
+  if (payload?.data != null) return payload.data as T;
+  return payload as T;
+}
+async function getAuthHeaders() {
+  const token = await AsyncStorage.getItem("auth_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+async function geoGet<T>(path: string): Promise<T> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "GET",
+    headers: { Accept: "application/json", ...headers },
+  });
+  const json = await safeJson(res);
+  if (!res.ok)
+    throw new Error(
+      json?.message || json?.error || `GET ${path} failed (${res.status})`
+    );
+  return unwrapData<T>(json);
+}
+
+/* ---------------- BottomSheet generic picker ---------------- */
+type PickerBase = { id: number; name: string; code?: string | null };
+
+function EntityPickerSheet<T extends PickerBase>({
+  title,
+  value,
+  options,
+  loading,
+  onSelect,
+  sheetRef,
+  emptyText,
+}: {
+  title: string;
+  value: T | null;
+  options: T[];
+  loading?: boolean;
+  onSelect: (v: T) => void;
+  sheetRef: React.RefObject<BottomSheetModal>;
+  emptyText?: string;
+}) {
+  const snapPoints = useMemo(() => ["45%", "75%"], []);
+  const [q, setQ] = useState("");
+
+  const filtered = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return options;
+    return options.filter(
+      (x) =>
+        x.name.toLowerCase().includes(t) ||
+        String(x.code || "").toLowerCase().includes(t)
+    );
+  }, [q, options]);
+
+  return (
+    <BottomSheetModal
+      ref={sheetRef}
+      snapPoints={snapPoints}
+      enablePanDownToClose
+      backgroundStyle={{ borderRadius: 24 }}
+      handleIndicatorStyle={{ opacity: 0.35 }}
+    >
+      <BottomSheetView style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
+        <View className="flex-row items-center justify-between">
+          <Text className="text-base font-bold text-[#2b2b2b]">{title}</Text>
+          <Pressable
+            onPress={() => sheetRef.current?.dismiss()}
+            className="rounded-full px-3 py-2 active:opacity-80"
+          >
+            <Text className="text-sm font-semibold text-[#a06b2a]">Done</Text>
+          </Pressable>
+        </View>
+
+        <View className="mt-3 rounded-xl border border-[#ead7c8] bg-[#fbf6f1] px-3 py-2">
+          <TextInput
+            value={q}
+            onChangeText={setQ}
+            placeholder="Search..."
+            className="text-base text-[#2b2b2b]"
+          />
+        </View>
+
+        <ScrollView className="mt-3" keyboardShouldPersistTaps="handled">
+          {loading ? (
+            <View className="py-6 items-center">
+              <Text className="text-sm text-[#7a6f66]">Loading...</Text>
+            </View>
+          ) : filtered.length === 0 ? (
+            <View className="py-6 items-center">
+              <Text className="text-sm text-[#7a6f66]">
+                {emptyText || "No data"}
+              </Text>
+            </View>
+          ) : (
+            filtered.map((item) => {
+              const active = item.id === value?.id;
+              return (
+                <Pressable
+                  key={String(item.id)}
+                  onPress={() => {
+                    onSelect(item);
+                    sheetRef.current?.dismiss();
+                  }}
+                  className={`mb-2 rounded-xl border px-4 py-3 active:opacity-80 ${
+                    active
+                      ? "border-[#a06b2a] bg-[#fff3e7]"
+                      : "border-[#ead7c8] bg-white"
+                  }`}
+                >
+                  <Text
+                    className={`text-sm font-semibold ${
+                      active ? "text-[#7a4a12]" : "text-[#2b2b2b]"
+                    }`}
+                  >
+                    {item.name}
+                  </Text>
+                  {item.code ? (
+                    <Text className="mt-1 text-[11px] text-[#7a6f66]">
+                      Code: {item.code}
+                    </Text>
+                  ) : null}
+                </Pressable>
+              );
+            })
+          )}
+        </ScrollView>
+      </BottomSheetView>
+    </BottomSheetModal>
+  );
+}
+
+/* ---------------- OFFLINE QUEUE ---------------- */
+const TRIP_QUEUE_KEY = "RV_TRIP_QUEUE_V1";
 
 type TripQueuedItem = {
   id: string;
   createdAt: string;
-  payload: TripApiPayload;
+  payload: TripCreatePayload;
 };
 
 async function loadTripQueue(): Promise<TripQueuedItem[]> {
@@ -368,12 +534,10 @@ async function loadTripQueue(): Promise<TripQueuedItem[]> {
     return [];
   }
 }
-
 async function saveTripQueue(items: TripQueuedItem[]) {
   await AsyncStorage.setItem(TRIP_QUEUE_KEY, JSON.stringify(items));
 }
-
-async function enqueueTrip(payload: TripApiPayload) {
+async function enqueueTrip(payload: TripCreatePayload) {
   const items = await loadTripQueue();
   items.push({
     id: `trip_${Date.now()}_${Math.random().toString(16).slice(2)}`,
@@ -382,35 +546,28 @@ async function enqueueTrip(payload: TripApiPayload) {
   });
   await saveTripQueue(items);
 }
-
 async function getTripQueueCount() {
   const items = await loadTripQueue();
   return items.length;
 }
-
 async function patchOwnerCodeInTripQueue(ownerCode: string) {
   const code = String(ownerCode || "").trim();
   if (!code) return 0;
-
   const items = await loadTripQueue();
   let patched = 0;
-
   const next = items.map((it) => {
     if (it.payload?.owner_code) return it;
     patched++;
     return { ...it, payload: { ...it.payload, owner_code: code } };
   });
-
   if (patched > 0) await saveTripQueue(next);
   return patched;
 }
-
-async function flushTripQueue(send: (payload: TripApiPayload) => Promise<any>) {
+async function flushTripQueue(send: (payload: TripCreatePayload) => Promise<any>) {
   const items = await loadTripQueue();
   if (!items.length) return { sent: 0, left: 0 };
 
   let sent = 0;
-
   for (let i = 0; i < items.length; i++) {
     try {
       await send(items[i].payload);
@@ -433,15 +590,14 @@ export default function NewTripRequest() {
   const [lang, setLang] = useState<Lang>("ta");
   const t = i18n[lang];
 
-  // ✅ values from /api/me (with cache fallback)
   const [ownerName, setOwnerName] = useState("");
   const [registrationNo, setRegistrationNo] = useState("");
   const [ownerCode, setOwnerCode] = useState("");
+  const [ownerDbId, setOwnerDbId] = useState(0);
 
   const [meLoading, setMeLoading] = useState(false);
   const [meError, setMeError] = useState<string | null>(null);
 
-  // ✅ Trip name depends on registrationNo (async)
   const [tripName, setTripName] = useState(() => makeTripName("REG"));
   useEffect(() => {
     if (!registrationNo) return;
@@ -449,7 +605,39 @@ export default function NewTripRequest() {
   }, [registrationNo]);
 
   const [method, setMethod] = useState("");
-  const [nearStation, setNearStation] = useState("");
+
+  // ✅ Fishing method sheet options
+  const methodOptions = useMemo(
+    () =>
+      FISHING_METHODS.map((name, idx) => ({
+        id: idx + 1,
+        name,
+        code: mapMethodToApi(name),
+      })),
+    []
+  );
+  const methodSel = useMemo(
+    () => methodOptions.find((x) => x.name === method) ?? null,
+    [method, methodOptions]
+  );
+
+  // ✅ Vessel
+  const [vessels, setVessels] = useState<VesselItem[]>([]);
+  const [vesselSel, setVesselSel] = useState<VesselItem | null>(null);
+  const [vesselsLoading, setVesselsLoading] = useState(false);
+
+  // ✅ GEO state
+  const [states, setStates] = useState<StateItem[]>([]);
+  const [districts, setDistricts] = useState<DistrictItem[]>([]);
+  const [locations, setLocations] = useState<LocationItem[]>([]);
+
+  const [stateSel, setStateSel] = useState<StateItem | null>(null);
+  const [districtSel, setDistrictSel] = useState<DistrictItem | null>(null);
+  const [locationSel, setLocationSel] = useState<LocationItem | null>(null);
+
+  const [statesLoading, setStatesLoading] = useState(false);
+  const [districtsLoading, setDistrictsLoading] = useState(false);
+  const [locationsLoading, setLocationsLoading] = useState(false);
 
   const [plannedDT, setPlannedDT] = useState<Date | null>(null);
   const [showPlannedDate, setShowPlannedDate] = useState(false);
@@ -466,7 +654,10 @@ export default function NewTripRequest() {
   const [iceKg, setIceKg] = useState("");
   const [iceRate, setIceRate] = useState("15");
 
-  const dieselCost = useMemo(() => toNum(dieselLiters) * toNum(dieselRate), [dieselLiters, dieselRate]);
+  const dieselCost = useMemo(
+    () => toNum(dieselLiters) * toNum(dieselRate),
+    [dieselLiters, dieselRate]
+  );
   const iceCost = useMemo(() => toNum(iceKg) * toNum(iceRate), [iceKg, iceRate]);
   const totalCost = useMemo(() => dieselCost + iceCost, [dieselCost, iceCost]);
 
@@ -475,34 +666,35 @@ export default function NewTripRequest() {
 
   const [posting, setPosting] = useState(false);
 
-  // ✅ Network + pending
   const [isOnline, setIsOnline] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
 
   const methodRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
-  const stationRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
+  const vesselRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
+  const stateRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
+  const districtRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
+  const locationRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
 
   const flushingRef = useRef(false);
 
-  // ✅ 1) Load /me cache immediately (works offline)
+  // Load /me cache
   useEffect(() => {
     let alive = true;
     (async () => {
       const cached = await readMeCache();
       if (!alive || !cached) return;
-
       if (cached.ownerName) setOwnerName(cached.ownerName);
       if (cached.registrationNo) setRegistrationNo(cached.registrationNo);
       if (cached.ownerCode) setOwnerCode(cached.ownerCode);
+      if (cached.ownerDbId) setOwnerDbId(Number(cached.ownerDbId));
     })();
-
     return () => {
       alive = false;
     };
   }, []);
 
-  // ✅ 2) Track network status + update pending count
+  // Network + pending count
   useEffect(() => {
     let alive = true;
 
@@ -531,7 +723,7 @@ export default function NewTripRequest() {
     };
   }, []);
 
-  // ✅ 3) When online, fetch /api/me (then patch queued trips owner_code)
+  // Fetch /me online
   useEffect(() => {
     let alive = true;
     if (!isOnline) return;
@@ -542,11 +734,10 @@ export default function NewTripRequest() {
       try {
         const fresh = await fetchMeFromApi();
         if (!alive) return;
-
         setOwnerName(fresh.ownerName);
         setRegistrationNo(fresh.registrationNo);
         setOwnerCode(fresh.ownerCode);
-
+        setOwnerDbId(Number(fresh.ownerDbId || 0));
         await writeMeCache(fresh);
 
         if (fresh.ownerCode) {
@@ -567,7 +758,190 @@ export default function NewTripRequest() {
     };
   }, [isOnline]);
 
-  // ✅ 4) Auto flush queue when online AND ownerCode available
+  // Load vessels by ownerDbId (cache first, then refresh online)
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      if (!ownerDbId) return;
+
+      // cached first (works offline)
+      const cached = await readVesselsCache(ownerDbId);
+      if (!alive) return;
+
+      if (cached?.length) {
+        setVessels(cached);
+        if (!vesselSel && cached.length === 1) setVesselSel(cached[0]);
+      }
+
+      // refresh online
+      if (!isOnline) return;
+
+      setVesselsLoading(true);
+      try {
+        const data = await geoGet<any>(
+          `/api/vessels/owner/${encodeURIComponent(String(ownerDbId))}`
+        );
+
+        const arr = Array.isArray(data)
+          ? data
+          : Array.isArray((data as any)?.data)
+          ? (data as any).data
+          : [];
+
+        const list: VesselItem[] = arr
+          .map((x: any) => {
+            const id = Number(x?.id ?? x?.vessel_db_id ?? 0);
+            const reg = String(
+              x?.registration_no ??
+                x?.reg_no ??
+                x?.vessel_reg_no ??
+                x?.registrationNo ??
+                ""
+            ).trim();
+
+            const code = String(x?.vessel_code ?? x?.vessel_id ?? x?.code ?? "").trim() || null;
+
+            const name =
+              reg && code ? `${reg} (${code})` : reg ? reg : code ? String(code) : `Vessel ${id}`;
+
+            return { id, name, code };
+          })
+          .filter((v) => v.id && v.name);
+
+        if (!alive) return;
+
+        setVessels(list);
+        await writeVesselsCache(ownerDbId, list);
+
+        if (!vesselSel && list.length === 1) setVesselSel(list[0]);
+        if (vesselSel && !list.some((v) => v.id === vesselSel.id)) {
+          setVesselSel(list[0] ?? null);
+        }
+      } finally {
+        if (alive) setVesselsLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+    // keep same behavior; don't add vesselSel dependency
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownerDbId, isOnline]);
+
+  // Load states
+  useEffect(() => {
+    let alive = true;
+    if (!isOnline) return;
+
+    (async () => {
+      setStatesLoading(true);
+      try {
+        const data = await geoGet<any>("/api/states");
+        const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        const list: StateItem[] = arr
+          .map((x: any) => ({
+            id: Number(x.id),
+            name: String(x.name || ""),
+            state_code: x.state_code ?? null,
+          }))
+          .filter((x: any) => x.id && x.name);
+
+        if (!alive) return;
+        setStates(list);
+      } finally {
+        if (alive) setStatesLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [isOnline]);
+
+  // When state changes -> load districts
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      setDistrictSel(null);
+      setLocationSel(null);
+      setDistricts([]);
+      setLocations([]);
+
+      if (!stateSel?.id) return;
+      if (!isOnline) return;
+
+      setDistrictsLoading(true);
+      try {
+        const data = await geoGet<any>(
+          `/api/states/${encodeURIComponent(String(stateSel.id))}/districts`
+        );
+        const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        const list: DistrictItem[] = arr
+          .map((x: any) => ({
+            id: Number(x.id),
+            name: String(x.name || ""),
+            district_code: x.district_code ?? null,
+            state_id: Number(x.state_id || stateSel.id),
+          }))
+          .filter((x: any) => x.id && x.name);
+
+        if (!alive) return;
+        setDistricts(list);
+      } finally {
+        if (alive) setDistrictsLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [stateSel?.id, isOnline]);
+
+  // When district changes -> load locations
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      setLocationSel(null);
+      setLocations([]);
+
+      if (!districtSel?.id) return;
+      if (!isOnline) return;
+
+      setLocationsLoading(true);
+      try {
+        const data = await geoGet<any>(
+          `/api/locations/district/${encodeURIComponent(String(districtSel.id))}`
+        );
+        const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        const list: LocationItem[] = arr
+          .map((x: any) => ({
+            id: Number(x.id),
+            name: String(x.name || ""),
+            location_code: x.location_code ?? null,
+            district_id: Number(x.district_id || districtSel.id),
+            state_id: Number(x.state_id || stateSel?.id || 0),
+            district_name: x.district_name,
+            state_name: x.state_name,
+          }))
+          .filter((x: any) => x.id && x.name);
+
+        if (!alive) return;
+        setLocations(list);
+      } finally {
+        if (alive) setLocationsLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [districtSel?.id, isOnline]);
+
+  // Auto flush queue when online
   useEffect(() => {
     let alive = true;
 
@@ -578,17 +952,15 @@ export default function NewTripRequest() {
 
     const doFlush = async () => {
       if (!isOnline) return;
-      if (!ownerCode) return; // wait until /me loads
+      if (!ownerCode) return;
       if (flushingRef.current) return;
 
       flushingRef.current = true;
       setSyncing(true);
       try {
-        // make sure queued items have owner_code before sending
         await patchOwnerCodeInTripQueue(ownerCode);
 
         await flushTripQueue(async (payload) => {
-          // if some queued payload still has no owner_code, block it (keep in queue)
           if (!payload.owner_code) throw new Error("owner_code missing (waiting for /me)");
           await dispatch(createTripThunk(payload as any)).unwrap();
         });
@@ -609,10 +981,13 @@ export default function NewTripRequest() {
 
   const submit = async () => {
     if (!method) return Alert.alert(t.title, t.errMethod);
-    if (!nearStation) return Alert.alert(t.title, t.errLanding);
+    if (!vesselSel?.id) return Alert.alert(t.title, t.errVessel);
+
+    if (!stateSel?.id) return Alert.alert(t.title, t.errState);
+    if (!districtSel?.id) return Alert.alert(t.title, t.errDistrict);
+    if (!locationSel?.id) return Alert.alert(t.title, t.errLocation);
     if (!plannedDT) return Alert.alert(t.title, t.errPlanned);
 
-    // if online but owner not loaded, try one more time; else fallback to queue
     let ownerFinal = String(ownerCode || "").trim();
     if (isOnline && !ownerFinal) {
       try {
@@ -621,33 +996,38 @@ export default function NewTripRequest() {
         setOwnerName(fresh.ownerName);
         setRegistrationNo(fresh.registrationNo);
         setOwnerCode(fresh.ownerCode);
+        setOwnerDbId(Number(fresh.ownerDbId || 0));
         await writeMeCache(fresh);
       } catch {}
     }
 
-    const apiPayload: TripApiPayload = {
+    // ✅ PAYLOAD + vessel_id
+    const payload: TripCreatePayload = {
       fishing_method: mapMethodToApi(method),
-      near_station: nearStation,
+
+      vessel_id: Number(vesselSel.id),
+
+      near_station: String(locationSel.name || "").trim(), // ✅ NAME
+      location_id: Number(locationSel.id), // ✅ NUMBER
+
       planned_at: toISO(plannedDT),
       arrival_at: expectedReturn ? toISOArrival(expectedReturn) : null,
-
       diesel: Number(dieselCost.toFixed(2)),
       ice: Number(iceCost.toFixed(2)),
       total: Number(totalCost.toFixed(2)),
-
       qr_count: Number(qrCount || 0),
-
-      // ✅ allow null offline; will be patched later
-      owner_code: ownerFinal || null,
-
+      owner_code: ownerFinal || "",
       count: crewCount,
+
+      ...(INCLUDE_STATE_DISTRICT_IN_PAYLOAD
+        ? { state_id: Number(locationSel.state_id), district_id: Number(locationSel.district_id) }
+        : {}),
     };
 
-    // ✅ OFFLINE (or owner not available) => queue + dummy
+    // OFFLINE or owner missing → queue + dummy
     if (!isOnline || !ownerFinal) {
-      await enqueueTrip(apiPayload);
-      const c = await getTripQueueCount();
-      setPendingCount(c);
+      await enqueueTrip({ ...payload, owner_code: ownerFinal || "" } as any);
+      setPendingCount(await getTripQueueCount());
 
       createTripDummy({
         tripId: tripName,
@@ -656,8 +1036,8 @@ export default function NewTripRequest() {
         ownerCode: ownerFinal || "—",
         registrationNo: registrationNo || "—",
         method,
-        landingCenter: nearStation,
-        locationCode: "",
+        landingCenter: locationSel.name,
+        locationCode: locationSel.name,
         plannedTripDateTime: plannedStr,
         expectedReturnDate: returnStr || null,
         crewCount,
@@ -681,72 +1061,24 @@ export default function NewTripRequest() {
     try {
       setPosting(true);
 
-      const created = await dispatch(createTripThunk(apiPayload as any)).unwrap();
+      const created = await dispatch(createTripThunk(payload as any)).unwrap();
 
       router.replace("/(wild)/trips" as const);
-      Alert.alert(t.sent, `${t.status}: ${created?.approval_status ?? "PENDING"}\n${t.totalCost}: ${money(totalCost)}`);
+      Alert.alert(
+        t.sent,
+        `${t.status}: ${created?.approval_status ?? "PENDING"}\n${t.totalCost}: ${money(totalCost)}`
+      );
     } catch (e: any) {
       const msg = String(e?.message || e);
 
       if (isNetworkishError(msg)) {
-        // network failed => queue + dummy
-        await enqueueTrip(apiPayload);
-        const c = await getTripQueueCount();
-        setPendingCount(c);
-
-        createTripDummy({
-          tripId: tripName,
-          tripName,
-          ownerName: ownerName || "—",
-          ownerCode: ownerFinal || "—",
-          registrationNo: registrationNo || "—",
-          method,
-          landingCenter: nearStation,
-          locationCode: "",
-          plannedTripDateTime: plannedStr,
-          expectedReturnDate: returnStr || null,
-          crewCount,
-          qrCount: Number(qrCount || 0),
-          dieselLiters: toNum(dieselLiters),
-          dieselRate: toNum(dieselRate),
-          dieselCost,
-          iceKg: toNum(iceKg),
-          iceRate: toNum(iceRate),
-          iceCost,
-          totalCost,
-          status: "pending",
-          count: crewCount,
-        } as any);
+        await enqueueTrip(payload);
+        setPendingCount(await getTripQueueCount());
 
         router.replace("/(wild)/trips" as const);
         Alert.alert(t.title, t.savedOffline);
         return;
       }
-
-      // non-network error => still dummy (your current pattern)
-      createTripDummy({
-        tripId: tripName,
-        tripName,
-        ownerName: ownerName || "—",
-        ownerCode: ownerFinal || "—",
-        registrationNo: registrationNo || "—",
-        method,
-        landingCenter: nearStation,
-        locationCode: "",
-        plannedTripDateTime: plannedStr,
-        expectedReturnDate: returnStr || null,
-        crewCount,
-        qrCount: Number(qrCount || 0),
-        dieselLiters: toNum(dieselLiters),
-        dieselRate: toNum(dieselRate),
-        dieselCost,
-        iceKg: toNum(iceKg),
-        iceRate: toNum(iceRate),
-        iceCost,
-        totalCost,
-        status: "pending",
-        count: crewCount,
-      } as any);
 
       router.replace("/(wild)/trips" as const);
       Alert.alert(t.apiFailDummy, msg);
@@ -757,19 +1089,52 @@ export default function NewTripRequest() {
 
   return (
     <View className="flex-1 bg-[#fbf6f1]">
-      <PickerSheet
+      {/* pickers */}
+      <EntityPickerSheet
         title={t.fishingMethod}
-        value={method}
-        options={FISHING_METHODS}
-        onSelect={setMethod}
+        value={methodSel as any}
+        options={methodOptions as any}
+        onSelect={(v: any) => setMethod(v.name)}
         sheetRef={methodRef}
+        emptyText={t.noData}
       />
-      <PickerSheet
-        title={t.landingCenter}
-        value={nearStation}
-        options={LANDING_CENTERS}
-        onSelect={setNearStation}
-        sheetRef={stationRef}
+
+      <EntityPickerSheet
+        title={t.vessel}
+        value={vesselSel as any}
+        options={vessels as any}
+        loading={vesselsLoading}
+        onSelect={(v: any) => setVesselSel(v)}
+        sheetRef={vesselRef}
+        emptyText={t.noData}
+      />
+
+      <EntityPickerSheet
+        title={t.state}
+        value={stateSel as any}
+        options={states.map((s) => ({ ...s, code: s.state_code ?? null })) as any}
+        loading={statesLoading}
+        onSelect={(v: any) => setStateSel(v)}
+        sheetRef={stateRef}
+        emptyText={t.noData}
+      />
+      <EntityPickerSheet
+        title={t.district}
+        value={districtSel as any}
+        options={districts.map((d) => ({ ...d, code: d.district_code ?? null })) as any}
+        loading={districtsLoading}
+        onSelect={(v: any) => setDistrictSel(v)}
+        sheetRef={districtRef}
+        emptyText={t.noData}
+      />
+      <EntityPickerSheet
+        title={t.nearStation}
+        value={locationSel as any}
+        options={locations.map((l) => ({ ...l, code: l.location_code ?? null })) as any}
+        loading={locationsLoading}
+        onSelect={(v: any) => setLocationSel(v)}
+        sheetRef={locationRef}
+        emptyText={t.noData}
       />
 
       <ScrollView contentContainerClassName="p-4 pb-10">
@@ -779,11 +1144,19 @@ export default function NewTripRequest() {
             <Text className="text-lg font-bold text-[#2b2b2b]">{t.title}</Text>
 
             <View className="mt-1 flex-row items-center gap-2">
-              <View className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: isOnline ? "#10b981" : "#f59e0b" }} />
-              <Text className="text-xs font-semibold" style={{ color: isOnline ? "#047857" : "#92400e" }}>
+              <View
+                className="h-2.5 w-2.5 rounded-full"
+                style={{ backgroundColor: isOnline ? "#10b981" : "#f59e0b" }}
+              />
+              <Text
+                className="text-xs font-semibold"
+                style={{ color: isOnline ? "#047857" : "#92400e" }}
+              >
                 {isOnline ? t.online : t.offline}
               </Text>
-              {syncing ? <Text className="text-[11px] text-[#7a6f66]"> • {t.syncing}</Text> : null}
+              {syncing ? (
+                <Text className="text-[11px] text-[#7a6f66]"> • {t.syncing}</Text>
+              ) : null}
             </View>
 
             {meLoading ? (
@@ -813,7 +1186,9 @@ export default function NewTripRequest() {
             onPress={() => setLang((x) => (x === "ta" ? "en" : "ta"))}
             className="rounded-full border border-[#ead7c8] bg-white px-3 py-2 active:opacity-80"
           >
-            <Text className="text-xs font-semibold text-[#2b2b2b]">{lang === "ta" ? "English" : "தமிழ்"}</Text>
+            <Text className="text-xs font-semibold text-[#2b2b2b]">
+              {lang === "ta" ? "English" : "தமிழ்"}
+            </Text>
           </Pressable>
         </View>
 
@@ -822,12 +1197,18 @@ export default function NewTripRequest() {
           <View className="flex-row justify-between">
             <View>
               <Label>{t.ownerName}:</Label>
-              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">{ownerName || "—"}</Text>
-              <Text className="mt-1 text-[11px] text-[#7a6f66]">Owner Code: {ownerCode || "—"}</Text>
+              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">
+                {ownerName || "—"}
+              </Text>
+              <Text className="mt-1 text-[11px] text-[#7a6f66]">
+                Owner Code: {ownerCode || "—"}
+              </Text>
             </View>
             <View>
               <Label>{t.regNo}:</Label>
-              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">{registrationNo || "—"}</Text>
+              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">
+                {registrationNo || "—"}
+              </Text>
             </View>
           </View>
         </Card>
@@ -842,11 +1223,39 @@ export default function NewTripRequest() {
               <Text className="text-base text-[#2b2b2b]">{tripName}</Text>
             </FieldBox>
 
+            {/* Vessel */}
             <View className="mt-3">
               <FieldBox>
-                <Pressable onPress={() => methodRef.current?.present()} className="active:opacity-80">
+                <Pressable
+                  onPress={() => vesselRef.current?.present()}
+                  className="active:opacity-80"
+                >
+                  <Label>{t.vessel}</Label>
+                  <Text
+                    className={`mt-1 text-base ${
+                      vesselSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"
+                    }`}
+                  >
+                    {vesselSel?.name || t.select}
+                  </Text>
+                  <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
+                </Pressable>
+              </FieldBox>
+            </View>
+
+            {/* Method */}
+            <View className="mt-3">
+              <FieldBox>
+                <Pressable
+                  onPress={() => methodRef.current?.present()}
+                  className="active:opacity-80"
+                >
                   <Label>{t.fishingMethod}</Label>
-                  <Text className={`mt-1 text-base ${method ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                  <Text
+                    className={`mt-1 text-base ${
+                      method ? "text-[#2b2b2b]" : "text-[#b1a59a]"
+                    }`}
+                  >
                     {method || t.select}
                   </Text>
                   <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
@@ -854,18 +1263,64 @@ export default function NewTripRequest() {
               </FieldBox>
             </View>
 
+            {/* State */}
             <View className="mt-3">
               <FieldBox>
-                <Pressable onPress={() => stationRef.current?.present()} className="active:opacity-80">
-                  <Label>{t.landingCenter}</Label>
-                  <Text className={`mt-1 text-base ${nearStation ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
-                    {nearStation || t.select}
+                <Pressable onPress={() => stateRef.current?.present()} className="active:opacity-80">
+                  <Label>{t.state}</Label>
+                  <Text className={`mt-1 text-base ${stateSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                    {stateSel?.name || t.select}
                   </Text>
-                  <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
                 </Pressable>
               </FieldBox>
             </View>
 
+            {/* District */}
+            <View className="mt-3">
+              <FieldBox>
+                <Pressable
+                  onPress={() => {
+                    if (!stateSel?.id) return Alert.alert(t.title, t.errState);
+                    districtRef.current?.present();
+                  }}
+                  className="active:opacity-80"
+                >
+                  <Label>{t.district}</Label>
+                  <Text className={`mt-1 text-base ${districtSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                    {districtSel?.name || t.select}
+                  </Text>
+                </Pressable>
+              </FieldBox>
+            </View>
+
+            {/* Location */}
+            <View className="mt-3">
+              <FieldBox>
+                <Pressable
+                  onPress={() => {
+                    if (!districtSel?.id) return Alert.alert(t.title, t.errDistrict);
+                    locationRef.current?.present();
+                  }}
+                  className="active:opacity-80"
+                >
+                  <Label>{t.nearStation}</Label>
+                  <Text className={`mt-1 text-base ${locationSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                    {locationSel?.name || t.select}
+                  </Text>
+
+                  {locationSel ? (
+                    <Text className="mt-1 text-[11px] text-[#7a6f66]">
+                      Payload near_station(name): {locationSel.name} | payload location_id: {locationSel.id} | derived
+                      state_id: {locationSel.state_id} | derived district_id: {locationSel.district_id}
+                    </Text>
+                  ) : (
+                    <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
+                  )}
+                </Pressable>
+              </FieldBox>
+            </View>
+
+            {/* Planned datetime */}
             <View className="mt-3">
               <FieldBox>
                 <Pressable onPress={() => setShowPlannedDate(true)} className="active:opacity-80">
@@ -916,13 +1371,13 @@ export default function NewTripRequest() {
           </Card>
         </View>
 
-        {/* Crew Details */}
+        {/* Crew */}
         <View className="mt-4">
           <Text className="text-base font-bold text-[#2b2b2b]">{t.crewDetails}</Text>
 
           <Card className="mt-3 p-4">
             <View className="flex-row items-start">
-              <View className="flex-1 pr-3" style={{ flexShrink: 1 }}>
+              <View className="flex-1 pr-3">
                 <Text className="text-sm font-semibold text-[#2b2b2b]" numberOfLines={1}>
                   {t.crewMembers}: {crewCount}
                 </Text>
@@ -931,7 +1386,7 @@ export default function NewTripRequest() {
                 </Text>
               </View>
 
-              <View className="flex-row items-center" style={{ flexShrink: 0 }}>
+              <View className="flex-row items-center">
                 <Pressable
                   onPress={() => setCrewCount((c) => Math.max(0, c - 1))}
                   disabled={crewCount === 0}
@@ -981,7 +1436,6 @@ export default function NewTripRequest() {
               />
             )}
 
-            {/* QR Count */}
             <View className="mt-4">
               <Label>{t.qrCount}</Label>
               <FieldBox>
@@ -997,11 +1451,9 @@ export default function NewTripRequest() {
               </FieldBox>
             </View>
 
-            {/* Supplies Cost */}
             <View className="mt-4">
               <Text className="text-sm font-bold text-[#2b2b2b]">{t.suppliesCost}</Text>
 
-              {/* Diesel */}
               <View className="mt-3">
                 <Label>{t.diesel}</Label>
                 <View className="mt-2 flex-row gap-3">
@@ -1036,7 +1488,6 @@ export default function NewTripRequest() {
                 </View>
               </View>
 
-              {/* Ice */}
               <View className="mt-4">
                 <Label>{t.ice}</Label>
                 <View className="mt-2 flex-row gap-3">
@@ -1071,7 +1522,6 @@ export default function NewTripRequest() {
                 </View>
               </View>
 
-              {/* Total */}
               <View className="mt-4 rounded-2xl border border-[#a06b2a] bg-[#fff3e7] px-4 py-3">
                 <Text className="text-xs text-[#7a4a12]">{t.totalCost}</Text>
                 <Text className="mt-1 text-lg font-extrabold text-[#2b2b2b]">{money(totalCost)}</Text>
@@ -1098,7 +1548,9 @@ export default function NewTripRequest() {
             className="flex-1 rounded-2xl bg-[#a06b2a] p-4 active:opacity-90"
             style={{ opacity: posting ? 0.7 : 1 }}
           >
-            <Text className="text-center text-white font-semibold">{posting ? "..." : t.submit}</Text>
+            <Text className="text-center text-white font-semibold">
+              {posting ? "..." : t.submit}
+            </Text>
           </Pressable>
         </View>
       </ScrollView>
