@@ -5,6 +5,7 @@ import { router } from "expo-router";
 import React, { useMemo, useRef, useState } from "react";
 import {
   Image,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -15,13 +16,25 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 
+/** ✅ NativeWind interop (NO styled) */
+import { cssInterop } from "nativewind";
+cssInterop(BlurView, { className: "style" });
+cssInterop(LinearGradient, { className: "style" });
+
 /** ✅ Redux */
 import { useDispatch, useSelector } from "react-redux";
-import { fetchDistrictsByState, fetchStates } from "../../src/store/auth/location.slice";
-import { registerUser, type RootverseType } from "../../src/store/auth/registration.slice";
+import {
+  fetchDistrictsByState,
+  fetchLocationsByDistrict,
+  fetchStates,
+} from "../../src/store/auth/location.slice";
+import {
+  registerUser,
+  type RootverseType,
+} from "../../src/store/auth/registration.slice";
 
 /** ✅ IMPORTANT: must match Provider store */
-import type { AppDispatch, RootState } from "../../src/store/store";
+import type { AppDispatch, RootState } from "../../src/store/auth/store";
 
 /** ✅ Toast */
 import Toast from "react-native-toast-message";
@@ -35,9 +48,27 @@ const MODULES: Array<{
   accent: string;
   icon: keyof typeof Ionicons.glyphMap;
 }> = [
-  { key: "WILD", title: "Wild Culture", subtitle: "Register for Wild Capture module", accent: "#38bdf8", icon: "fish-outline" },
-  { key: "AQUA", title: "Aqua Culture", subtitle: "Register for Aquaculture module", accent: "#34d399", icon: "water-outline" },
-  { key: "MARI", title: "Mari Culture", subtitle: "Register for Mariculture module", accent: "#a78bfa", icon: "leaf-outline" },
+  {
+    key: "WILD",
+    title: "Wild Culture",
+    subtitle: "Register for Wild Capture module",
+    accent: "#38bdf8",
+    icon: "fish-outline",
+  },
+  {
+    key: "AQUA",
+    title: "Aqua Culture",
+    subtitle: "Register for Aquaculture module",
+    accent: "#34d399",
+    icon: "water-outline",
+  },
+  {
+    key: "MARI",
+    title: "Mari Culture",
+    subtitle: "Register for Mariculture module",
+    accent: "#a78bfa",
+    icon: "leaf-outline",
+  },
 ];
 
 function isValidPhone10(phone: string) {
@@ -53,123 +84,66 @@ function mapToBackendRootverseType(k: Category): RootverseType {
   return "MARICULTURE";
 }
 
-/** ✅ BlurView blocks clicks on WEB sometimes */
+/** ✅ Toast helper */
+function showToast(p: any) {
+  Toast.show({
+    visibilityTime: 3000,
+    ...p,
+  });
+}
+
+/** ✅ Glass */
 function Glass({
   intensity = 18,
-  style,
+  className = "",
   children,
 }: {
   intensity?: number;
-  style?: any;
+  className?: string;
   children: React.ReactNode;
 }) {
-  if (Platform.OS === "web") {
-    return <View style={[{ backgroundColor: "rgba(0,0,0,0.92)" }, style]}>{children}</View>;
-  }
   return (
-    <BlurView intensity={intensity} tint="dark" style={style}>
+    <BlurView
+      intensity={intensity}
+      tint="dark"
+      className={`bg-black ${className}`}
+    >
       {children}
     </BlurView>
   );
 }
 
 /**
- * ✅ ModalFrame
- * WEB: fixed overlay View (NO <Modal>) so list clicks work
- * MOBILE: absolute overlay View (NO <Modal>) so Toast can overlay
- *
- * IMPORTANT: zIndex is customizable:
- * - Register modal: zIndex 10000
- * - Dropdown modals: zIndex 20000 (so they appear above register modal)
+ * ✅ ModalFrame (NO <Modal>)
  */
 function ModalFrame({
   visible,
   onClose,
-  borderRadius = 22,
-  zIndex = 10000,
+  zClass = "z-[10000]",
+  roundedClass = "rounded-3xl",
   children,
 }: {
   visible: boolean;
   onClose: () => void;
-  borderRadius?: number;
-  zIndex?: number;
+  zClass?: string;
+  roundedClass?: string;
   children: React.ReactNode;
 }) {
   if (!visible) return null;
 
-  // ✅ WEB: fixed overlay
-  if (Platform.OS === "web") {
-    return (
-      <View
-        style={{
-          position: "fixed" as any,
-          inset: 0,
-          zIndex,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 18,
-          backgroundColor: "transparent",
-        }}
-      >
-        <Pressable
-          onPress={onClose}
-          style={{
-            position: "fixed" as any,
-            inset: 0,
-            backgroundColor: "transparent",
-          }}
-        />
-
-        <View
-          style={{
-            position: "relative",
-            zIndex: zIndex + 1,
-            width: "100%",
-            maxWidth: 520,
-            borderRadius,
-            overflow: "hidden",
-            borderWidth: 1,
-            borderColor: "rgba(255,255,255,0.10)",
-            backgroundColor: "rgba(0,0,0,0.92)",
-          }}
-        >
-          {children}
-        </View>
-      </View>
-    );
-  }
-
-  // ✅ MOBILE: absolute overlay
   return (
     <View
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        justifyContent: "center",
-        paddingHorizontal: 18,
-        zIndex,
-        elevation: zIndex,
-      }}
+      className={`absolute inset-0 items-center justify-center px-5 ${zClass}`}
       pointerEvents="box-none"
     >
       <Pressable
         onPress={onClose}
-        style={{ position: "absolute", inset: 0, backgroundColor: "transparent" }}
+        className="absolute inset-0 bg-black/90"
         pointerEvents="auto"
       />
 
       <View
-        style={{
-          borderRadius,
-          overflow: "hidden",
-          borderWidth: 1,
-          borderColor: "rgba(255,255,255,0.10)",
-          backgroundColor: "rgba(0,0,0,0.92)",
-        }}
+        className={`w-full max-w-[520px] h-[74%] overflow-hidden border border-white/10 bg-black ${roundedClass}`}
         pointerEvents="auto"
       >
         {children}
@@ -192,50 +166,42 @@ function ModuleCard({
   onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={{ borderRadius: 26, overflow: "hidden" }}>
-      <Glass intensity={22} style={{ borderRadius: 26, overflow: "hidden" }}>
-        <View
-          style={{
-            backgroundColor: "rgba(0,0,0,0.35)",
-            borderWidth: 1,
-            borderColor: "rgba(255,255,255,0.10)",
-            borderRadius: 26,
-            padding: 20,
-          }}
-        >
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-            <View style={{ flex: 1, paddingRight: 12 }}>
-              <Text style={{ color: "white", fontWeight: "800", fontSize: 16 }} numberOfLines={1}>
+    <Pressable onPress={onPress} className="rounded-[26px] overflow-hidden">
+      <Glass intensity={22} className="rounded-[26px] overflow-hidden">
+        <View className="rounded-[26px] border border-white/10 bg-white/5 p-5">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-1 pr-3">
+              <Text
+                className="text-white font-extrabold text-base"
+                numberOfLines={1}
+              >
                 {title}
               </Text>
-              <Text style={{ color: "#cbd5e1", fontSize: 11, marginTop: 4, lineHeight: 16 }} numberOfLines={2}>
+              <Text
+                className="text-slate-300 text-[11px] mt-1 leading-4"
+                numberOfLines={2}
+              >
                 {subtitle}
               </Text>
             </View>
 
-            <View
-              style={{
-                height: 44,
-                width: 44,
-                borderRadius: 16,
-                alignItems: "center",
-                justifyContent: "center",
-                borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.10)",
-                backgroundColor: "rgba(255,255,255,0.05)",
-              }}
-            >
+            <View className="h-11 w-11 rounded-2xl items-center justify-center border border-white/10 bg-white/5">
               <Ionicons name={icon} size={18} color={accent} />
             </View>
           </View>
 
-          <View style={{ marginTop: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-            <Text style={{ color: "#cbd5e1", fontSize: 11, flex: 1, paddingRight: 10 }} numberOfLines={1}>
+          <View className="mt-3.5 flex-row items-center justify-between">
+            <Text
+              className="text-slate-300 text-[11px] flex-1 pr-2.5"
+              numberOfLines={1}
+            >
               Tap to register for this module
             </Text>
 
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <Text style={{ color: "#7dd3fc", fontSize: 11, fontWeight: "700", marginRight: 6 }}>Open</Text>
+            <View className="flex-row items-center">
+              <Text className="text-sky-300 text-[11px] font-bold mr-1.5">
+                Open
+              </Text>
               <Ionicons name="chevron-forward" size={14} color="#7dd3fc" />
             </View>
           </View>
@@ -245,7 +211,7 @@ function ModuleCard({
   );
 }
 
-/** ✅ State/District list modal */
+/** ✅ State/District/Location list modal */
 function SelectListModal<T extends { id: number; name: string }>({
   open,
   title,
@@ -266,50 +232,64 @@ function SelectListModal<T extends { id: number; name: string }>({
   onSelect: (item: T) => void;
 }) {
   return (
-    <ModalFrame visible={open} onClose={onClose} borderRadius={22} zIndex={20000}>
-      <Glass intensity={18} style={{ padding: 14 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <Text style={{ color: "white", fontWeight: "800", fontSize: 14 }}>{title}</Text>
-          <Pressable onPress={onClose} style={{ padding: 8, marginRight: -8 }}>
+    <ModalFrame
+      visible={open}
+      onClose={onClose}
+      zClass="z-[20000]"
+      roundedClass="rounded-2xl"
+    >
+      <Glass intensity={18} className="p-3.5 flex-1">
+        <View className="flex-row items-center justify-between">
+          <Text className="text-white font-extrabold text-sm">{title}</Text>
+          <Pressable onPress={onClose} className="p-2 -mr-2">
             <Ionicons name="close" size={18} color="#cbd5e1" />
           </Pressable>
         </View>
 
-        <View style={{ marginTop: 10, maxHeight: 340 }}>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {!!disabledText ? (
-              <Text style={{ color: "#94a3b8", fontSize: 12, paddingVertical: 14 }}>{disabledText}</Text>
+        <View className="mt-2 flex-1">
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
+            {disabledText ? (
+              <Text className="text-slate-400 text-xs py-3.5">
+                {disabledText}
+              </Text>
             ) : loading ? (
-              <Text style={{ color: "#94a3b8", fontSize: 12, paddingVertical: 14 }}>Loading...</Text>
+              <Text className="text-slate-400 text-xs py-3.5">Loading...</Text>
             ) : items.length === 0 ? (
-              <Text style={{ color: "#94a3b8", fontSize: 12, paddingVertical: 14 }}>No items found.</Text>
+              <Text className="text-slate-400 text-xs py-3.5">
+                No items found.
+              </Text>
             ) : (
-              items.map((it) => {
-                const active = selectedId === it.id;
-                return (
-                  <Pressable
-                    key={it.id}
-                    onPress={() => onSelect(it)}
-                    style={{
-                      paddingVertical: 12,
-                      paddingHorizontal: 12,
-                      borderRadius: 14,
-                      marginBottom: 8,
-                      borderWidth: 1,
-                      borderColor: active ? "rgba(125,211,252,0.35)" : "rgba(255,255,255,0.08)",
-                      backgroundColor: active ? "rgba(125,211,252,0.10)" : "rgba(255,255,255,0.04)",
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                    }}
-                  >
-                    <Text style={{ color: "white", fontSize: 12, paddingRight: 12, flex: 1 }} numberOfLines={1}>
-                      {it.name}
-                    </Text>
-                    {active ? <Ionicons name="checkmark" size={18} color="#7dd3fc" /> : null}
-                  </Pressable>
-                );
-              })
+              <View className="pt-2 pb-3">
+                {items.map((it) => {
+                  const active = selectedId === it.id;
+                  return (
+                    <Pressable
+                      key={it.id}
+                      onPress={() => onSelect(it)}
+                      className={[
+                        "px-3 py-3 rounded-2xl mb-2 border flex-row items-center justify-between",
+                        active
+                          ? "border-sky-300/40 bg-sky-300/10"
+                          : "border-white/10 bg-white/5",
+                      ].join(" ")}
+                    >
+                      <Text
+                        className="text-white text-xs flex-1 pr-3"
+                        numberOfLines={1}
+                      >
+                        {it.name}
+                      </Text>
+                      {active ? (
+                        <Ionicons name="checkmark" size={18} color="#7dd3fc" />
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
             )}
           </ScrollView>
         </View>
@@ -337,6 +317,10 @@ function RegisterModal({
     districtsByStateId,
     districtsLoadingByStateId,
     districtsErrorByStateId,
+
+    locationsByDistrictId,
+    locationsLoadingByDistrictId,
+    locationsErrorByDistrictId,
   } = useSelector((s: RootState) => (s as any).location);
 
   const [username, setUsername] = useState("");
@@ -346,11 +330,21 @@ function RegisterModal({
 
   const [stateId, setStateId] = useState<number | null>(null);
   const [districtId, setDistrictId] = useState<number | null>(null);
+  const [locationId, setLocationId] = useState<number | null>(null);
 
   const [stateModal, setStateModal] = useState(false);
   const [districtModal, setDistrictModal] = useState(false);
+  const [locationModal, setLocationModal] = useState(false);
 
   const userRef = useRef<TextInput>(null);
+  const addressRef = useRef<TextInput>(null);
+  const formScrollRef = useRef<ScrollView>(null);
+
+  const [row1Y, setRow1Y] = useState(0);
+  const [row2Y, setRow2Y] = useState(0);
+  const [row3Y, setRow3Y] = useState(0);
+  const [addressY, setAddressY] = useState(0);
+  const [submitY, setSubmitY] = useState(0);
 
   React.useEffect(() => {
     if (!open) return;
@@ -361,12 +355,14 @@ function RegisterModal({
     setProfileUri("");
     setStateId(null);
     setDistrictId(null);
+    setLocationId(null);
     setStateModal(false);
     setDistrictModal(false);
+    setLocationModal(false);
 
     dispatch(fetchStates());
 
-    const t = setTimeout(() => userRef.current?.focus?.(), Platform.OS === "web" ? 250 : 150);
+    const t = setTimeout(() => userRef.current?.focus?.(), 180);
     return () => clearTimeout(t);
   }, [open, module?.key, dispatch]);
 
@@ -376,18 +372,46 @@ function RegisterModal({
     return Array.isArray(arr) ? arr : [];
   }, [stateId, districtsByStateId]);
 
-  const districtsLoading = useMemo(() => (!!stateId ? !!districtsLoadingByStateId?.[stateId] : false), [
-    stateId,
-    districtsLoadingByStateId,
-  ]);
+  const districtsLoading = useMemo(
+    () => (!!stateId ? !!districtsLoadingByStateId?.[stateId] : false),
+    [stateId, districtsLoadingByStateId],
+  );
 
-  const districtsError = useMemo(() => (!!stateId ? districtsErrorByStateId?.[stateId] ?? null : null), [
-    stateId,
-    districtsErrorByStateId,
-  ]);
+  const districtsError = useMemo(
+    () => (!!stateId ? (districtsErrorByStateId?.[stateId] ?? null) : null),
+    [stateId, districtsErrorByStateId],
+  );
 
-  const selectedStateName = useMemo(() => states?.find((s: any) => s.id === stateId)?.name ?? "", [states, stateId]);
-  const selectedDistrictName = useMemo(() => districts?.find((d: any) => d.id === districtId)?.name ?? "", [districts, districtId]);
+  const locations = useMemo(() => {
+    if (!districtId) return [];
+    const arr = locationsByDistrictId?.[districtId];
+    return Array.isArray(arr) ? arr : [];
+  }, [districtId, locationsByDistrictId]);
+
+  const locationsLoading = useMemo(
+    () => (!!districtId ? !!locationsLoadingByDistrictId?.[districtId] : false),
+    [districtId, locationsLoadingByDistrictId],
+  );
+
+  const locationsError = useMemo(
+    () => (!!districtId ? (locationsErrorByDistrictId?.[districtId] ?? null) : null),
+    [districtId, locationsErrorByDistrictId],
+  );
+
+  const selectedStateName = useMemo(
+    () => states?.find((s: any) => s.id === stateId)?.name ?? "",
+    [states, stateId],
+  );
+
+  const selectedDistrictName = useMemo(
+    () => districts?.find((d: any) => d.id === districtId)?.name ?? "",
+    [districts, districtId],
+  );
+
+  const selectedLocationName = useMemo(
+    () => locations?.find((l: any) => l.id === locationId)?.name ?? "",
+    [locations, locationId],
+  );
 
   const canSubmit =
     username.trim().length >= 2 &&
@@ -395,12 +419,62 @@ function RegisterModal({
     isValidAddress(address) &&
     profile_image_uri.trim().length > 0 &&
     !!stateId &&
-    !!districtId;
+    !!districtId &&
+    !!locationId;
+
+  const scrollToY = (y: number) => {
+    formScrollRef.current?.scrollTo({ y: Math.max(0, y - 60), animated: true });
+  };
+
+  const validateOrToast = () => {
+    if (username.trim().length < 2) {
+      showToast({ type: "info", text1: "Enter username" });
+      scrollToY(row1Y);
+      setTimeout(() => userRef.current?.focus?.(), 150);
+      return false;
+    }
+    if (!isValidPhone10(phone_no)) {
+      showToast({ type: "info", text1: "Enter valid 10-digit phone" });
+      scrollToY(row1Y);
+      return false;
+    }
+    if (!stateId) {
+      showToast({ type: "info", text1: "Select state" });
+      scrollToY(row2Y);
+      return false;
+    }
+    if (!districtId) {
+      showToast({ type: "info", text1: "Select district" });
+      scrollToY(row2Y);
+      return false;
+    }
+    if (!locationId) {
+      showToast({ type: "info", text1: "Select location" });
+      scrollToY(row3Y);
+      return false;
+    }
+    if (!profile_image_uri.trim()) {
+      showToast({ type: "info", text1: "Select profile photo" });
+      scrollToY(row3Y);
+      return false;
+    }
+    if (!isValidAddress(address)) {
+      showToast({ type: "info", text1: "Enter address (min 8 chars)" });
+      scrollToY(addressY);
+      setTimeout(() => addressRef.current?.focus?.(), 150);
+      return false;
+    }
+    return true;
+  };
 
   const pickImage = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Toast.show({ type: "error", text1: "Permission needed", text2: "Allow gallery permission.", position: "top" });
+      showToast({
+        type: "error",
+        text1: "Permission needed",
+        text2: "Allow gallery permission.",
+      });
       return;
     }
 
@@ -418,7 +492,8 @@ function RegisterModal({
   };
 
   const onRegister = async () => {
-    if (!module || !canSubmit || loading) return;
+    if (!module || loading) return;
+    if (!validateOrToast()) return;
 
     const rootverse_type = mapToBackendRootverseType(module.key);
 
@@ -431,20 +506,24 @@ function RegisterModal({
         profile_image_uri,
         state_id: stateId!,
         district_id: districtId!,
-      })
+        location_id: locationId!, // ✅ NEW
+      } as any),
     );
 
     if (registerUser.rejected.match(res)) {
-      Toast.show({
+      showToast({
         type: "error",
         text1: "Registration failed",
         text2: (res.payload as string) || res.error.message || "Try again",
-        position: "top",
       });
       return;
     }
 
-    Toast.show({ type: "success", text1: "Registered successfully", text2: `${module.title} • ${phone_no}`, position: "top" });
+    showToast({
+      type: "success",
+      text1: "Registered successfully",
+      text2: `${module.title} • ${phone_no}`,
+    });
 
     onClose();
     router.replace("/(auth)/login");
@@ -464,6 +543,7 @@ function RegisterModal({
         onSelect={(st: any) => {
           setStateId(st.id);
           setDistrictId(null);
+          setLocationId(null);
           setStateModal(false);
           dispatch(fetchDistrictsByState({ stateId: st.id }));
         }}
@@ -479,251 +559,372 @@ function RegisterModal({
         onClose={() => setDistrictModal(false)}
         onSelect={(d: any) => {
           setDistrictId(d.id);
+          setLocationId(null);
           setDistrictModal(false);
+          dispatch(fetchLocationsByDistrict({ districtId: d.id }));
         }}
       />
 
-      {/* ✅ Register modal zIndex LOWER than dropdowns */}
-      <ModalFrame visible={open} onClose={onClose} borderRadius={26} zIndex={10000}>
-        <Glass intensity={14} style={{ padding: 16 }}>
-          {/* Header */}
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-            <View style={{ flexDirection: "row", alignItems: "center", flex: 1, paddingRight: 10 }}>
+      <SelectListModal
+        open={locationModal}
+        title="Select Location"
+        items={locations}
+        loading={locationsLoading}
+        selectedId={locationId}
+        disabledText={!districtId ? "Select district first" : undefined}
+        onClose={() => setLocationModal(false)}
+        onSelect={(l: any) => {
+          setLocationId(l.id);
+          setLocationModal(false);
+        }}
+      />
+
+      <ModalFrame
+        visible={open}
+        onClose={onClose}
+        zClass="z-[10000]"
+        roundedClass="rounded-[26px]"
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          className="flex-1"
+        >
+          <Glass intensity={14} className="p-4 flex-1">
+            <View className="flex-row items-center justify-between">
+              <View className="flex-row items-center flex-1 pr-2.5">
+                <View className="h-10 w-10 rounded-2xl items-center justify-center border border-white/10 bg-white/5">
+                  <Ionicons
+                    name={module.icon}
+                    size={18}
+                    color={module.accent}
+                  />
+                </View>
+
+                <View className="ml-3 flex-1">
+                  <Text
+                    className="text-white font-extrabold text-[15px]"
+                    numberOfLines={1}
+                  >
+                    {module.title}
+                  </Text>
+                </View>
+              </View>
+
+              <Pressable onPress={onClose} className="p-2 -mr-2">
+                <Ionicons name="close" size={18} color="#cbd5e1" />
+              </Pressable>
+            </View>
+
+            <ScrollView
+              ref={formScrollRef}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              nestedScrollEnabled
+              className="flex-1 mt-3"
+              contentContainerStyle={{ paddingBottom: 16 }}
+            >
+              {/* Row 1: Username + Phone */}
+              <View onLayout={(e) => setRow1Y(e.nativeEvent.layout.y)}>
+                <View className="flex-row">
+                  <View className="flex-1 mr-3">
+                    <Text className="text-slate-300 text-[11px] mb-1.5">
+                      Username
+                    </Text>
+                    <View className="flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
+                      <Ionicons
+                        name="person-outline"
+                        size={16}
+                        color="#94a3b8"
+                      />
+                      <TextInput
+                        ref={userRef}
+                        value={username}
+                        onChangeText={setUsername}
+                        placeholder="Username"
+                        placeholderTextColor="#64748b"
+                        className="flex-1 ml-2.5 text-white text-[12px] py-0"
+                      />
+                    </View>
+                  </View>
+
+                  <View className="flex-1">
+                    <Text className="text-slate-300 text-[11px] mb-1.5">
+                      Phone
+                    </Text>
+                    <View className="flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
+                      <Ionicons name="call-outline" size={16} color="#94a3b8" />
+                      <TextInput
+                        value={phone_no}
+                        onChangeText={(t) =>
+                          setPhoneNo(t.replace(/[^\d]/g, ""))
+                        }
+                        placeholder="10-digit"
+                        placeholderTextColor="#64748b"
+                        keyboardType="number-pad"
+                        maxLength={10}
+                        className="flex-1 ml-2.5 text-white text-[12px] py-0"
+                      />
+                    </View>
+                  </View>
+                </View>
+              </View>
+
+              {/* Row 2: State + District */}
               <View
-                style={{
-                  height: 40,
-                  width: 40,
-                  borderRadius: 16,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderWidth: 1,
-                  borderColor: "rgba(255,255,255,0.10)",
-                  backgroundColor: "rgba(255,255,255,0.05)",
-                }}
+                className="mt-3"
+                onLayout={(e) => setRow2Y(e.nativeEvent.layout.y)}
               >
-                <Ionicons name={module.icon} size={18} color={module.accent} />
+                <View className="flex-row">
+                  <View className="flex-1 mr-3">
+                    <Text className="text-slate-300 text-[11px] mb-1.5">
+                      State
+                    </Text>
+                    <Pressable
+                      onPress={() => setStateModal(true)}
+                      className="flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-5"
+                    >
+                      <Ionicons name="map-outline" size={16} color="#94a3b8" />
+                      <Text
+                        className={[
+                          "flex-1 ml-2.5 text-[12px]",
+                          selectedStateName ? "text-white" : "text-slate-500",
+                        ].join(" ")}
+                        numberOfLines={1}
+                      >
+                        {statesLoading
+                          ? "Loading..."
+                          : selectedStateName || "Select"}
+                      </Text>
+                      <Ionicons name="chevron-down" size={16} color="#cbd5e1" />
+                    </Pressable>
+                  </View>
+
+                  <View className="flex-1">
+                    <Text className="text-slate-300 text-[11px] mb-1.5">
+                      District
+                    </Text>
+                    <Pressable
+                      onPress={() => {
+                        if (!stateId) {
+                          showToast({
+                            type: "info",
+                            text1: "Select state first",
+                          });
+                          return;
+                        }
+                        if (!districtsLoading && districts.length === 0) {
+                          dispatch(fetchDistrictsByState({ stateId }));
+                        }
+                        setDistrictModal(true);
+                      }}
+                      className={[
+                        "flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-5",
+                        stateId ? "opacity-100" : "opacity-60",
+                      ].join(" ")}
+                    >
+                      <Ionicons
+                        name="business-outline"
+                        size={16}
+                        color="#94a3b8"
+                      />
+                      <Text
+                        className={[
+                          "flex-1 ml-2.5 text-[12px]",
+                          selectedDistrictName
+                            ? "text-white"
+                            : "text-slate-500",
+                        ].join(" ")}
+                        numberOfLines={1}
+                      >
+                        {!stateId
+                          ? "Select state"
+                          : districtsLoading
+                            ? "Loading..."
+                            : selectedDistrictName || "Select"}
+                      </Text>
+                      <Ionicons name="chevron-down" size={16} color="#cbd5e1" />
+                    </Pressable>
+                  </View>
+                </View>
+
+                {!!districtsError && (
+                  <Text className="text-red-300 text-[11px] mt-2">
+                    District API error: {districtsError}
+                  </Text>
+                )}
+                {!!statesError && (
+                  <Text className="text-red-300 text-[11px] mt-2">
+                    State API error: {statesError}
+                  </Text>
+                )}
               </View>
 
-              <View style={{ marginLeft: 12, flex: 1 }}>
-                <Text style={{ color: "white", fontWeight: "800", fontSize: 15 }} numberOfLines={1}>
-                  {module.title}
-                </Text>
-                <Text style={{ color: "#cbd5e1", fontSize: 11, marginTop: 2 }} numberOfLines={1}>
-                  Username • Phone • State • District • Address • Photo
-                </Text>
-              </View>
-            </View>
-
-            <Pressable onPress={onClose} style={{ padding: 8, marginRight: -8 }}>
-              <Ionicons name="close" size={18} color="#cbd5e1" />
-            </Pressable>
-          </View>
-
-          {/* Profile pic */}
-          <Text style={{ color: "#cbd5e1", fontSize: 11, marginTop: 16, marginBottom: 8 }}>Profile Picture</Text>
-          <Pressable
-            onPress={pickImage}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              borderRadius: 16,
-              paddingHorizontal: 14,
-              paddingVertical: 12,
-              borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.12)",
-              backgroundColor: "rgba(255,255,255,0.04)",
-            }}
-          >
-            <View
-              style={{
-                height: 44,
-                width: 44,
-                borderRadius: 14,
-                overflow: "hidden",
-                backgroundColor: "rgba(255,255,255,0.06)",
-                borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.10)",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {profile_image_uri ? (
-                <Image source={{ uri: profile_image_uri }} style={{ height: 44, width: 44 }} />
-              ) : (
-                <Ionicons name="image-outline" size={18} color="#94a3b8" />
-              )}
-            </View>
-
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={{ color: "white", fontSize: 12, fontWeight: "700" }} numberOfLines={1}>
-                {profile_image_uri ? "Photo selected" : "Choose from gallery"}
-              </Text>
-              <Text style={{ color: "#94a3b8", fontSize: 10, marginTop: 2 }} numberOfLines={1}>
-                {profile_image_uri ? profile_image_uri : "Tap to pick a profile image"}
-              </Text>
-            </View>
-          </Pressable>
-
-          {/* Username */}
-          <Text style={{ color: "#cbd5e1", fontSize: 11, marginTop: 16, marginBottom: 8 }}>Username</Text>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              borderRadius: 16,
-              paddingHorizontal: 16,
-              paddingVertical: 12,
-              borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.12)",
-              backgroundColor: "rgba(255,255,255,0.04)",
-            }}
-          >
-            <Ionicons name="person-outline" size={18} color="#94a3b8" />
-            <TextInput
-              ref={userRef}
-              value={username}
-              onChangeText={setUsername}
-              placeholder="Enter username"
-              placeholderTextColor="#64748b"
-              style={{ flex: 1, marginLeft: 12, color: "white", fontSize: 12 }}
-            />
-          </View>
-
-          {/* Phone */}
-          <Text style={{ color: "#cbd5e1", fontSize: 11, marginTop: 16, marginBottom: 8 }}>Phone Number</Text>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              borderRadius: 16,
-              paddingHorizontal: 16,
-              paddingVertical: 12,
-              borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.12)",
-              backgroundColor: "rgba(255,255,255,0.04)",
-            }}
-          >
-            <Ionicons name="call-outline" size={18} color="#94a3b8" />
-            <TextInput
-              value={phone_no}
-              onChangeText={(t) => setPhoneNo(t.replace(/[^\d]/g, ""))}
-              placeholder="10-digit mobile number"
-              placeholderTextColor="#64748b"
-              keyboardType="number-pad"
-              maxLength={10}
-              style={{ flex: 1, marginLeft: 12, color: "white", fontSize: 12 }}
-            />
-          </View>
-
-          {/* State */}
-          <Text style={{ color: "#cbd5e1", fontSize: 11, marginTop: 16, marginBottom: 8 }}>State</Text>
-          <Pressable
-            onPress={() => setStateModal(true)}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              borderRadius: 16,
-              paddingHorizontal: 16,
-              paddingVertical: 12,
-              borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.12)",
-              backgroundColor: "rgba(255,255,255,0.04)",
-            }}
-          >
-            <Ionicons name="map-outline" size={18} color="#94a3b8" />
-            <Text style={{ flex: 1, marginLeft: 12, color: selectedStateName ? "white" : "#64748b", fontSize: 12 }}>
-              {statesLoading ? "Loading states..." : selectedStateName || "Select state"}
-            </Text>
-            <Ionicons name="chevron-down" size={18} color="#cbd5e1" />
-          </Pressable>
-
-          {/* District */}
-          <Text style={{ color: "#cbd5e1", fontSize: 11, marginTop: 16, marginBottom: 8 }}>District</Text>
-          <Pressable
-            onPress={() => {
-              if (!stateId) {
-                Toast.show({ type: "info", text1: "Select state first", position: "top" });
-                return;
-              }
-              if (!districtsLoading && districts.length === 0) {
-                dispatch(fetchDistrictsByState({ stateId }));
-              }
-              setDistrictModal(true);
-            }}
-            style={{
-              opacity: stateId ? 1 : 0.6,
-              flexDirection: "row",
-              alignItems: "center",
-              borderRadius: 16,
-              paddingHorizontal: 16,
-              paddingVertical: 12,
-              borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.12)",
-              backgroundColor: "rgba(255,255,255,0.04)",
-            }}
-          >
-            <Ionicons name="business-outline" size={18} color="#94a3b8" />
-            <Text style={{ flex: 1, marginLeft: 12, color: selectedDistrictName ? "white" : "#64748b", fontSize: 12 }}>
-              {!stateId
-                ? "Select state first"
-                : districtsLoading
-                ? "Loading districts..."
-                : selectedDistrictName || `Select district (${districts.length})`}
-            </Text>
-            <Ionicons name="chevron-down" size={18} color="#cbd5e1" />
-          </Pressable>
-
-          {!!districtsError && (
-            <Text style={{ color: "#fca5a5", fontSize: 11, marginTop: 8 }}>District API error: {districtsError}</Text>
-          )}
-
-          {/* Address */}
-          <Text style={{ color: "#cbd5e1", fontSize: 11, marginTop: 16, marginBottom: 8 }}>Address</Text>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "flex-start",
-              borderRadius: 16,
-              paddingHorizontal: 16,
-              paddingVertical: 12,
-              borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.12)",
-              backgroundColor: "rgba(255,255,255,0.04)",
-            }}
-          >
-            <Ionicons name="location-outline" size={18} color="#94a3b8" style={{ marginTop: 2 }} />
-            <TextInput
-              value={address}
-              onChangeText={setAddress}
-              placeholder="Enter address"
-              placeholderTextColor="#64748b"
-              multiline
-              style={{ flex: 1, marginLeft: 12, color: "white", minHeight: 44, fontSize: 12 }}
-            />
-          </View>
-
-          {/* Submit */}
-          <View style={{ marginTop: 18 }}>
-            <Pressable
-              disabled={!canSubmit || loading}
-              onPress={onRegister}
-              style={{ opacity: !canSubmit || loading ? 0.6 : 1, borderRadius: 24, overflow: "hidden" }}
-            >
-              <LinearGradient
-                colors={[module.accent, "#22c55e", "#06b6d4"]}
-                start={{ x: 0, y: 0.5 }}
-                end={{ x: 1, y: 0.5 }}
-                style={{ paddingVertical: 14, alignItems: "center", borderRadius: 24 }}
+              {/* Row 3: Location + Profile Picture (profile at last) */}
+              <View
+                className="mt-3"
+                onLayout={(e) => setRow3Y(e.nativeEvent.layout.y)}
               >
-                <Text style={{ color: "black", fontWeight: "800" }}>{loading ? "Registering..." : "Register"}</Text>
-              </LinearGradient>
-            </Pressable>
+                <View className="flex-row">
+                  <View className="flex-1 mr-3">
+                    <Text className="text-slate-300 text-[11px] mb-1.5">
+                      Location
+                    </Text>
+                    <Pressable
+                      onPress={() => {
+                        if (!districtId) {
+                          showToast({
+                            type: "info",
+                            text1: "Select district first",
+                          });
+                          return;
+                        }
+                        if (!locationsLoading && locations.length === 0) {
+                          dispatch(fetchLocationsByDistrict({ districtId }));
+                        }
+                        setLocationModal(true);
+                      }}
+                      className={[
+                        "flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-5",
+                        districtId ? "opacity-100" : "opacity-60",
+                      ].join(" ")}
+                    >
+                      <Ionicons
+                        name="navigate-outline"
+                        size={16}
+                        color="#94a3b8"
+                      />
+                      <Text
+                        className={[
+                          "flex-1 ml-2.5 text-[12px]",
+                          selectedLocationName
+                            ? "text-white"
+                            : "text-slate-500",
+                        ].join(" ")}
+                        numberOfLines={1}
+                      >
+                        {!districtId
+                          ? "Select district"
+                          : locationsLoading
+                            ? "Loading..."
+                            : selectedLocationName || "Select"}
+                      </Text>
+                      <Ionicons name="chevron-down" size={16} color="#cbd5e1" />
+                    </Pressable>
+                  </View>
 
-            {!!statesError && (
-              <Text style={{ color: "#fca5a5", fontSize: 11, marginTop: 8 }}>State API error: {statesError}</Text>
-            )}
-          </View>
-        </Glass>
+                  <View className="flex-1">
+                    <Text className="text-slate-300 text-[11px] mb-1.5">
+                      Profile Picture
+                    </Text>
+                    <Pressable
+                      onPress={pickImage}
+                      className="flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5"
+                    >
+                      <View className="h-10 w-10 rounded-2xl overflow-hidden bg-white/10 border border-white/10 items-center justify-center">
+                        {profile_image_uri ? (
+                          <Image
+                            source={{ uri: profile_image_uri }}
+                            className="h-10 w-10"
+                          />
+                        ) : (
+                          <Ionicons
+                            name="image-outline"
+                            size={18}
+                            color="#94a3b8"
+                          />
+                        )}
+                      </View>
+
+                      <View className="flex-1 ml-3">
+                        <Text
+                          className="text-white text-xs font-bold"
+                          numberOfLines={1}
+                        >
+                          {profile_image_uri
+                            ? "Photo selected"
+                            : "Choose photo"}
+                        </Text>
+                        <Text
+                          className="text-slate-400 text-[10px] mt-0.5"
+                          numberOfLines={1}
+                        >
+                          {profile_image_uri
+                            ? "Ready"
+                            : "Tap to pick a profile image"}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  </View>
+                </View>
+
+                {!!locationsError && (
+                  <Text className="text-red-300 text-[11px] mt-2">
+                    Location API error: {locationsError}
+                  </Text>
+                )}
+              </View>
+
+              {/* Address (below) */}
+              <View
+                className="mt-3"
+                onLayout={(e) => setAddressY(e.nativeEvent.layout.y)}
+              >
+                <Text className="text-slate-300 text-[11px] mb-1.5">
+                  Address
+                </Text>
+                <View className="flex-row items-start rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
+                  <View className="mt-0.5">
+                    <Ionicons
+                      name="location-outline"
+                      size={16}
+                      color="#94a3b8"
+                    />
+                  </View>
+                  <TextInput
+                    ref={addressRef}
+                    value={address}
+                    onChangeText={setAddress}
+                    placeholder="Enter address"
+                    placeholderTextColor="#64748b"
+                    multiline
+                    textAlignVertical="top"
+                    onFocus={() => {
+                      setTimeout(() => scrollToY(submitY), 120);
+                    }}
+                    className="flex-1 ml-2.5 text-white text-[12px] min-h-[64px]"
+                  />
+                </View>
+              </View>
+
+              {/* Submit */}
+              <View
+                className="mt-4 mb-1"
+                onLayout={(e) => setSubmitY(e.nativeEvent.layout.y)}
+              >
+                <Pressable
+                  disabled={loading}
+                  onPress={onRegister}
+                  className={[
+                    "rounded-3xl overflow-hidden",
+                    !canSubmit || loading ? "opacity-60" : "opacity-100",
+                  ].join(" ")}
+                >
+                  <LinearGradient
+                    colors={[module.accent, "#22c55e", "#06b6d4"]}
+                    start={{ x: 0, y: 0.5 }}
+                    end={{ x: 1, y: 0.5 }}
+                    className="py-3 items-center rounded-3xl"
+                  >
+                    <Text className="text-black font-extrabold">
+                      {loading ? "Registering..." : "Register"}
+                    </Text>
+                  </LinearGradient>
+                </Pressable>
+              </View>
+            </ScrollView>
+          </Glass>
+        </KeyboardAvoidingView>
       </ModalFrame>
     </>
   );
@@ -733,57 +934,95 @@ export default function RegisterScreen() {
   const insets = useSafeAreaInsets();
 
   const [selected, setSelected] = useState<Category | null>(null);
-  const selectedModule = useMemo(() => MODULES.find((m) => m.key === selected) ?? null, [selected]);
+  const selectedModule = useMemo(
+    () => MODULES.find((m) => m.key === selected) ?? null,
+    [selected],
+  );
 
   return (
-    <View style={{ flex: 1, backgroundColor: "black", position: "relative" }}>
+    <View className="flex-1 bg-black relative">
       <LinearGradient
-        colors={["rgba(14,165,233,0.20)", "rgba(0,0,0,0.88)", "rgba(0,0,0,0.96)"]}
+        colors={[
+          "rgba(14,165,233,0.20)",
+          "rgba(0,0,0,0.88)",
+          "rgba(0,0,0,0.96)",
+        ]}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
-        style={{ position: "absolute", inset: 0 }}
+        className="absolute inset-0"
       />
 
-      <RegisterModal open={!!selected} onClose={() => setSelected(null)} module={selectedModule} />
+      <RegisterModal
+        open={!!selected}
+        onClose={() => setSelected(null)}
+        module={selectedModule}
+      />
 
-      <SafeAreaView style={{ flex: 1, paddingTop: Math.max(8, insets.top * 0.25) }}>
+      <SafeAreaView
+        className="flex-1"
+        style={{
+          paddingTop: Math.max(8, insets.top * 0.25),
+          paddingBottom: Math.max(12, insets.bottom + 12),
+        }}
+      >
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 22 }}
+          contentContainerStyle={{
+            paddingBottom: Math.max(24, insets.bottom + 24),
+          }}
         >
-          <View style={{ marginBottom: 12 }}>
-            <Pressable
-              onPress={() => router.back()}
-              style={{ flexDirection: "row", alignItems: "center", alignSelf: "flex-start", paddingVertical: 6, paddingRight: 10 }}
-              hitSlop={10}
-            >
-              <Ionicons name="chevron-back" size={20} color="#cbd5e1" />
-              <Text style={{ color: "#e2e8f0", fontSize: 13, marginLeft: 4, fontWeight: "700" }}>Back</Text>
-            </Pressable>
+          <View className="px-5 pt-2 pb-6">
+            <View className="mb-3">
+              <Pressable
+                onPress={() => router.back()}
+                className="flex-row items-center self-start py-1.5 pr-2.5"
+                hitSlop={10}
+              >
+                <Ionicons name="chevron-back" size={20} color="#cbd5e1" />
+                <Text className="text-slate-200 text-[13px] ml-1 font-bold">
+                  Back
+                </Text>
+              </Pressable>
 
-            <Text style={{ color: "white", fontSize: 26, fontWeight: "900", marginTop: 8 }}>Create Account</Text>
-            <Text style={{ color: "#cbd5e1", fontSize: 12, marginTop: 8 }}>Select your module to register.</Text>
-          </View>
-
-          <View style={{ gap: 14 }}>
-            {MODULES.map((m) => (
-              <ModuleCard
-                key={m.key}
-                title={m.title}
-                subtitle={m.subtitle}
-                accent={m.accent}
-                icon={m.icon}
-                onPress={() => setSelected(m.key)}
-              />
-            ))}
-          </View>
-
-          <View style={{ alignItems: "center", marginTop: 18 }}>
-            <Pressable onPress={() => router.replace("/(auth)/login")}>
-              <Text style={{ color: "#cbd5e1", fontSize: 11 }}>
-                Already have an account? <Text style={{ color: "#7dd3fc", fontWeight: "800" }}>Sign in</Text>
+              <Text className="text-white text-[26px] font-black mt-2">
+                Create Account
               </Text>
-            </Pressable>
+              <Text className="text-slate-300 text-xs mt-2">
+                Select your module to register.
+              </Text>
+            </View>
+
+            <View>
+              {MODULES.map((m, idx) => (
+                <View
+                  key={m.key}
+                  className={idx === MODULES.length - 1 ? "" : "mb-3.5"}
+                >
+                  <ModuleCard
+                    title={m.title}
+                    subtitle={m.subtitle}
+                    accent={m.accent}
+                    icon={m.icon}
+                    onPress={() => setSelected(m.key)}
+                  />
+                </View>
+              ))}
+            </View>
+
+            <View className="mt-5 pb-6 px-2">
+              <Pressable
+                onPress={() => router.replace("/(auth)/login")}
+                hitSlop={10}
+                className="w-full"
+              >
+                <Text className="w-full text-slate-300 text-[11px] leading-5 text-center">
+                  Already have an account?{" "}
+                  <Text className="text-sky-300 font-extrabold">
+                    {"Sign\u00A0in"}
+                  </Text>
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </ScrollView>
       </SafeAreaView>

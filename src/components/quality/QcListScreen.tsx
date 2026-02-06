@@ -1,3 +1,4 @@
+// src/components/quality/QcListScreen.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -5,7 +6,6 @@ import {
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
   Alert,
   Modal,
@@ -14,8 +14,9 @@ import {
 import {
   getQcFillQueue,
   removeQcFillById,
-  upsertQcFillDraft,
   type QcFillQueuedItem,
+  deriveTabFromPayload,
+  type TabStatus as QueueTabStatus,
 } from "../../utils/qcFillQueue";
 
 import { FullRow, TwoColRow, type Division, type Lang } from "./QualityUI";
@@ -25,12 +26,13 @@ export type TabStatus = "pending" | "checked" | "rejected";
 type ListItem = {
   id: string;
   qrCode: string;
-  createdAt: number; // display time
-  eventAt: number; // actual filter time (createdAt / syncedAt)
+  createdAt: number;
+  eventAt: number;
   synced: boolean;
   payload: any;
   lastError?: string;
   syncedAt?: number;
+  tab: QueueTabStatus;
 };
 
 function upper(v: any) {
@@ -50,7 +52,6 @@ function toYmdLocal(ts: number): string {
 }
 
 function formatDmy(ymd: string): string {
-  // ymd: YYYY-MM-DD -> DD-MM-YYYY
   const [y, m, d] = String(ymd || "").split("-");
   if (!y || !m || !d) return ymd;
   return `${d}-${m}-${y}`;
@@ -67,21 +68,6 @@ function getQcResult(p: any) {
   return upper(v);
 }
 
-function isRejected(p: any) {
-  const r = getQcResult(p);
-  return r === "REJECT" || r === "REJECTED" || !!p?.reject_reason;
-}
-
-// ✅ Checked means "submitted to server" AND not rejected
-function isChecked(p: any, synced: boolean) {
-  return !!synced && !isRejected(p);
-}
-
-// ✅ Pending means "not submitted to server yet" (editable/deletable)
-function isPending(_p: any, synced: boolean) {
-  return !synced;
-}
-
 function getImages(p: any): string[] {
   const imgs =
     p?.inspection_images ||
@@ -89,50 +75,43 @@ function getImages(p: any): string[] {
     p?.pond_condition_images ||
     p?.images ||
     [];
-  return Array.isArray(imgs) ? imgs : [];
+  return Array.isArray(imgs) ? imgs.filter(Boolean) : [];
 }
 
-/** ===== Render all form fields safely ===== */
 const HIDE_KEYS = new Set([
-  // meta / internal
   "_local",
   "server_qr",
   "raw",
   "data",
   "qr",
   "updatedQr",
-
-  // ids shown elsewhere or not useful in UI
   "checker_code",
   "checkerCode",
   "quality_checker_id",
   "qualityCheckerId",
-
-  // division/result shown already
   "division",
   "qc_result",
   "qcResult",
   "qc_status",
   "qcStatus",
   "status",
-
-  // images shown separately
   "crate_images",
   "inspection_images",
   "pond_images",
   "pond_condition_images",
   "images",
 
-  // (you said keep it, so NOT hiding is_damaged)
-  // "is_damaged",
-  // "isDamaged",
+  // ✅ hide inspected time field coming from payload
+  "inspected_at",
+  "inspectedAt",
+  "inspected_at_time",
+  "inspectedAtTime",
+  "inspected at",
 ]);
 
 function isUriLike(s: string) {
   const v = String(s || "");
-  return (
-    v.startsWith("file:") || v.startsWith("content:") || v.startsWith("http")
-  );
+  return v.startsWith("file:") || v.startsWith("content:") || v.startsWith("http");
 }
 
 function formatValue(v: any): string {
@@ -143,10 +122,8 @@ function formatValue(v: any): string {
 
   if (Array.isArray(v)) {
     if (v.length === 0) return "—";
-    if (v.every((x) => typeof x === "string" && isUriLike(x)))
-      return `${v.length} file(s)`;
-    if (v.length <= 8 && v.every((x) => typeof x !== "object"))
-      return v.map(String).join(", ");
+    if (v.every((x) => typeof x === "string" && isUriLike(x))) return `${v.length} file(s)`;
+    if (v.length <= 8 && v.every((x) => typeof x !== "object")) return v.map(String).join(", ");
     return JSON.stringify(v);
   }
 
@@ -181,7 +158,6 @@ function getFormEntries(payload: any): Array<{ label: string; value: string }> {
 
 function renderTwoCol(entries: Array<{ label: string; value: string }>) {
   const rows: React.ReactNode[] = [];
-
   for (let i = 0; i < entries.length; i += 2) {
     const left = entries[i];
     const right = entries[i + 1];
@@ -195,19 +171,13 @@ function renderTwoCol(entries: Array<{ label: string; value: string }>) {
         />
       );
     } else {
-      rows.push(
-        <FullRow
-          key={`${left.label}_${i}`}
-          label={left.label}
-          value={left.value}
-        />
-      );
+      rows.push(<FullRow key={`${left.label}_${i}`} label={left.label} value={left.value} />);
     }
   }
   return rows;
 }
 
-/* ================= CALENDAR (no dependency) ================= */
+/* ================= CALENDAR ================= */
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function ymdToDate(ymd: string): Date {
@@ -215,23 +185,45 @@ function ymdToDate(ymd: string): Date {
   if (!y || !m || !d) return new Date();
   return new Date(y, m - 1, d);
 }
-
 function monthStart(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), 1);
 }
-
 function daysInMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
 }
-
 function addMonths(d: Date, delta: number) {
   return new Date(d.getFullYear(), d.getMonth() + delta, 1);
 }
-
 function fmtMonthTitle(d: Date) {
   const m = d.toLocaleString(undefined, { month: "long" });
   return `${m} ${d.getFullYear()}`;
 }
+
+const CAL = {
+  overlay: "rgba(0,0,0,0.70)",
+  cardBg: "#0b1630",
+  cardTop: "rgba(255,255,255,0.04)",
+  border: "rgba(255,255,255,0.10)",
+  textSoft: "rgba(255,255,255,0.55)",
+
+  btnBg: "rgba(255,255,255,0.07)",
+  btnBorder: "rgba(255,255,255,0.12)",
+
+  dayBg: "rgba(255,255,255,0.06)",
+  dayBorder: "rgba(255,255,255,0.10)",
+
+  selBg: "rgba(59,130,246,0.35)",
+  selBorder: "rgba(59,130,246,0.70)",
+
+  todayBorder: "rgba(34,197,94,0.85)",
+  markDot: "rgba(255,255,255,0.70)",
+
+  primaryBtnBg: "rgba(59,130,246,0.25)",
+  primaryBtnBorder: "rgba(59,130,246,0.35)",
+
+  okBg: "rgba(34,197,94,0.18)",
+  okBorder: "rgba(34,197,94,0.35)",
+};
 
 export default function QcListScreen({
   division,
@@ -239,80 +231,85 @@ export default function QcListScreen({
   status,
   selectedDate,
   onChangeDate,
+  onEditItem,
 }: {
   division: Division;
   lang: Lang;
   status: TabStatus;
 
-  // ✅ calendar props from parent
   selectedDate: string; // YYYY-MM-DD
   onChangeDate: (ymd: string) => void;
+
+  onEditItem?: (draft: { qrCode: string; payload: any }) => void;
 }) {
   const [items, setItems] = useState<ListItem[]>([]);
   const [loading, setLoading] = useState(false);
-
-  // ✅ selected item shown inline (no modal)
   const [selected, setSelected] = useState<ListItem | null>(null);
 
-  // ✅ edit state (only for pending)
-  const [editMode, setEditMode] = useState(false);
-  const [editResult, setEditResult] = useState("");
-  const [editRemarks, setEditRemarks] = useState("");
+  const [markedDays, setMarkedDays] = useState<Record<string, number>>({});
 
-  // ✅ calendar modal
   const [calOpen, setCalOpen] = useState(false);
-  const [calMonth, setCalMonth] = useState<Date>(() =>
-    monthStart(ymdToDate(selectedDate))
-  );
+  const [calMonth, setCalMonth] = useState<Date>(() => monthStart(ymdToDate(selectedDate)));
 
-  // keep month view in sync when selectedDate changes
   useEffect(() => {
     setCalMonth(monthStart(ymdToDate(selectedDate)));
   }, [selectedDate]);
+
+  const todayYmd = useMemo(() => toYmdLocal(Date.now()), []);
+  const todayMonthStart = useMemo(() => monthStart(new Date()), []);
 
   const load = async () => {
     try {
       setLoading(true);
       const q = await getQcFillQueue();
-
       const ymd = String(selectedDate || "").trim();
 
-      const list = (q as QcFillQueuedItem[])
+      const base = (q as QcFillQueuedItem[])
         .filter((x) => upper(x.payload?.division) === upper(division))
         .filter((x) => {
-          const p = x.payload;
-          if (status === "checked") return isChecked(p, x.synced);
-          if (status === "rejected") return !!x.synced && isRejected(p);
-          return isPending(p, x.synced);
-        })
-        // ✅ Date filter here
+          const tab = deriveTabFromPayload(x.payload);
+          if (status === "checked") return tab === "checked";
+          if (status === "rejected") return tab === "rejected";
+          return tab === "pending";
+        });
+
+      const perDay: Record<string, number> = {};
+      base.forEach((x) => {
+        const eventAt = (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
+        const k = toYmdLocal(eventAt);
+        perDay[k] = (perDay[k] || 0) + 1;
+      });
+      setMarkedDays(perDay);
+
+      const list = base
         .filter((x) => {
           if (!ymd) return true;
-          const t = x.synced ? x.syncedAt || x.createdAt : x.createdAt;
-          return toYmdLocal(t) === ymd;
+          const eventAt = (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
+          return toYmdLocal(eventAt) === ymd;
         })
-        .sort(
-          (a, b) => (b.syncedAt || b.createdAt) - (a.syncedAt || a.createdAt)
-        )
+        .sort((a, b) => {
+          const aT = (a.synced ? a.syncedAt : undefined) || a.updatedAt || a.createdAt || 0;
+          const bT = (b.synced ? b.syncedAt : undefined) || b.updatedAt || b.createdAt || 0;
+          return bT - aT;
+        })
         .map((x) => {
-          const eventAt = x.synced ? x.syncedAt || x.createdAt : x.createdAt;
+          const eventAt = (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
 
           return {
             id: x.id,
             qrCode: x.qrCode,
-            createdAt: eventAt, // display
+            createdAt: eventAt,
             eventAt,
             synced: x.synced,
             syncedAt: x.syncedAt,
             payload: x.payload,
-            lastError:
-              (x as any)?.lastError || (x as any)?.payload?._local?.last_error,
+            tab: deriveTabFromPayload(x.payload),
+            lastError: (x as any)?.lastError || (x as any)?.payload?._local?.last_error,
           };
         });
 
       setItems(list);
 
-      // if selected no longer exists, close details
       if (selected) {
         const still = list.find((i) => i.id === selected.id);
         if (!still) setSelected(null);
@@ -327,49 +324,11 @@ export default function QcListScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [division, status, selectedDate]);
 
-  // preload edit values when selecting
-  useEffect(() => {
-    if (!selected) return;
-    setEditMode(false);
-    setEditResult(getQcResult(selected.payload) || "");
-    setEditRemarks(
-      String(selected.payload?.remarks || selected.payload?.qc_remarks || "")
-    );
-  }, [selected]);
-
-  const onDelete = async () => {
+  const onDeleteSelected = async () => {
     if (!selected) return;
     await removeQcFillById(selected.id);
     setSelected(null);
-    setEditMode(false);
     await load();
-  };
-
-  const onSaveEdit = async () => {
-    if (!selected) return;
-
-    if (status !== "pending" || selected.synced) return;
-
-    const nextPayload = {
-      ...(selected.payload || {}),
-      qc_result: upper(editResult || selected.payload?.qc_result),
-      remarks: editRemarks,
-      division,
-      _local: {
-        ...(selected.payload?._local || {}),
-        last_error: null,
-        last_error_at: null,
-      },
-    };
-
-    try {
-      await upsertQcFillDraft(selected.qrCode, nextPayload);
-      setSelected(null);
-      setEditMode(false);
-      await load();
-    } catch (e: any) {
-      Alert.alert("Edit failed", String(e?.message || e || "Failed"));
-    }
   };
 
   const title = useMemo(() => {
@@ -378,46 +337,32 @@ export default function QcListScreen({
     return "Pending Inspections";
   }, [status]);
 
-  const formEntries = useMemo(() => {
-    return selected ? getFormEntries(selected.payload) : [];
-  }, [selected]);
+  const formEntries = useMemo(() => (selected ? getFormEntries(selected.payload) : []), [selected]);
 
-  // calendar grid
   const calCells = useMemo(() => {
     const start = monthStart(calMonth);
     const total = daysInMonth(start);
-    const firstDow = start.getDay(); // 0..6
+    const firstDow = start.getDay();
     const cells: Array<{ day?: number; ymd?: string }> = [];
 
-    // blanks
     for (let i = 0; i < firstDow; i++) cells.push({});
-
-    // days
     for (let d = 1; d <= total; d++) {
       const dt = new Date(start.getFullYear(), start.getMonth(), d);
       cells.push({ day: d, ymd: toYmdLocal(dt.getTime()) });
     }
-
-    // pad to full weeks
     while (cells.length % 7 !== 0) cells.push({});
-
     return cells;
   }, [calMonth]);
 
+  const canGoNextMonth = useMemo(() => {
+    const next = monthStart(addMonths(calMonth, 1));
+    return next.getTime() <= todayMonthStart.getTime();
+  }, [calMonth, todayMonthStart]);
+
   return (
     <View style={{ marginTop: 12, flex: 1 }}>
-      {/* ✅ Title left + Calendar right */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 10,
-        }}
-      >
-        <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>
-          {title}
-        </Text>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>{title}</Text>
 
         <Pressable
           onPress={() => setCalOpen(true)}
@@ -430,9 +375,7 @@ export default function QcListScreen({
             borderColor: "rgba(255,255,255,0.10)",
           }}
         >
-          <Text style={{ color: "white", fontWeight: "900" }}>
-            {formatDmy(selectedDate)}
-          </Text>
+          <Text style={{ color: "white", fontWeight: "900" }}>{formatDmy(selectedDate)}</Text>
         </Pressable>
       </View>
 
@@ -444,65 +387,44 @@ export default function QcListScreen({
         </Text>
       )}
 
-      <ScrollView
-        style={{ marginTop: 12 }}
-        contentContainerStyle={{ paddingBottom: 30 }}
-      >
+      <ScrollView style={{ marginTop: 12 }} contentContainerStyle={{ paddingBottom: 30 }}>
         {items.map((it) => {
           const active = selected?.id === it.id;
+          const allowEditDelete = it.tab === "pending";
 
           return (
             <View key={it.id} style={{ marginBottom: 10 }}>
               <Pressable
-                onPress={() => {
-                  if (active) setSelected(null);
-                  else setSelected(it);
-                }}
+                onPress={() => setSelected(active ? null : it)}
                 style={{
                   padding: 14,
                   borderRadius: 18,
-                  backgroundColor: active
-                    ? "rgba(59,130,246,0.15)"
-                    : "rgba(255,255,255,0.06)",
+                  backgroundColor: active ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.06)",
                   borderWidth: 1,
-                  borderColor: active
-                    ? "rgba(59,130,246,0.45)"
-                    : "rgba(255,255,255,0.10)",
+                  borderColor: active ? "rgba(59,130,246,0.45)" : "rgba(255,255,255,0.10)",
                 }}
               >
-                <Text style={{ color: "white", fontWeight: "900" }}>
-                  {it.qrCode}
-                </Text>
+                <Text style={{ color: "white", fontWeight: "900" }}>{it.qrCode}</Text>
 
                 <Text style={{ color: "rgba(255,255,255,0.65)", marginTop: 4 }}>
                   Result: {getQcResult(it.payload) || "—"}
                 </Text>
 
-                {!!it.lastError && !it.synced && (
-                  <Text
-                    style={{ color: "rgba(255,120,120,0.85)", marginTop: 4 }}
-                  >
+                {!!it.lastError && (
+                  <Text style={{ color: "rgba(255,120,120,0.85)", marginTop: 4 }}>
                     Error: {it.lastError}
                   </Text>
                 )}
 
                 <Text style={{ color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
-                  {it.synced ? "Submitted" : "Saved"}:{" "}
-                  {new Date(it.createdAt).toLocaleString()}
+                  {it.synced ? "Submitted" : "Saved"}: {new Date(it.createdAt).toLocaleString()}
                 </Text>
 
-                <Text
-                  style={{
-                    color: "rgba(255,255,255,0.45)",
-                    marginTop: 8,
-                    fontWeight: "800",
-                  }}
-                >
+                <Text style={{ color: "rgba(255,255,255,0.45)", marginTop: 8, fontWeight: "800" }}>
                   {active ? "Tap to hide details ▲" : "Tap to view details ▼"}
                 </Text>
               </Pressable>
 
-              {/* ✅ INLINE DETAILS (no modal) */}
               {active && (
                 <View
                   style={{
@@ -516,55 +438,33 @@ export default function QcListScreen({
                 >
                   <TwoColRow
                     left={{ label: "Division", value: division }}
-                    right={{
-                      label: "Result",
-                      value: getQcResult(it.payload) || "—",
-                    }}
+                    right={{ label: "Result", value: getQcResult(it.payload) || "—" }}
                   />
 
                   <TwoColRow
                     left={{
                       label: "QC Status",
-                      value: String(
-                        it.payload?.qc_status || it.payload?.qcStatus || "—"
-                      ),
+                      value: String(it.payload?.qc_status || it.payload?.qcStatus || "—"),
                     }}
                     right={{
                       label: "Sync",
-                      value: it.synced ? "Submitted" : "Pending",
+                      value: it.synced ? "Submitted" : "Local Draft",
                     }}
                   />
 
-                  <FullRow
-                    label="Remarks"
-                    value={it.payload?.remarks || it.payload?.qc_remarks || "—"}
-                  />
+                  <FullRow label="Remarks" value={it.payload?.remarks || it.payload?.qc_remarks || "—"} />
 
-                  {/* ✅ FORM DETAILS: ALL side-by-side */}
                   <View style={{ marginTop: 12 }}>
-                    <Text
-                      style={{
-                        color: "rgba(255,255,255,0.9)",
-                        fontWeight: "900",
-                        fontSize: 15,
-                      }}
-                    >
+                    <Text style={{ color: "rgba(255,255,255,0.9)", fontWeight: "900", fontSize: 15 }}>
                       Form Details
                     </Text>
 
                     {formEntries.length === 0 ? (
-                      <Text
-                        style={{
-                          color: "rgba(255,255,255,0.55)",
-                          marginTop: 8,
-                        }}
-                      >
+                      <Text style={{ color: "rgba(255,255,255,0.55)", marginTop: 8 }}>
                         No extra fields found in payload.
                       </Text>
                     ) : (
-                      <View style={{ marginTop: 6 }}>
-                        {renderTwoCol(formEntries)}
-                      </View>
+                      <View style={{ marginTop: 6 }}>{renderTwoCol(formEntries)}</View>
                     )}
                   </View>
 
@@ -574,144 +474,36 @@ export default function QcListScreen({
                         <Image
                           key={uri}
                           source={{ uri }}
-                          style={{
-                            width: 140,
-                            height: 110,
-                            borderRadius: 14,
-                            marginRight: 10,
-                          }}
+                          style={{ width: 140, height: 110, borderRadius: 14, marginRight: 10 }}
                         />
                       ))}
                     </ScrollView>
                   )}
 
-                  {/* ✅ ONLY FOR PENDING (inline edit/delete) */}
-                  {status === "pending" && !it.synced && (
+                  {allowEditDelete && (
                     <>
-                      {!editMode ? (
-                        <Pressable
-                          onPress={() => setEditMode(true)}
-                          style={{
-                            marginTop: 14,
-                            padding: 14,
-                            borderRadius: 14,
-                            backgroundColor: "#2563EB",
-                            alignItems: "center",
-                          }}
-                        >
-                          <Text style={{ color: "white", fontWeight: "900" }}>
-                            Edit
-                          </Text>
-                        </Pressable>
-                      ) : (
-                        <View
-                          style={{
-                            marginTop: 14,
-                            padding: 12,
-                            borderRadius: 14,
-                            borderWidth: 1,
-                            borderColor: "rgba(255,255,255,0.10)",
-                            backgroundColor: "rgba(255,255,255,0.06)",
-                          }}
-                        >
-                          <Text
-                            style={{
-                              color: "rgba(255,255,255,0.8)",
-                              fontWeight: "900",
-                            }}
-                          >
-                            Edit Pending
-                          </Text>
-
-                          <Text
-                            style={{
-                              color: "rgba(255,255,255,0.65)",
-                              marginTop: 10,
-                            }}
-                          >
-                            Result (PASS / HOLD / REJECT)
-                          </Text>
-                          <TextInput
-                            value={editResult}
-                            onChangeText={setEditResult}
-                            placeholder="PASS"
-                            placeholderTextColor="rgba(255,255,255,0.35)"
-                            autoCapitalize="characters"
-                            style={{
-                              marginTop: 6,
-                              borderRadius: 12,
-                              paddingHorizontal: 12,
-                              paddingVertical: 10,
-                              backgroundColor: "rgba(0,0,0,0.35)",
-                              borderWidth: 1,
-                              borderColor: "rgba(255,255,255,0.12)",
-                              color: "white",
-                              fontWeight: "900",
-                            }}
-                          />
-
-                          <Text
-                            style={{
-                              color: "rgba(255,255,255,0.65)",
-                              marginTop: 10,
-                            }}
-                          >
-                            Remarks
-                          </Text>
-                          <TextInput
-                            value={editRemarks}
-                            onChangeText={setEditRemarks}
-                            placeholder="Remarks"
-                            placeholderTextColor="rgba(255,255,255,0.35)"
-                            multiline
-                            style={{
-                              marginTop: 6,
-                              borderRadius: 12,
-                              paddingHorizontal: 12,
-                              paddingVertical: 10,
-                              minHeight: 80,
-                              backgroundColor: "rgba(0,0,0,0.35)",
-                              borderWidth: 1,
-                              borderColor: "rgba(255,255,255,0.12)",
-                              color: "white",
-                              fontWeight: "800",
-                            }}
-                          />
-
-                          <Pressable
-                            onPress={onSaveEdit}
-                            style={{
-                              marginTop: 12,
-                              padding: 14,
-                              borderRadius: 14,
-                              backgroundColor: "#16A34A",
-                              alignItems: "center",
-                            }}
-                          >
-                            <Text style={{ color: "white", fontWeight: "900" }}>
-                              Save
-                            </Text>
-                          </Pressable>
-
-                          <Pressable
-                            onPress={() => setEditMode(false)}
-                            style={{
-                              marginTop: 10,
-                              padding: 12,
-                              borderRadius: 14,
-                              backgroundColor: "rgba(255,255,255,0.08)",
-                              alignItems: "center",
-                            }}
-                          >
-                            <Text style={{ color: "white", fontWeight: "900" }}>
-                              Cancel
-                            </Text>
-                          </Pressable>
-                        </View>
-                      )}
+                      <Pressable
+                        onPress={() => {
+                          if (!onEditItem) {
+                            Alert.alert("Edit not wired", "onEditItem prop missing");
+                            return;
+                          }
+                          setSelected(null);
+                          onEditItem({ qrCode: it.qrCode, payload: it.payload });
+                        }}
+                        style={{
+                          marginTop: 14,
+                          padding: 14,
+                          borderRadius: 14,
+                          backgroundColor: "#2563EB",
+                          alignItems: "center",
+                        }}
+                      >
+                        <Text style={{ color: "white", fontWeight: "900" }}>Edit (Open Form)</Text>
+                      </Pressable>
 
                       <Pressable
-                        onPress={onDelete}
+                        onPress={onDeleteSelected}
                         style={{
                           marginTop: 10,
                           padding: 14,
@@ -720,9 +512,7 @@ export default function QcListScreen({
                           alignItems: "center",
                         }}
                       >
-                        <Text style={{ color: "white", fontWeight: "900" }}>
-                          Delete
-                        </Text>
+                        <Text style={{ color: "white", fontWeight: "900" }}>Delete</Text>
                       </Pressable>
                     </>
                   )}
@@ -733,153 +523,238 @@ export default function QcListScreen({
         })}
       </ScrollView>
 
-      {/* ================= CALENDAR MODAL ================= */}
-      <Modal visible={calOpen} transparent animationType="fade">
+      {/* ✅ Center Calendar Modal */}
+      <Modal visible={calOpen} transparent animationType="fade" onRequestClose={() => setCalOpen(false)}>
         <View
           style={{
             flex: 1,
-            backgroundColor: "rgba(0,0,0,0.65)",
+            backgroundColor: CAL.overlay,
+            alignItems: "center",
             justifyContent: "center",
             padding: 16,
           }}
         >
+          <Pressable
+            onPress={() => setCalOpen(false)}
+            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+          />
+
           <View
             style={{
-              backgroundColor: "#0b1630",
+              width: "100%",
+              maxWidth: 420,
               borderRadius: 22,
-              padding: 14,
+              overflow: "hidden",
+              backgroundColor: CAL.cardBg,
               borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.10)",
+              borderColor: CAL.border,
+              shadowColor: "#000",
+              shadowOpacity: 0.35,
+              shadowRadius: 18,
+              shadowOffset: { width: 0, height: 10 },
+              elevation: 18,
             }}
           >
-            {/* Header */}
             <View
               style={{
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+                backgroundColor: CAL.cardTop,
+                borderBottomWidth: 1,
+                borderBottomColor: "rgba(255,255,255,0.08)",
                 flexDirection: "row",
                 alignItems: "center",
                 justifyContent: "space-between",
-                gap: 10,
+                gap: 12,
               }}
             >
-              <Pressable
-                onPress={() => setCalMonth((p) => addMonths(p, -1))}
-                style={{
-                  paddingHorizontal: 12,
-                  paddingVertical: 8,
-                  borderRadius: 14,
-                  backgroundColor: "rgba(255,255,255,0.06)",
-                  borderWidth: 1,
-                  borderColor: "rgba(255,255,255,0.10)",
-                }}
-              >
-                <Text style={{ color: "white", fontWeight: "900" }}>‹</Text>
-              </Pressable>
-
-              <Text style={{ color: "white", fontWeight: "900", fontSize: 16 }}>
-                {fmtMonthTitle(calMonth)}
-              </Text>
-
-              <Pressable
-                onPress={() => setCalMonth((p) => addMonths(p, 1))}
-                style={{
-                  paddingHorizontal: 12,
-                  paddingVertical: 8,
-                  borderRadius: 14,
-                  backgroundColor: "rgba(255,255,255,0.06)",
-                  borderWidth: 1,
-                  borderColor: "rgba(255,255,255,0.10)",
-                }}
-              >
-                <Text style={{ color: "white", fontWeight: "900" }}>›</Text>
-              </Pressable>
-            </View>
-
-            {/* DOW */}
-            <View style={{ flexDirection: "row", marginTop: 12 }}>
-              {DOW.map((d) => (
-                <View key={d} style={{ flex: 1, alignItems: "center" }}>
-                  <Text style={{ color: "rgba(255,255,255,0.55)", fontWeight: "900" }}>
-                    {d}
-                  </Text>
-                </View>
-              ))}
-            </View>
-
-            {/* Grid */}
-            <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 8 }}>
-              {calCells.map((c, idx) => {
-                const isSel = !!c.ymd && c.ymd === selectedDate;
-                return (
-                  <View key={idx} style={{ width: "14.2857%", padding: 4 }}>
-                    {c.day ? (
-                      <Pressable
-                        onPress={() => {
-                          if (!c.ymd) return;
-                          onChangeDate(c.ymd);
-                          setCalOpen(false);
-                        }}
-                        style={{
-                          height: 40,
-                          borderRadius: 12,
-                          alignItems: "center",
-                          justifyContent: "center",
-                          backgroundColor: isSel
-                            ? "rgba(59,130,246,0.35)"
-                            : "rgba(255,255,255,0.06)",
-                          borderWidth: 1,
-                          borderColor: isSel
-                            ? "rgba(59,130,246,0.60)"
-                            : "rgba(255,255,255,0.10)",
-                        }}
-                      >
-                        <Text style={{ color: "white", fontWeight: "900" }}>
-                          {c.day}
-                        </Text>
-                      </Pressable>
-                    ) : (
-                      <View style={{ height: 40 }} />
-                    )}
-                  </View>
-                );
-              })}
-            </View>
-
-            {/* Footer */}
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
-              <Pressable
-                onPress={() => {
-                  const now = new Date();
-                  const ymd = toYmdLocal(now.getTime());
-                  onChangeDate(ymd);
-                  setCalOpen(false);
-                }}
-                style={{
-                  flex: 1,
-                  paddingVertical: 12,
-                  borderRadius: 14,
-                  backgroundColor: "rgba(34,197,94,0.20)",
-                  borderWidth: 1,
-                  borderColor: "rgba(34,197,94,0.35)",
-                  alignItems: "center",
-                }}
-              >
-                <Text style={{ color: "white", fontWeight: "900" }}>Today</Text>
-              </Pressable>
+              <View>
+                <Text style={{ color: "white", fontWeight: "900", fontSize: 16 }}>Select Date</Text>
+                <Text style={{ color: CAL.textSoft, fontWeight: "800", marginTop: 2 }}>
+                  Selected: {formatDmy(selectedDate)}
+                </Text>
+              </View>
 
               <Pressable
                 onPress={() => setCalOpen(false)}
                 style={{
-                  flex: 1,
-                  paddingVertical: 12,
-                  borderRadius: 14,
-                  backgroundColor: "rgba(255,255,255,0.08)",
+                  width: 38,
+                  height: 38,
+                  borderRadius: 12,
+                  backgroundColor: CAL.btnBg,
                   borderWidth: 1,
-                  borderColor: "rgba(255,255,255,0.10)",
+                  borderColor: CAL.btnBorder,
                   alignItems: "center",
+                  justifyContent: "center",
                 }}
+                hitSlop={10}
               >
-                <Text style={{ color: "white", fontWeight: "900" }}>Close</Text>
+                <Text style={{ color: "white", fontWeight: "900", fontSize: 16 }}>✕</Text>
               </Pressable>
+            </View>
+
+            <View style={{ padding: 14 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <Pressable
+                  onPress={() => setCalMonth((p) => addMonths(p, -1))}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 14,
+                    backgroundColor: CAL.btnBg,
+                    borderWidth: 1,
+                    borderColor: CAL.btnBorder,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                  hitSlop={10}
+                >
+                  <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>‹</Text>
+                </Pressable>
+
+                <View style={{ alignItems: "center" }}>
+                  <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>
+                    {fmtMonthTitle(calMonth)}
+                  </Text>
+                </View>
+
+                <Pressable
+                  onPress={() => {
+                    if (!canGoNextMonth) {
+                      Alert.alert("Locked", "Future dates are locked.");
+                      return;
+                    }
+                    setCalMonth((p) => addMonths(p, 1));
+                  }}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 14,
+                    backgroundColor: CAL.btnBg,
+                    borderWidth: 1,
+                    borderColor: CAL.btnBorder,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: canGoNextMonth ? 1 : 0.35,
+                  }}
+                  hitSlop={10}
+                >
+                  <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>›</Text>
+                </Pressable>
+              </View>
+
+              <View style={{ flexDirection: "row", marginTop: 14 }}>
+                {DOW.map((d) => (
+                  <View key={d} style={{ flex: 1, alignItems: "center" }}>
+                    <Text style={{ color: CAL.textSoft, fontWeight: "900", fontSize: 12 }}>
+                      {d.toUpperCase()}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
+              <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 10 }}>
+                {calCells.map((c, idx) => {
+                  const isSel = !!c.ymd && c.ymd === selectedDate;
+                  const isToday = !!c.ymd && c.ymd === todayYmd;
+                  const count = c.ymd ? (markedDays[c.ymd] || 0) : 0;
+                  const isFuture = !!c.ymd && c.ymd > todayYmd;
+
+                  return (
+                    <View key={idx} style={{ width: "14.2857%", padding: 6, opacity: isFuture ? 0.35 : 1 }}>
+                      {c.day ? (
+                        <Pressable
+                          onPress={() => {
+                            if (!c.ymd) return;
+                            if (c.ymd > todayYmd) {
+                              Alert.alert("Locked", "Future dates are locked.");
+                              return;
+                            }
+                            onChangeDate(c.ymd);
+                            setCalOpen(false);
+                          }}
+                          style={{
+                            width: "100%",
+                            aspectRatio: 1,
+                            borderRadius: 999,
+                            alignItems: "center",
+                            justifyContent: "center",
+                            backgroundColor: isSel ? CAL.selBg : CAL.dayBg,
+                            borderWidth: 1.2,
+                            borderColor: isSel ? CAL.selBorder : isToday ? CAL.todayBorder : CAL.dayBorder,
+                          }}
+                          hitSlop={10}
+                        >
+                          <Text style={{ color: "white", fontWeight: "900", fontSize: 14 }}>{c.day}</Text>
+
+                          {!isSel && count > 0 && (
+                            <View
+                              style={{
+                                position: "absolute",
+                                bottom: 7,
+                                width: 6,
+                                height: 6,
+                                borderRadius: 999,
+                                backgroundColor: CAL.markDot,
+                              }}
+                            />
+                          )}
+
+                          {isToday && !isSel && (
+                            <View
+                              style={{
+                                position: "absolute",
+                                top: 7,
+                                width: 6,
+                                height: 6,
+                                borderRadius: 999,
+                                backgroundColor: "rgba(34,197,94,0.95)",
+                              }}
+                            />
+                          )}
+                        </Pressable>
+                      ) : (
+                        <View style={{ width: "100%", aspectRatio: 1 }} />
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+                <Pressable
+                  onPress={() => {
+                    onChangeDate(todayYmd);
+                    setCalOpen(false);
+                  }}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 12,
+                    borderRadius: 14,
+                    backgroundColor: CAL.okBg,
+                    borderWidth: 1,
+                    borderColor: CAL.okBorder,
+                    alignItems: "center",
+                  }}
+                >
+                  <Text style={{ color: "white", fontWeight: "900" }}>Today</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => setCalOpen(false)}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 12,
+                    borderRadius: 14,
+                    backgroundColor: CAL.primaryBtnBg,
+                    borderWidth: 1,
+                    borderColor: CAL.primaryBtnBorder,
+                    alignItems: "center",
+                  }}
+                >
+                  <Text style={{ color: "white", fontWeight: "900" }}>Close</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         </View>

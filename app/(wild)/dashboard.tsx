@@ -1,4 +1,3 @@
-// app/(wild)/index.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { router } from "expo-router";
 import {
@@ -84,9 +83,10 @@ const i18n = {
     catchLogSub: "Record catch details",
     catchLogVoice: "Tap New Catch Log",
 
-    scanDetails: "Scan & View Details",
-    scanDetailsSub: "Scan QR to view owner, vessel, trip & catch",
-    scanDetailsVoice: "Tap Scan and View Details",
+    // ✅ UPDATED TEXT
+    scanDetails: "Scan & View Catch Log Details",
+    scanDetailsSub: "Scan QR to view catch log details",
+    scanDetailsVoice: "Tap Scan and View Catch Log Details",
 
     trips: "My Trips",
     tripsSub: "View your trips list",
@@ -125,9 +125,10 @@ const i18n = {
     catchLogSub: "மீன் பிடிப்பு விவரங்களை பதிவு",
     catchLogVoice: "புதிய பிடிப்பு பதிவு என்று தட்டுங்கள்",
 
-    scanDetails: "ஸ்கேன் & விவரங்கள்",
-    scanDetailsSub: "QR ஸ்கேன் செய்து உரிமையாளர்/கப்பல்/பயணம்/பிடிப்பு பார்க்கவும்",
-    scanDetailsVoice: "ஸ்கேன் மற்றும் விவரங்கள் என்று தட்டுங்கள்",
+    // ✅ UPDATED TEXT
+    scanDetails: "ஸ்கேன் & பிடிப்பு பதிவு விவரங்கள்",
+    scanDetailsSub: "QR ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்களை பார்க்கவும்",
+    scanDetailsVoice: "ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்கள் பார்க்க தட்டுங்கள்",
 
     trips: "என் பயணங்கள்",
     tripsSub: "பயண பட்டியலை பார்க்கவும்",
@@ -525,8 +526,6 @@ export default function WildDashboard() {
       // 2) Need token to know “who is logged in” and to refresh profile
       const token = await readTokenFromStorage();
       if (!token) {
-        // If we have cache, show it (offline) and don't force login here.
-        // But if no cache, push to login.
         if (!profile && !lastId) {
           setProfileError(t.noToken);
           router.replace("/(auth)/otp" as const);
@@ -547,7 +546,7 @@ export default function WildDashboard() {
       setMe(meData);
       setOwnerDbId(meData.id);
 
-      // 5) Fetch full owner profile (your /owner/fetch has avatar url etc)
+      // 5) Fetch full owner profile
       const ownerData = await fetchOwnerById(meData.id, token);
       setProfile(ownerData);
 
@@ -564,7 +563,6 @@ export default function WildDashboard() {
         return;
       }
 
-      // If online fetch fails but cache exists, keep cache on screen
       if (!profile) setProfileError(e?.message || t.failedProfile);
     } finally {
       setLoadingProfile(false);
@@ -610,7 +608,7 @@ export default function WildDashboard() {
     };
   }, [profile, me, ownerDbId]);
 
-  // Speak once on first open
+  // ✅ UPDATED greeting voice line
   const greeted = useRef(false);
   useEffect(() => {
     if (greeted.current) return;
@@ -620,8 +618,8 @@ export default function WildDashboard() {
       if (AppState.currentState !== "active") return;
       speak(
         lang === "ta"
-          ? "புதிய பயணம். புதிய பிடிப்பு பதிவு. ஸ்கேன் மற்றும் விவரங்கள். என் பயணங்கள்."
-          : "New Trip. New Catch Log. Scan and View Details. My Trips.",
+          ? "புதிய பயணம். புதிய பிடிப்பு பதிவு. ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்கள். என் பயணங்கள்."
+          : "New Trip. New Catch Log. Scan and View Catch Log Details. My Trips.",
         lang
       );
     }, 650);
@@ -723,7 +721,10 @@ export default function WildDashboard() {
             </View>
 
             {!!lastCrateId && (
-              <View className="mt-2 rounded-xl px-3 py-2 border" style={{ backgroundColor: UI.greenSoft, borderColor: "#bfe8cd" }}>
+              <View
+                className="mt-2 rounded-xl px-3 py-2 border"
+                style={{ backgroundColor: UI.greenSoft, borderColor: "#bfe8cd" }}
+              >
                 <Text className="text-sm" style={{ color: UI.text }}>
                   Last Sticker: <Text style={{ fontWeight: "800" }}>{String(lastCrateId)}</Text>
                 </Text>

@@ -4,11 +4,20 @@ export type Trip = {
   id: number;
   trip_id: string;
   fishing_method: string;
-  near_station: string;
+
+  // ✅ should be NAME (string) in DB
+  // backend might return legacy values, so keep flexible
+  near_station: string | number | null;
+
+  // ✅ FK id in DB
+  location_id?: number | null;
+
+  // ✅ NEW: vessel FK id in DB
+  vessel_id?: number | null;
+
   planned_at: string;
   arrival_at: string | null;
 
-  // backend returns strings in response sometimes; keep as string here to be safe
   diesel: string;
   ice: string;
   qr_count: number;
@@ -20,24 +29,41 @@ export type Trip = {
 
   count?: number;
   owner_code?: string;
+
+  // optional join fields (if backend returns)
+  near_station_name?: string;
+  state_id?: number;
+  district_id?: number;
+  state_name?: string;
+  district_name?: string;
 };
 
 export type TripCreatePayload = {
   fishing_method: string;
+
+  // ✅ store NAME here
   near_station: string;
+
+  // ✅ store LOCATION ID here
+  location_id: number;
+
+  // ✅ NEW: send vessel id (optional-safe; UI should send it)
+  vessel_id?: number | null;
+
   planned_at: string;
   arrival_at: string | null;
 
-  // ✅ BACKEND EXPECTS NUMBER
   diesel: number;
   ice: number;
   total: number;
 
   qr_count: number;
-
-  // ✅ REQUIRED
   owner_code: string;
   count: number;
+
+  // OPTIONAL: only if backend expects
+  state_id?: number;
+  district_id?: number;
 };
 
 type ApiWrapped<T> = {
@@ -47,23 +73,18 @@ type ApiWrapped<T> = {
   data?: T;
 };
 
-// ✅ HARDCODED BASE URL (no .env)
+// ✅ HARDCODED BASE URL
 const BASE_URL = "https://rootverse-backend-5qoo.onrender.com";
 
 function baseUrl() {
   return BASE_URL.replace(/\/+$/, "");
 }
-
 function apiUrl(path: string) {
   return `${baseUrl()}${path.startsWith("/") ? "" : "/"}${path}`;
 }
 
 function isWrapped<T>(x: any): x is ApiWrapped<T> {
-  return (
-    x &&
-    typeof x === "object" &&
-    ("success" in x || "data" in x || "message" in x)
-  );
+  return x && typeof x === "object" && ("success" in x || "data" in x || "message" in x);
 }
 
 function unwrapOrThrow<T>(payload: any): T {
@@ -74,15 +95,11 @@ function unwrapOrThrow<T>(payload: any): T {
   }
 
   if (payload.data != null) return payload.data as T;
-
   return payload as T;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const url = apiUrl(path);
-
-  console.log("[tripApi] Request:", init.method || "GET", url);
-  if (init.body) console.log("[tripApi] Body:", init.body);
 
   const res = await fetch(url, {
     ...init,
@@ -97,17 +114,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let json: any = null;
   try {
     json = text ? JSON.parse(text) : null;
-  } catch {
-    // non-json
-  }
+  } catch {}
 
   if (!res.ok) {
     const msg =
       json?.message ||
       json?.error ||
-      (typeof text === "string" && text.trim()
-        ? text
-        : `Request failed (${res.status})`);
+      (typeof text === "string" && text.trim() ? text : `Request failed (${res.status})`);
     throw new Error(msg);
   }
 
@@ -117,11 +130,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 function toStatusPath(status?: string | "ALL") {
   const s = String(status || "").trim();
   if (!s || s.toUpperCase() === "ALL") return null;
-  return s.toLowerCase(); // pending/approved/rejected
+  return s.toLowerCase();
 }
 
 export const tripApi = {
-  // ✅ CREATE
   createTrip: (payload: TripCreatePayload, token?: string) =>
     request<Trip>("/api/trip", {
       method: "POST",
@@ -129,18 +141,12 @@ export const tripApi = {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     }),
 
-  // ✅ LIST ALL
   fetchTrips: (token?: string) =>
     request<Trip[]>("/api/trip", {
       method: "GET",
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     }),
 
-  // ✅ LIST BY OWNER + OPTIONAL STATUS (your tabs: ALL/PENDING/APPROVED/REJECTED)
-  // Tries:
-  //   ALL -> /api/trip/owner/:owner_code
-  //   STATUS -> /api/trip/owner/:owner_code/status/:status
-  // If ALL endpoint is missing in backend, it falls back to merging 3 status calls.
   fetchTripsByOwnerCode: async (
     owner_code: string,
     token?: string,
@@ -157,16 +163,12 @@ export const tripApi = {
       });
     }
 
-    // ALL
     try {
-      return await request<Trip[]>(`/api/trip/owner/${oc}`, {
-        method: "GET",
-        headers,
-      });
-    } catch (e) {
-      // fallback: merge 3 status endpoints
+      return await request<Trip[]>(`/api/trip/owner/${oc}`, { method: "GET", headers });
+    } catch {
       const statuses = ["pending", "approved", "rejected"];
       const all: Trip[] = [];
+
       for (const s of statuses) {
         try {
           const part = await request<Trip[]>(
@@ -177,19 +179,15 @@ export const tripApi = {
         } catch {}
       }
 
-      // de-dupe by trip_id (or id)
       const map = new Map<string, Trip>();
       for (const tr of all) {
         const k = String(tr?.trip_id || tr?.id || "");
-        if (!k) continue;
-        if (!map.has(k)) map.set(k, tr);
+        if (k && !map.has(k)) map.set(k, tr);
       }
-
       return Array.from(map.values());
     }
   },
 
-  // ✅ GET ONE by numeric id
   getTripById: (id: number | string, token?: string) =>
     request<Trip>(`/api/trip/${encodeURIComponent(String(id))}`, {
       method: "GET",
