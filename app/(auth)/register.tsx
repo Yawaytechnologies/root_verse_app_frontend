@@ -13,10 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import {
-  SafeAreaView,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 
 /** ✅ NativeWind interop (NO styled) */
@@ -28,6 +25,7 @@ cssInterop(LinearGradient, { className: "style" });
 import { useDispatch, useSelector } from "react-redux";
 import {
   fetchDistrictsByState,
+  fetchLocationsByDistrict,
   fetchStates,
 } from "../../src/store/auth/location.slice";
 import {
@@ -213,7 +211,7 @@ function ModuleCard({
   );
 }
 
-/** ✅ State/District list modal */
+/** ✅ State/District/Location list modal */
 function SelectListModal<T extends { id: number; name: string }>({
   open,
   title,
@@ -319,6 +317,10 @@ function RegisterModal({
     districtsByStateId,
     districtsLoadingByStateId,
     districtsErrorByStateId,
+
+    locationsByDistrictId,
+    locationsLoadingByDistrictId,
+    locationsErrorByDistrictId,
   } = useSelector((s: RootState) => (s as any).location);
 
   const [username, setUsername] = useState("");
@@ -328,17 +330,19 @@ function RegisterModal({
 
   const [stateId, setStateId] = useState<number | null>(null);
   const [districtId, setDistrictId] = useState<number | null>(null);
+  const [locationId, setLocationId] = useState<number | null>(null);
 
   const [stateModal, setStateModal] = useState(false);
   const [districtModal, setDistrictModal] = useState(false);
+  const [locationModal, setLocationModal] = useState(false);
 
   const userRef = useRef<TextInput>(null);
   const addressRef = useRef<TextInput>(null);
   const formScrollRef = useRef<ScrollView>(null);
 
-  const [photoY, setPhotoY] = useState(0);
   const [row1Y, setRow1Y] = useState(0);
   const [row2Y, setRow2Y] = useState(0);
+  const [row3Y, setRow3Y] = useState(0);
   const [addressY, setAddressY] = useState(0);
   const [submitY, setSubmitY] = useState(0);
 
@@ -351,8 +355,10 @@ function RegisterModal({
     setProfileUri("");
     setStateId(null);
     setDistrictId(null);
+    setLocationId(null);
     setStateModal(false);
     setDistrictModal(false);
+    setLocationModal(false);
 
     dispatch(fetchStates());
 
@@ -376,6 +382,22 @@ function RegisterModal({
     [stateId, districtsErrorByStateId],
   );
 
+  const locations = useMemo(() => {
+    if (!districtId) return [];
+    const arr = locationsByDistrictId?.[districtId];
+    return Array.isArray(arr) ? arr : [];
+  }, [districtId, locationsByDistrictId]);
+
+  const locationsLoading = useMemo(
+    () => (!!districtId ? !!locationsLoadingByDistrictId?.[districtId] : false),
+    [districtId, locationsLoadingByDistrictId],
+  );
+
+  const locationsError = useMemo(
+    () => (!!districtId ? (locationsErrorByDistrictId?.[districtId] ?? null) : null),
+    [districtId, locationsErrorByDistrictId],
+  );
+
   const selectedStateName = useMemo(
     () => states?.find((s: any) => s.id === stateId)?.name ?? "",
     [states, stateId],
@@ -386,24 +408,25 @@ function RegisterModal({
     [districts, districtId],
   );
 
+  const selectedLocationName = useMemo(
+    () => locations?.find((l: any) => l.id === locationId)?.name ?? "",
+    [locations, locationId],
+  );
+
   const canSubmit =
     username.trim().length >= 2 &&
     isValidPhone10(phone_no) &&
     isValidAddress(address) &&
     profile_image_uri.trim().length > 0 &&
     !!stateId &&
-    !!districtId;
+    !!districtId &&
+    !!locationId;
 
   const scrollToY = (y: number) => {
     formScrollRef.current?.scrollTo({ y: Math.max(0, y - 60), animated: true });
   };
 
   const validateOrToast = () => {
-    if (!profile_image_uri.trim()) {
-      showToast({ type: "info", text1: "Select profile photo" });
-      scrollToY(photoY);
-      return false;
-    }
     if (username.trim().length < 2) {
       showToast({ type: "info", text1: "Enter username" });
       scrollToY(row1Y);
@@ -423,6 +446,16 @@ function RegisterModal({
     if (!districtId) {
       showToast({ type: "info", text1: "Select district" });
       scrollToY(row2Y);
+      return false;
+    }
+    if (!locationId) {
+      showToast({ type: "info", text1: "Select location" });
+      scrollToY(row3Y);
+      return false;
+    }
+    if (!profile_image_uri.trim()) {
+      showToast({ type: "info", text1: "Select profile photo" });
+      scrollToY(row3Y);
       return false;
     }
     if (!isValidAddress(address)) {
@@ -460,7 +493,6 @@ function RegisterModal({
 
   const onRegister = async () => {
     if (!module || loading) return;
-
     if (!validateOrToast()) return;
 
     const rootverse_type = mapToBackendRootverseType(module.key);
@@ -474,7 +506,8 @@ function RegisterModal({
         profile_image_uri,
         state_id: stateId!,
         district_id: districtId!,
-      }),
+        location_id: locationId!, // ✅ NEW
+      } as any),
     );
 
     if (registerUser.rejected.match(res)) {
@@ -510,6 +543,7 @@ function RegisterModal({
         onSelect={(st: any) => {
           setStateId(st.id);
           setDistrictId(null);
+          setLocationId(null);
           setStateModal(false);
           dispatch(fetchDistrictsByState({ stateId: st.id }));
         }}
@@ -525,7 +559,23 @@ function RegisterModal({
         onClose={() => setDistrictModal(false)}
         onSelect={(d: any) => {
           setDistrictId(d.id);
+          setLocationId(null);
           setDistrictModal(false);
+          dispatch(fetchLocationsByDistrict({ districtId: d.id }));
+        }}
+      />
+
+      <SelectListModal
+        open={locationModal}
+        title="Select Location"
+        items={locations}
+        loading={locationsLoading}
+        selectedId={locationId}
+        disabledText={!districtId ? "Select district first" : undefined}
+        onClose={() => setLocationModal(false)}
+        onSelect={(l: any) => {
+          setLocationId(l.id);
+          setLocationModal(false);
         }}
       />
 
@@ -574,56 +624,8 @@ function RegisterModal({
               className="flex-1 mt-3"
               contentContainerStyle={{ paddingBottom: 16 }}
             >
-              {/* Profile Picture */}
-              <View onLayout={(e) => setPhotoY(e.nativeEvent.layout.y)}>
-                <Text className="text-slate-300 text-[11px] mb-2">
-                  Profile Picture
-                </Text>
-                <Pressable
-                  onPress={pickImage}
-                  className="flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5"
-                >
-                  <View className="h-10 w-10 rounded-2xl overflow-hidden bg-white/10 border border-white/10 items-center justify-center">
-                    {profile_image_uri ? (
-                      <Image
-                        source={{ uri: profile_image_uri }}
-                        className="h-10 w-10"
-                      />
-                    ) : (
-                      <Ionicons
-                        name="image-outline"
-                        size={18}
-                        color="#94a3b8"
-                      />
-                    )}
-                  </View>
-
-                  <View className="flex-1 ml-3">
-                    <Text
-                      className="text-white text-xs font-bold"
-                      numberOfLines={1}
-                    >
-                      {profile_image_uri
-                        ? "Photo selected"
-                        : "Choose from gallery"}
-                    </Text>
-                    <Text
-                      className="text-slate-400 text-[10px] mt-0.5"
-                      numberOfLines={1}
-                    >
-                      {profile_image_uri
-                        ? profile_image_uri
-                        : "Tap to pick a profile image"}
-                    </Text>
-                  </View>
-                </Pressable>
-              </View>
-
-              {/* Row 1 */}
-              <View
-                className="mt-3"
-                onLayout={(e) => setRow1Y(e.nativeEvent.layout.y)}
-              >
+              {/* Row 1: Username + Phone */}
+              <View onLayout={(e) => setRow1Y(e.nativeEvent.layout.y)}>
                 <View className="flex-row">
                   <View className="flex-1 mr-3">
                     <Text className="text-slate-300 text-[11px] mb-1.5">
@@ -668,7 +670,7 @@ function RegisterModal({
                 </View>
               </View>
 
-              {/* Row 2 */}
+              {/* Row 2: State + District */}
               <View
                 className="mt-3"
                 onLayout={(e) => setRow2Y(e.nativeEvent.layout.y)}
@@ -680,7 +682,7 @@ function RegisterModal({
                     </Text>
                     <Pressable
                       onPress={() => setStateModal(true)}
-                      className="flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5"
+                      className="flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-5"
                     >
                       <Ionicons name="map-outline" size={16} color="#94a3b8" />
                       <Text
@@ -717,7 +719,7 @@ function RegisterModal({
                         setDistrictModal(true);
                       }}
                       className={[
-                        "flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5",
+                        "flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-5",
                         stateId ? "opacity-100" : "opacity-60",
                       ].join(" ")}
                     >
@@ -758,7 +760,112 @@ function RegisterModal({
                 )}
               </View>
 
-              {/* Address */}
+              {/* Row 3: Location + Profile Picture (profile at last) */}
+              <View
+                className="mt-3"
+                onLayout={(e) => setRow3Y(e.nativeEvent.layout.y)}
+              >
+                <View className="flex-row">
+                  <View className="flex-1 mr-3">
+                    <Text className="text-slate-300 text-[11px] mb-1.5">
+                      Location
+                    </Text>
+                    <Pressable
+                      onPress={() => {
+                        if (!districtId) {
+                          showToast({
+                            type: "info",
+                            text1: "Select district first",
+                          });
+                          return;
+                        }
+                        if (!locationsLoading && locations.length === 0) {
+                          dispatch(fetchLocationsByDistrict({ districtId }));
+                        }
+                        setLocationModal(true);
+                      }}
+                      className={[
+                        "flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-5",
+                        districtId ? "opacity-100" : "opacity-60",
+                      ].join(" ")}
+                    >
+                      <Ionicons
+                        name="navigate-outline"
+                        size={16}
+                        color="#94a3b8"
+                      />
+                      <Text
+                        className={[
+                          "flex-1 ml-2.5 text-[12px]",
+                          selectedLocationName
+                            ? "text-white"
+                            : "text-slate-500",
+                        ].join(" ")}
+                        numberOfLines={1}
+                      >
+                        {!districtId
+                          ? "Select district"
+                          : locationsLoading
+                            ? "Loading..."
+                            : selectedLocationName || "Select"}
+                      </Text>
+                      <Ionicons name="chevron-down" size={16} color="#cbd5e1" />
+                    </Pressable>
+                  </View>
+
+                  <View className="flex-1">
+                    <Text className="text-slate-300 text-[11px] mb-1.5">
+                      Profile Picture
+                    </Text>
+                    <Pressable
+                      onPress={pickImage}
+                      className="flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5"
+                    >
+                      <View className="h-10 w-10 rounded-2xl overflow-hidden bg-white/10 border border-white/10 items-center justify-center">
+                        {profile_image_uri ? (
+                          <Image
+                            source={{ uri: profile_image_uri }}
+                            className="h-10 w-10"
+                          />
+                        ) : (
+                          <Ionicons
+                            name="image-outline"
+                            size={18}
+                            color="#94a3b8"
+                          />
+                        )}
+                      </View>
+
+                      <View className="flex-1 ml-3">
+                        <Text
+                          className="text-white text-xs font-bold"
+                          numberOfLines={1}
+                        >
+                          {profile_image_uri
+                            ? "Photo selected"
+                            : "Choose photo"}
+                        </Text>
+                        <Text
+                          className="text-slate-400 text-[10px] mt-0.5"
+                          numberOfLines={1}
+                        >
+                          {profile_image_uri
+                            ? "Ready"
+                            : "Tap to pick a profile image"}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  </View>
+                </View>
+
+                {!!locationsError && (
+                  <Text className="text-red-300 text-[11px] mt-2">
+                    Location API error: {locationsError}
+                  </Text>
+                )}
+              </View>
+
+              {/* Address (below) */}
               <View
                 className="mt-3"
                 onLayout={(e) => setAddressY(e.nativeEvent.layout.y)}
@@ -855,13 +962,13 @@ export default function RegisterScreen() {
         className="flex-1"
         style={{
           paddingTop: Math.max(8, insets.top * 0.25),
-          paddingBottom: Math.max(12, insets.bottom + 12), // ✅ FIX: bottom safe area
+          paddingBottom: Math.max(12, insets.bottom + 12),
         }}
       >
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{
-            paddingBottom: Math.max(24, insets.bottom + 24), // ✅ FIX: prevents footer clipping
+            paddingBottom: Math.max(24, insets.bottom + 24),
           }}
         >
           <View className="px-5 pt-2 pb-6">
@@ -902,7 +1009,6 @@ export default function RegisterScreen() {
               ))}
             </View>
 
-            {/* ✅ FIXED FOOTER (force full width + no split "Sign in") */}
             <View className="mt-5 pb-6 px-2">
               <Pressable
                 onPress={() => router.replace("/(auth)/login")}

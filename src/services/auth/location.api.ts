@@ -3,6 +3,7 @@ import { getJson } from "./api";
 
 export type StateItem = { id: number; name: string };
 export type DistrictItem = { id: number; name: string };
+export type LocationItem = { id: number; name: string };
 
 function pickArray(raw: any): any[] {
   if (Array.isArray(raw)) return raw;
@@ -63,4 +64,14 @@ export async function fetchDistrictsByStateApi(stateId: number): Promise<Distric
   }
 
   throw new Error(lastErr?.message ?? "Failed to load districts");
+}
+export async function fetchLocationsByDistrictApi(districtId: number): Promise<LocationItem[]> {
+  const res: any = await getJson<any>(`/api/locations/district/${districtId}`);
+
+  // backend: { success, message, data: [...] }
+  const arr = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
+  return arr.map((x: any) => ({
+    id: Number(x.id),
+    name: String(x.name ?? ""),
+  }));
 }
