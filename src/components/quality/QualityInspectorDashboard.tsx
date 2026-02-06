@@ -9,7 +9,7 @@ import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchQcMe, selectInspector as selectQcInspector } from "../../store/qualityAuth/qualityAuth.slice";
 import QcScannerScreen from "./QcScannerScreen";
 
-import { getQcFillQueue, type QcFillQueuedItem } from "../../utils/qcFillQueue";
+import { getQcFillQueue, type QcFillQueuedItem, deriveTabFromPayload } from "../../utils/qcFillQueue";
 
 export type Division = "WILD" | "AQUA" | "MARICULTURE";
 
@@ -38,6 +38,10 @@ function todayYmd(): string {
   const d = new Date();
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
+function toYmdLocal(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
 
 function formatZone(i: InspectorInfo) {
   const dName = (i.district_name || "").trim();
@@ -53,20 +57,13 @@ function formatZone(i: InspectorInfo) {
   if (dId && sId) return `District #${dId}, State #${sId}`;
   if (sId) return `State #${sId}`;
   if (dId) return `District #${dId}`;
-
   return "—";
 }
 
 type TabKey = "scanner" | "checked" | "pending" | "rejected";
 
-function getQcResultUpper(p: any): string {
-  const v = p?.qc_result ?? p?.qcResult ?? p?.qc_status ?? p?.qcStatus ?? p?.status ?? "";
-  return String(v || "").toUpperCase();
-}
-
-function isRejectedPayload(p: any): boolean {
-  const r = getQcResultUpper(p);
-  return r === "REJECT" || r === "REJECTED" || !!p?.reject_reason;
+function upper(v: any) {
+  return String(v ?? "").trim().toUpperCase();
 }
 
 export default function QualityInspectorDashboard({ division, inspector }: Props) {
@@ -97,8 +94,8 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   const [tab, setTab] = useState<TabKey>("scanner");
   const [lang, setLang] = useState<"en" | "ta">("en");
 
-  // ✅ NEW: shared selected date for all list tabs
   const [selectedDate, setSelectedDate] = useState<string>(() => todayYmd());
+  const [editDraft, setEditDraft] = useState<{ qrCode: string; payload: any } | null>(null);
 
   const zoneText = useMemo(() => formatZone(mergedInspector), [mergedInspector]);
 
@@ -107,27 +104,25 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   const refreshCounts = async () => {
     try {
       const q: QcFillQueuedItem[] = await getQcFillQueue();
-      const divisionItems = q.filter(
-        (x) => String(x.payload?.division || "").toUpperCase() === String(division).toUpperCase()
-      );
+      const ymd = String(selectedDate || "").trim();
+
+      const divisionItems = q
+        .filter((x) => upper(x.payload?.division) === upper(division))
+        .filter((x) => {
+          if (!ymd) return true;
+          const eventAt = (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
+          return toYmdLocal(eventAt) === ymd;
+        });
 
       let pending = 0;
       let checked = 0;
       let rejected = 0;
 
       for (const x of divisionItems) {
-        const p = x.payload || {};
-        const rej = isRejectedPayload(p);
-
-        // ✅ Pending = local not-synced ONLY (editable/deletable)
-        if (!x.synced) {
-          pending += 1;
-          continue;
-        }
-
-        // ✅ Synced items split into rejected vs checked
-        if (rej) rejected += 1;
-        else checked += 1;
+        const t = deriveTabFromPayload(x.payload);
+        if (t === "pending") pending += 1;
+        else if (t === "checked") checked += 1;
+        else rejected += 1;
       }
 
       setCounts({
@@ -144,14 +139,8 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   useEffect(() => {
     refreshCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [division]);
+  }, [division, tab, selectedDate]);
 
-  useEffect(() => {
-    refreshCounts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
-
-  // ✅ keep counts updated while user edits/deletes/resyncs inside list screens
   useEffect(() => {
     let alive = true;
     const t = setInterval(() => {
@@ -164,11 +153,10 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
       clearInterval(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [division]);
+  }, [division, selectedDate]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#030712" }} edges={["top"]}>
-      {/* ===== Header ===== */}
       <View
         style={{
           paddingTop: Platform.OS === "android" ? Math.max(insets.top, 2) : 2,
@@ -197,7 +185,9 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
             </View>
 
             <View style={{ marginTop: -2 }}>
-              <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>Quality{"\n"}Inspector</Text>
+              <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>
+                Quality{"\n"}Inspector
+              </Text>
               <Text style={{ color: "rgba(255,255,255,0.55)" }}>{mergedInspector.divisionLabel}</Text>
             </View>
           </View>
@@ -217,7 +207,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               marginTop: -2,
             }}
           >
-            <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900" }}>EN</Text>
+            <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900", fontSize: 13 }}>EN</Text>
 
             <View
               style={{
@@ -241,13 +231,12 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               />
             </View>
 
-            <Text style={{ color: "rgba(255,255,255,0.75)", fontWeight: "900" }}>தமிழ்</Text>
+            <Text style={{ color: "rgba(255,255,255,0.75)", fontWeight: "900", fontSize: 11 }}>தமிழ்</Text>
           </Pressable>
         </View>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24, flexGrow: 1 }}>
-        {/* ===== Banner ===== */}
         <View
           style={{
             backgroundColor: theme.bannerFrom,
@@ -270,9 +259,13 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               <Text style={{ color: "rgba(255,255,255,0.85)", marginTop: 2, fontSize: 12.5 }}>
                 {lang === "en" ? "ID" : "ஐடி"}: {mergedInspector.id}
               </Text>
+
+              {/* ✅ ALWAYS show date (including scanner tab) */}
+              <Text style={{ color: "rgba(255,255,255,0.85)", marginTop: 6, fontSize: 12.5 }}>
+                Date: {selectedDate}
+              </Text>
             </View>
 
-            {/* ✅ LOCAL counts */}
             <View style={{ width: 150, gap: 8 }}>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <StatBox label={lang === "en" ? "Total" : "மொத்தம்"} value={counts.total} bg="#3E86E0" />
@@ -286,7 +279,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
           </View>
         </View>
 
-        {/* ===== Tabs ===== */}
         <View style={{ backgroundColor: "#071228", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" }}>
           <View style={{ flexDirection: "row" }}>
             <MiniTab
@@ -295,6 +287,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               icon="scan-outline"
               activeColor={theme.scannerActive}
               onPress={() => setTab("scanner")}
+              lang={lang}
             />
             <MiniTab
               active={tab === "checked"}
@@ -302,6 +295,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               icon="checkmark-circle-outline"
               activeColor={theme.completedActive}
               onPress={() => setTab("checked")}
+              lang={lang}
             />
             <MiniTab
               active={tab === "pending"}
@@ -309,6 +303,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               icon="time-outline"
               activeColor={theme.pendingActive}
               onPress={() => setTab("pending")}
+              lang={lang}
             />
             <MiniTab
               active={tab === "rejected"}
@@ -316,30 +311,27 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               icon="close-circle-outline"
               activeColor={theme.rejectedActive}
               onPress={() => setTab("rejected")}
+              lang={lang}
             />
           </View>
         </View>
 
-        {/* ===== Content ===== */}
         <View style={{ paddingHorizontal: 16, paddingVertical: 14 }}>
           {tab === "scanner" ? (
             <QcScannerScreen
               division={division}
-              lang={lang}
-              onAfterSubmit={(qcResult) => {
-                const r = String(qcResult || "").toUpperCase();
-
-                // Pending tab is for NOT-SYNCED local failures (editable/deletable)
-                if (r === "REJECT") setTab("rejected");
-                else setTab("checked");
-
+              lang={lang as any}
+              selectedDate={selectedDate}
+              editDraft={editDraft}
+              onEditDraftConsumed={() => setEditDraft(null)}
+              onAfterSubmit={() => {
                 refreshCounts();
               }}
             />
           ) : tab === "checked" ? (
             <QcListScreen
               division={division}
-              lang={lang}
+              lang={lang as any}
               status="checked"
               selectedDate={selectedDate}
               onChangeDate={setSelectedDate}
@@ -347,15 +339,19 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
           ) : tab === "pending" ? (
             <QcListScreen
               division={division}
-              lang={lang}
+              lang={lang as any}
               status="pending"
               selectedDate={selectedDate}
               onChangeDate={setSelectedDate}
+              onEditItem={(draft) => {
+                setEditDraft(draft);
+                setTab("scanner");
+              }}
             />
           ) : (
             <QcListScreen
               division={division}
-              lang={lang}
+              lang={lang as any}
               status="rejected"
               selectedDate={selectedDate}
               onChangeDate={setSelectedDate}
@@ -374,7 +370,8 @@ function StatBox({ label, value, bg }: { label: string; value: number; bg: strin
         flex: 1,
         borderRadius: 18,
         backgroundColor: bg,
-        paddingVertical: 11,
+        paddingVertical: 10,
+        paddingHorizontal: 6,
         alignItems: "center",
         justifyContent: "center",
         shadowColor: "#000",
@@ -384,8 +381,23 @@ function StatBox({ label, value, bg }: { label: string; value: number; bg: strin
         elevation: 8,
       }}
     >
-      <Text style={{ color: "white", fontSize: 20, fontWeight: "900" }}>{value}</Text>
-      <Text style={{ color: "rgba(255,255,255,0.92)", fontWeight: "900", fontSize: 11 }}>{label}</Text>
+      <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>{value}</Text>
+
+      <Text
+        numberOfLines={1}
+        ellipsizeMode="clip"
+        style={{
+          color: "rgba(255,255,255,0.92)",
+          fontWeight: "900",
+          fontSize: 9.5,
+          lineHeight: 11,
+          marginTop: 2,
+          textAlign: "center",
+          ...(Platform.OS === "android" ? ({ includeFontPadding: false } as any) : null),
+        }}
+      >
+        {label}
+      </Text>
     </View>
   );
 }
@@ -396,18 +408,52 @@ function MiniTab({
   icon,
   activeColor,
   onPress,
+  lang,
 }: {
   active: boolean;
   label: string;
   icon: any;
   activeColor: string;
   onPress: () => void;
+  lang: "en" | "ta";
 }) {
+  const isTamil = lang === "ta";
+
   return (
-    <Pressable onPress={onPress} style={{ flex: 1, paddingVertical: 10, alignItems: "center", justifyContent: "center" }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+    <Pressable
+      onPress={onPress}
+      style={{
+        flex: 1,
+        paddingVertical: 10,
+        alignItems: "stretch",
+        justifyContent: "center",
+      }}
+    >
+      <View
+        style={{
+          width: "100%",
+          paddingHorizontal: 8,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "flex-start",
+          gap: 8,
+        }}
+      >
         <Ionicons name={icon} size={17} color={active ? activeColor : "rgba(255,255,255,0.55)"} />
-        <Text numberOfLines={1} style={{ color: active ? activeColor : "rgba(255,255,255,0.55)", fontWeight: "900", fontSize: 14 }}>
+
+        <Text
+          numberOfLines={1}
+          ellipsizeMode="clip"
+          style={{
+            flex: 1,
+            color: active ? activeColor : "rgba(255,255,255,0.55)",
+            fontWeight: "900",
+            fontSize: isTamil ? 11 : 14,
+            lineHeight: isTamil ? 13 : 16,
+            textAlign: "left",
+            ...(Platform.OS === "android" ? ({ includeFontPadding: false } as any) : null),
+          }}
+        >
           {label}
         </Text>
       </View>
@@ -419,8 +465,26 @@ function MiniTab({
 
 function getTheme(division: Division) {
   if (division === "AQUA")
-    return { bannerFrom: "#1D4ED8", scannerActive: "#3b82f6", completedActive: "#34D399", pendingActive: "#FBBF24", rejectedActive: "#F87171" };
+    return {
+      bannerFrom: "#1D4ED8",
+      scannerActive: "#3b82f6",
+      completedActive: "#34D399",
+      pendingActive: "#FBBF24",
+      rejectedActive: "#F87171",
+    };
   if (division === "MARICULTURE")
-    return { bannerFrom: "#A855F7", scannerActive: "#3b82f6", completedActive: "#34D399", pendingActive: "#FBBF24", rejectedActive: "#F87171" };
-  return { bannerFrom: "#0EA5A4", scannerActive: "#3b82f6", completedActive: "#34D399", pendingActive: "#FBBF24", rejectedActive: "#F87171" };
+    return {
+      bannerFrom: "#A855F7",
+      scannerActive: "#3b82f6",
+      completedActive: "#34D399",
+      pendingActive: "#FBBF24",
+      rejectedActive: "#F87171",
+    };
+  return {
+    bannerFrom: "#0EA5A4",
+    scannerActive: "#3b82f6",
+    completedActive: "#34D399",
+    pendingActive: "#FBBF24",
+    rejectedActive: "#F87171",
+  };
 }
