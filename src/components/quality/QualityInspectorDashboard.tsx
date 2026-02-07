@@ -1,14 +1,26 @@
 // src/components/quality/QualityInspectorDashboard.tsx
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useMemo, useState } from "react";
-import { Platform, Pressable, ScrollView, Text, View } from "react-native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Animated,
+  BackHandler,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { router } from "expo-router";
 
 import QcListScreen from "./QcListScreen";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import {
+  clearQc,
   fetchQcMe,
   selectInspector as selectQcInspector,
+  TOKEN_KEY,
 } from "../../store/qualityAuth/qualityAuth.slice";
 import QcScannerScreen from "./QcScannerScreen";
 
@@ -49,12 +61,10 @@ function toYmdLocal(ts: number): string {
   const d = new Date(ts);
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
-
 function cleanName(v: any): string | undefined {
   const t = String(v ?? "").trim();
   return t ? t : undefined;
 }
-
 function formatZone(i: InspectorInfo) {
   const dName = cleanName(i.district_name);
   const sName = cleanName(i.state_name);
@@ -62,8 +72,6 @@ function formatZone(i: InspectorInfo) {
   if (dName && sName) return `${dName}, ${sName}`;
   if (sName) return sName;
   if (dName) return dName;
-
-  // ✅ don't show id fallback
   return "—";
 }
 
@@ -80,7 +88,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   const dispatch = useAppDispatch();
   const qc = useAppSelector(selectQcInspector);
 
-  // ✅ fetch QC profile not only when checker_code missing, but also when names missing
   useEffect(() => {
     const needsQcProfile =
       !qc?.checker_code ||
@@ -89,15 +96,8 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
       !cleanName(qc?.district_name);
 
     if (needsQcProfile) dispatch(fetchQcMe());
-  }, [
-    dispatch,
-    qc?.checker_code,
-    qc?.checker_name,
-    qc?.state_name,
-    qc?.district_name,
-  ]);
+  }, [dispatch, qc?.checker_code, qc?.checker_name, qc?.state_name, qc?.district_name]);
 
-  // ✅ IMPORTANT: don't let "" override real qc names
   const mergedInspector: InspectorInfo = useMemo(() => {
     const name = inspector?.name || qc?.checker_name || "Inspector";
     const id = inspector?.id || qc?.checker_code || "";
@@ -109,8 +109,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
       state_id: inspector.state_id ?? qc?.state_id,
       district_id: inspector.district_id ?? qc?.district_id,
       state_name: cleanName(inspector.state_name) ?? cleanName(qc?.state_name),
-      district_name:
-        cleanName(inspector.district_name) ?? cleanName(qc?.district_name),
+      district_name: cleanName(inspector.district_name) ?? cleanName(qc?.district_name),
     };
   }, [inspector, qc]);
 
@@ -121,7 +120,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   const [editDraft, setEditDraft] = useState<{ qrCode: string; payload: any } | null>(null);
 
   const zoneText = useMemo(() => formatZone(mergedInspector), [mergedInspector]);
-
   const [counts, setCounts] = useState({ total: 0, checked: 0, pending: 0, rejected: 0 });
 
   const refreshCounts = async () => {
@@ -133,8 +131,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
         .filter((x) => upper(x.payload?.division) === upper(division))
         .filter((x) => {
           if (!ymd) return true;
-          const eventAt =
-            (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
+          const eventAt = (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
           return toYmdLocal(eventAt) === ymd;
         });
 
@@ -179,20 +176,62 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [division, selectedDate]);
 
+  // ✅ Back closes app (android) while on dashboard
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      BackHandler.exitApp();
+      return true;
+    });
+
+    return () => sub.remove();
+  }, []);
+
+  // ✅ Logout animation
+  const logoutScale = useRef(new Animated.Value(1)).current;
+
+  const pressIn = () => {
+    Animated.spring(logoutScale, {
+      toValue: 0.96,
+      useNativeDriver: true,
+      speed: 24,
+      bounciness: 0,
+    }).start();
+  };
+  const pressOut = () => {
+    Animated.spring(logoutScale, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 24,
+      bounciness: 0,
+    }).start();
+  };
+
+  const handleLogout = async () => {
+    try {
+      await AsyncStorage.removeItem(TOKEN_KEY);
+    } catch {}
+    dispatch(clearQc());
+    router.replace("/(auth)/login"); // change if your route differs
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#030712" }} edges={["top"]}>
+      {/* TOP HEADER */}
       <View
         style={{
           paddingTop: Platform.OS === "android" ? Math.max(insets.top, 2) : 2,
           paddingHorizontal: 12,
-          paddingBottom: 6,
+          paddingBottom: 8,
           backgroundColor: "#071228",
           borderBottomWidth: 1,
           borderBottomColor: "rgba(255,255,255,0.06)",
         }}
       >
+        {/* Row 1: icon + title on left, logout on right */}
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
             <View
               style={{
                 height: 42,
@@ -208,58 +247,87 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               <Ionicons name="shield-checkmark-outline" size={22} color="#fff" />
             </View>
 
-            <View style={{ marginTop: -2 }}>
-              <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>
-                Quality{"\n"}Inspector
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>Quality Inspector</Text>
+              <Text style={{ color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
+                {mergedInspector.divisionLabel}
               </Text>
-              <Text style={{ color: "rgba(255,255,255,0.55)" }}>{mergedInspector.divisionLabel}</Text>
             </View>
           </View>
 
+          <Animated.View style={{ transform: [{ scale: logoutScale }] }}>
+            <Pressable
+              onPress={handleLogout}
+              onPressIn={pressIn}
+              onPressOut={pressOut}
+              style={{
+                paddingHorizontal: 10,
+                paddingVertical: 7,
+                borderRadius: 12,
+                backgroundColor: "rgba(255,255,255,0.06)",
+                borderWidth: 1,
+                borderColor: "rgba(255,255,255,0.10)",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <Ionicons name="log-out-outline" size={16} color="rgba(255,255,255,0.85)" />
+              <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900", fontSize: 12 }}>
+                Logout
+              </Text>
+            </Pressable>
+          </Animated.View>
+        </View>
+
+        {/* Row 2: ✅ Toggle placed BELOW the icon (no unwanted left gap) */}
+        <View style={{ marginTop: 6, flexDirection: "row", alignItems: "center", justifyContent: "flex-start" }}>
           <Pressable
             onPress={() => setLang((p) => (p === "en" ? "ta" : "en"))}
             style={{
-              paddingHorizontal: 10,
-              paddingVertical: 7,
-              borderRadius: 14,
+              alignSelf: "flex-start",
+              paddingHorizontal: 8,
+              paddingVertical: 5,
+              borderRadius: 12,
               backgroundColor: "rgba(255,255,255,0.06)",
               borderWidth: 1,
               borderColor: "rgba(255,255,255,0.10)",
               flexDirection: "row",
               alignItems: "center",
               gap: 8,
-              marginTop: -2,
             }}
           >
-            <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900", fontSize: 13 }}>EN</Text>
+            <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900", fontSize: 12 }}>EN</Text>
 
             <View
               style={{
-                height: 20,
-                width: 44,
+                height: 16,
+                width: 36,
                 borderRadius: 999,
                 backgroundColor: "rgba(255,255,255,0.10)",
                 borderWidth: 1,
                 borderColor: "rgba(255,255,255,0.10)",
                 justifyContent: "center",
+                paddingHorizontal: 2,
               }}
             >
               <View
                 style={{
-                  height: 16,
-                  width: 16,
+                  height: 12,
+                  width: 12,
                   borderRadius: 999,
                   backgroundColor: "#3b82f6",
-                  marginLeft: lang === "en" ? 3 : 25,
+                  marginLeft: lang === "en" ? 0 : 18,
                 }}
               />
             </View>
 
-            <Text style={{ color: "rgba(255,255,255,0.75)", fontWeight: "900", fontSize: 11 }}>தமிழ்</Text>
+            <Text style={{ color: "rgba(255,255,255,0.75)", fontWeight: "900", fontSize: 10 }}>தமிழ்</Text>
           </Pressable>
         </View>
       </View>
 
+      {/* BODY */}
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24, flexGrow: 1 }}>
         <View
           style={{
