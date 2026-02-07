@@ -11,6 +11,7 @@ import {
   View,
   AppState,
   Image,
+  Vibration, // ✅ ADDED
 } from "react-native";
 
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -801,13 +802,18 @@ function PickerSheetObj<T extends PickerItem>({
             onPress={() => sheetRef.current?.dismiss()}
             className="rounded-full px-3 py-2 active:opacity-80"
           >
-            <Text style={{ color: UI.accent }} className="text-base font-semibold">
+            <Text
+              style={{ color: UI.accent }}
+              className="text-base font-semibold"
+            >
               Done
             </Text>
           </Pressable>
         </View>
 
-        <View className={`mt-3 rounded-2xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}>
+        <View
+          className={`mt-3 rounded-2xl border ${UI.border} bg-[#fbf6f1] px-3 py-2`}
+        >
           <TextInput
             value={q}
             onChangeText={setQ}
@@ -819,7 +825,9 @@ function PickerSheetObj<T extends PickerItem>({
         <ScrollView className="mt-3" keyboardShouldPersistTaps="handled">
           {filtered.map((item) => {
             const active = item.key === valueKey;
-            const uri = showImage ? sanitizeImageUrl((item as any)?.imageUri) : "";
+            const uri = showImage
+              ? sanitizeImageUrl((item as any)?.imageUri)
+              : "";
 
             return (
               <Pressable
@@ -829,7 +837,9 @@ function PickerSheetObj<T extends PickerItem>({
                   sheetRef.current?.dismiss();
                 }}
                 className={`mb-2 rounded-2xl border px-4 py-3 active:opacity-80 ${
-                  active ? `bg-[#fff3e7] border-[#ffd9b6]` : `${UI.border} bg-white`
+                  active
+                    ? `bg-[#fff3e7] border-[#ffd9b6]`
+                    : `${UI.border} bg-white`
                 }`}
               >
                 <View className="flex-row items-center">
@@ -866,13 +876,19 @@ function PickerSheetObj<T extends PickerItem>({
                   ) : null}
 
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text className={`text-base font-semibold ${UI.text}`} numberOfLines={2}>
+                    <Text
+                      className={`text-base font-semibold ${UI.text}`}
+                      numberOfLines={2}
+                    >
                       {item.label}
                     </Text>
 
                     {/* ✅ optional hint only for fish list */}
                     {showImage ? (
-                      <Text className={`mt-1 text-xs ${UI.muted}`} numberOfLines={1}>
+                      <Text
+                        className={`mt-1 text-xs ${UI.muted}`}
+                        numberOfLines={1}
+                      >
                         {uri ? "Image available" : "No image"}
                       </Text>
                     ) : null}
@@ -886,7 +902,6 @@ function PickerSheetObj<T extends PickerItem>({
     </BottomSheetModal>
   );
 }
-
 
 /* ---------------- MAIN SCREEN ---------------- */
 export default function CreateCatchLog() {
@@ -1649,6 +1664,9 @@ export default function CreateCatchLog() {
     if (!v) return;
     if (!fishScanCanScan) return;
 
+    // ✅ ADDED: vibrate on successful scan
+    Vibration.vibrate(40);
+
     setFishScanCanScan(false);
     setFishScanOpen(false);
 
@@ -1679,6 +1697,10 @@ export default function CreateCatchLog() {
 
     setCanScan(false);
     addQrToGroup(activeGroup.id, value);
+
+    // ✅ ADDED: vibrate on scan (indicator)
+    Vibration.vibrate(40);
+
     setTimeout(() => setCanScan(true), 350);
   };
 
@@ -2400,60 +2422,59 @@ export default function CreateCatchLog() {
           </View>
         </Card>
 
-       {/* Vessel picker (NO IMAGE) */}
-<PickerSheetObj
-  title={t.chooseVessel}
-  valueKey={selectedVesselDbId ? String(selectedVesselDbId) : ""}
-  options={vesselOptions}
-  onSelect={(item: any) => {
-    const raw = item._raw as Vessel;
-    const db = vesselDbId(raw);
-    if (!db) return;
-    setSelectedVesselDbId(db);
-    setSelectedVesselLabel(vesselLabel(raw));
-    setSelectedVesselCode(vesselCode(raw));
-  }}
-  sheetRef={vesselRef}
-  searchPlaceholder="Search vessel..."
-  showImage={false}
-/>
+        {/* Vessel picker (NO IMAGE) */}
+        <PickerSheetObj
+          title={t.chooseVessel}
+          valueKey={selectedVesselDbId ? String(selectedVesselDbId) : ""}
+          options={vesselOptions}
+          onSelect={(item: any) => {
+            const raw = item._raw as Vessel;
+            const db = vesselDbId(raw);
+            if (!db) return;
+            setSelectedVesselDbId(db);
+            setSelectedVesselLabel(vesselLabel(raw));
+            setSelectedVesselCode(vesselCode(raw));
+          }}
+          sheetRef={vesselRef}
+          searchPlaceholder="Search vessel..."
+          showImage={false}
+        />
 
-{/* Trip picker (NO IMAGE) */}
-<PickerSheetObj
-  title={t.chooseTrip}
-  valueKey={tripId || ""}
-  options={tripOptions}
-  onSelect={(item: any) => {
-    const raw = item._raw as Trip;
-    const key = tripKey(raw);
-    setTripId(key);
-    setTripLabelText(tripLabel(raw));
-  }}
-  sheetRef={tripRef}
-  searchPlaceholder="Search trip..."
-  showImage={false}
-/>
+        {/* Trip picker (NO IMAGE) */}
+        <PickerSheetObj
+          title={t.chooseTrip}
+          valueKey={tripId || ""}
+          options={tripOptions}
+          onSelect={(item: any) => {
+            const raw = item._raw as Trip;
+            const key = tripKey(raw);
+            setTripId(key);
+            setTripLabelText(tripLabel(raw));
+          }}
+          sheetRef={tripRef}
+          searchPlaceholder="Search trip..."
+          showImage={false}
+        />
 
-{/* Fish picker (✅ IMAGE) */}
-<PickerSheetObj
-  title={t.chooseSpecies}
-  valueKey={
-    fishPickGroupId
-      ? String(groups.find((g) => g.id === fishPickGroupId)?.fishId || "")
-      : ""
-  }
-  options={fishOptions}
-  onSelect={(item: any) => {
-    const id = Number(item.key);
-    const label = String(item.label || "");
-    if (!fishPickGroupId) return;
-    setGroupFish(fishPickGroupId, id, label);
-  }}
-  sheetRef={fishRef}
-  searchPlaceholder="Search fish..."
-  showImage={true}
-/>
-
+        {/* Fish picker (✅ IMAGE) */}
+        <PickerSheetObj
+          title={t.chooseSpecies}
+          valueKey={
+            fishPickGroupId
+              ? String(groups.find((g) => g.id === fishPickGroupId)?.fishId || "")
+              : ""
+          }
+          options={fishOptions}
+          onSelect={(item: any) => {
+            const id = Number(item.key);
+            const label = String(item.label || "");
+            if (!fishPickGroupId) return;
+            setGroupFish(fishPickGroupId, id, label);
+          }}
+          sheetRef={fishRef}
+          searchPlaceholder="Search fish..."
+          showImage={true}
+        />
 
         {/* STEP 1 */}
         {step === 1 ? (
