@@ -268,7 +268,7 @@ export default function LoginScreen() {
         throw new Error("TOKEN_NOT_RECEIVED");
       }
 
-      router.push({
+      router.replace({
         pathname: "/(auth)/otp",
         params: { phone_no: phoneDigits },
       } as any);

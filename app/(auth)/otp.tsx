@@ -28,6 +28,9 @@ import { loginWithPhone } from "../../src/store/auth/login.slice";
 import { fetchMe } from "../../src/store/auth/me.slice";
 import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
 
+// ✅ ADD: persist token for 30-days login
+import { persistSession } from "../../src/store/auth/authSession.slice";
+
 // ✅ QC: clear old inspector + fetch new inspector after login (token-based)
 import { clearQc, fetchQcMe } from "../../src/store/qualityAuth/qualityAuth.slice";
 
@@ -155,11 +158,38 @@ export default function OtpScreen() {
 
     setLoading(true);
     try {
-      // ✅ login (token should be overwritten here)
+      /**
+       * NOTE:
+       * You're not sending otp to backend here.
+       * If your backend has verify-otp API, you should call that.
+       * But for your CURRENT flow, we at least persist the returned token
+       * BEFORE routing, so _layout doesn't kick you back to login.
+       */
+
       const raw: any = await dispatch(loginWithPhone(phone_no)).unwrap();
 
       const p = raw?.data ?? raw;
       const u = p?.user ?? p?.data?.user ?? p?.data ?? p;
+
+      // ✅ CRITICAL: get token and persist it BEFORE leaving (auth)
+      const token = pickFirst(
+        p?.token,
+        raw?.token,
+        p?.data?.token,
+        u?.token,
+        login?.token
+      );
+
+      if (!token) {
+        Alert.alert(
+          "Login error",
+          "Token not received after OTP. Your OTP verify API is not being called or response has no token."
+        );
+        return;
+      }
+
+      // ✅ This makes _layout see token, so it won't redirect back to login
+      await dispatch(persistSession(token)).unwrap();
 
       const status = pickFirst(
         p?.status,
@@ -187,10 +217,8 @@ export default function OtpScreen() {
         return;
       }
 
-      // ✅ KEY FIX: if QC logs in, clear old QC + fetch new QC details for this token
       if (String(rootType).toUpperCase().includes("QUALITY_CHECKER")) {
         dispatch(clearQc());
-        // Don't block routing forever; but try to fetch once right now
         await dispatch(fetchQcMe()).unwrap().catch(() => {});
       }
 
@@ -219,6 +247,7 @@ export default function OtpScreen() {
   const onResend = async () => {
     if (sec > 0) return;
     setSec(30);
+    // (optional) call resend api here if you have it
   };
 
   return (
@@ -265,12 +294,7 @@ export default function OtpScreen() {
         <Animated.View
           pointerEvents="none"
           style={[
-            {
-              position: "absolute",
-              inset: 0,
-              backgroundColor: "black",
-              zIndex: 5,
-            },
+            { position: "absolute", inset: 0, backgroundColor: "black", zIndex: 5 },
             dimOverlayAnim,
           ]}
         />
@@ -285,11 +309,7 @@ export default function OtpScreen() {
           }}
         >
           <Animated.View style={formAnim}>
-            <BlurView
-              intensity={22}
-              tint="dark"
-              style={{ borderRadius: 26, overflow: "hidden" }}
-            >
+            <BlurView intensity={22} tint="dark" style={{ borderRadius: 26, overflow: "hidden" }}>
               <View className="bg-black/35 border border-white/10 rounded-[26px] p-5">
                 <Text className="text-slate-300 text-[11px] mb-2">OTP</Text>
 
@@ -303,19 +323,11 @@ export default function OtpScreen() {
                     placeholderTextColor="#64748b"
                     keyboardType="number-pad"
                     className="text-white flex-1 ml-3"
-                    style={{
-                      backgroundColor: "transparent",
-                      letterSpacing: 6,
-                      fontSize: 18,
-                    }}
+                    style={{ backgroundColor: "transparent", letterSpacing: 6, fontSize: 18 }}
                   />
                   <View
                     className={`h-2.5 w-2.5 rounded-full ${
-                      otp.length === 0
-                        ? "bg-slate-700"
-                        : otpOk
-                        ? "bg-emerald-400"
-                        : "bg-rose-400"
+                      otp.length === 0 ? "bg-slate-700" : otpOk ? "bg-emerald-400" : "bg-rose-400"
                     }`}
                   />
                 </View>
@@ -326,28 +338,17 @@ export default function OtpScreen() {
                   </Text>
 
                   <Pressable onPress={onResend} disabled={sec > 0}>
-                    <Text
-                      className={`text-[11px] font-semibold ${
-                        sec > 0 ? "text-slate-500" : "text-emerald-300"
-                      }`}
-                    >
+                    <Text className={`text-[11px] font-semibold ${sec > 0 ? "text-slate-500" : "text-emerald-300"}`}>
                       Resend
                     </Text>
                   </Pressable>
                 </View>
 
-                <Pressable
-                  onPress={() => setAgree((p) => !p)}
-                  className="flex-row items-center mt-4"
-                >
+                <Pressable onPress={() => setAgree((p) => !p)} className="flex-row items-center mt-4">
                   <View className="h-5 w-5 rounded-md border border-white/20 items-center justify-center bg-white/5">
-                    {agree ? (
-                      <Ionicons name="checkmark" size={14} color="#34d399" />
-                    ) : null}
+                    {agree ? <Ionicons name="checkmark" size={14} color="#34d399" /> : null}
                   </View>
-                  <Text className="text-slate-300 text-[11px] ml-3">
-                    I confirm this OTP is mine
-                  </Text>
+                  <Text className="text-slate-300 text-[11px] ml-3">I confirm this OTP is mine</Text>
                 </Pressable>
 
                 <View className="mt-5">
@@ -355,19 +356,13 @@ export default function OtpScreen() {
                   <Pressable
                     disabled={!canVerify}
                     onPress={onVerify}
-                    className={`rounded-3xl overflow-hidden ${
-                      !canVerify || loading ? "opacity-60" : "opacity-100"
-                    }`}
+                    className={`rounded-3xl overflow-hidden ${!canVerify || loading ? "opacity-60" : "opacity-100"}`}
                   >
                     <LinearGradient
                       colors={["#34d399", "#10b981", "#06b6d4"]}
                       start={{ x: 0, y: 0.5 }}
                       end={{ x: 1, y: 0.5 }}
-                      style={{
-                        paddingVertical: 15,
-                        alignItems: "center",
-                        borderRadius: 24,
-                      }}
+                      style={{ paddingVertical: 15, alignItems: "center", borderRadius: 24 }}
                     >
                       <Text className="text-black font-semibold">
                         {loading ? "Checking..." : "Verify & Continue"}

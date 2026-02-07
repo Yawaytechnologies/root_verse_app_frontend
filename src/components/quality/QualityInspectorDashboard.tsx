@@ -6,10 +6,17 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 
 import QcListScreen from "./QcListScreen";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
-import { fetchQcMe, selectInspector as selectQcInspector } from "../../store/qualityAuth/qualityAuth.slice";
+import {
+  fetchQcMe,
+  selectInspector as selectQcInspector,
+} from "../../store/qualityAuth/qualityAuth.slice";
 import QcScannerScreen from "./QcScannerScreen";
 
-import { getQcFillQueue, type QcFillQueuedItem, deriveTabFromPayload } from "../../utils/qcFillQueue";
+import {
+  getQcFillQueue,
+  type QcFillQueuedItem,
+  deriveTabFromPayload,
+} from "../../utils/qcFillQueue";
 
 export type Division = "WILD" | "AQUA" | "MARICULTURE";
 
@@ -43,20 +50,20 @@ function toYmdLocal(ts: number): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+function cleanName(v: any): string | undefined {
+  const t = String(v ?? "").trim();
+  return t ? t : undefined;
+}
+
 function formatZone(i: InspectorInfo) {
-  const dName = (i.district_name || "").trim();
-  const sName = (i.state_name || "").trim();
+  const dName = cleanName(i.district_name);
+  const sName = cleanName(i.state_name);
 
   if (dName && sName) return `${dName}, ${sName}`;
   if (sName) return sName;
   if (dName) return dName;
 
-  const dId = typeof i.district_id === "number" ? String(i.district_id) : "";
-  const sId = typeof i.state_id === "number" ? String(i.state_id) : "";
-
-  if (dId && sId) return `District #${dId}, State #${sId}`;
-  if (sId) return `State #${sId}`;
-  if (dId) return `District #${dId}`;
+  // ✅ don't show id fallback
   return "—";
 }
 
@@ -73,21 +80,37 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   const dispatch = useAppDispatch();
   const qc = useAppSelector(selectQcInspector);
 
+  // ✅ fetch QC profile not only when checker_code missing, but also when names missing
   useEffect(() => {
-    if (!qc?.checker_code) dispatch(fetchQcMe());
-  }, [dispatch, qc?.checker_code]);
+    const needsQcProfile =
+      !qc?.checker_code ||
+      !qc?.checker_name ||
+      !cleanName(qc?.state_name) ||
+      !cleanName(qc?.district_name);
 
+    if (needsQcProfile) dispatch(fetchQcMe());
+  }, [
+    dispatch,
+    qc?.checker_code,
+    qc?.checker_name,
+    qc?.state_name,
+    qc?.district_name,
+  ]);
+
+  // ✅ IMPORTANT: don't let "" override real qc names
   const mergedInspector: InspectorInfo = useMemo(() => {
     const name = inspector?.name || qc?.checker_name || "Inspector";
     const id = inspector?.id || qc?.checker_code || "";
+
     return {
       ...inspector,
       name,
       id,
       state_id: inspector.state_id ?? qc?.state_id,
       district_id: inspector.district_id ?? qc?.district_id,
-      state_name: inspector.state_name ?? qc?.state_name,
-      district_name: inspector.district_name ?? qc?.district_name,
+      state_name: cleanName(inspector.state_name) ?? cleanName(qc?.state_name),
+      district_name:
+        cleanName(inspector.district_name) ?? cleanName(qc?.district_name),
     };
   }, [inspector, qc]);
 
@@ -110,7 +133,8 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
         .filter((x) => upper(x.payload?.division) === upper(division))
         .filter((x) => {
           if (!ymd) return true;
-          const eventAt = (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
+          const eventAt =
+            (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
           return toYmdLocal(eventAt) === ymd;
         });
 
@@ -260,7 +284,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
                 {lang === "en" ? "ID" : "ஐடி"}: {mergedInspector.id}
               </Text>
 
-              {/* ✅ ALWAYS show date (including scanner tab) */}
               <Text style={{ color: "rgba(255,255,255,0.85)", marginTop: 6, fontSize: 12.5 }}>
                 Date: {selectedDate}
               </Text>
