@@ -19,6 +19,11 @@ import NetInfo from "@react-native-community/netinfo";
 
 import { useTrace } from "../../src/data/wild/trace.store";
 
+// ✅ sync (same queue used by catchlog screen)
+import { useAppDispatch } from "../../src/store/hooks";
+import { submitCatchLog } from "../../src/services/wild/catchLog.slice";
+import { flushQueue, getQueueCount } from "../../src/utils/offlineQueue";
+
 type Lang = "ta" | "en";
 
 const TOKEN_KEY = "auth_token";
@@ -27,7 +32,6 @@ const API_BASE = "https://rootverse-backend-5qoo.onrender.com";
 const ME_API = `${API_BASE}/api/me`;
 const OWNER_API_BASE = `${API_BASE}/api/owner/fetch`;
 
-// ✅ offline cache keys
 const LAST_OWNER_ID_KEY = "rv_last_owner_id";
 const OWNER_CACHE_PREFIX = "rv_owner_cache:";
 
@@ -63,8 +67,6 @@ type MeApiRes = {
 const i18n = {
   en: {
     title: "Wild Fisher",
-    online: "Online",
-    offline: "Offline",
     hint: "Tap to open. Long-press to hear again.",
 
     myDetails: "My Details",
@@ -83,7 +85,6 @@ const i18n = {
     catchLogSub: "Record catch details",
     catchLogVoice: "Tap New Catch Log",
 
-    // ✅ UPDATED TEXT
     scanDetails: "Scan & View Catch Log Details",
     scanDetailsSub: "Scan QR to view catch log details",
     scanDetailsVoice: "Tap Scan and View Catch Log Details",
@@ -102,11 +103,13 @@ const i18n = {
     noToken: "No token found. Please login again.",
     sessionExpired: "Session expired. Please login again.",
     offlineNoCache: "Offline. No cached profile found.",
+
+    syncPending: "Sync pending",
+    syncing: "Syncing…",
+    syncDone: "SYNC DONE",
   },
   ta: {
     title: "Wild Fisher",
-    online: "ஆன்லைன்",
-    offline: "ஆஃப்லைன்",
     hint: "தட்டி திறக்கவும். நீண்ட தட்டலில் மீண்டும் கேட்கலாம்.",
 
     myDetails: "என் விவரங்கள்",
@@ -125,7 +128,6 @@ const i18n = {
     catchLogSub: "மீன் பிடிப்பு விவரங்களை பதிவு",
     catchLogVoice: "புதிய பிடிப்பு பதிவு என்று தட்டுங்கள்",
 
-    // ✅ UPDATED TEXT
     scanDetails: "ஸ்கேன் & பிடிப்பு பதிவு விவரங்கள்",
     scanDetailsSub: "QR ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்களை பார்க்கவும்",
     scanDetailsVoice: "ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்கள் பார்க்க தட்டுங்கள்",
@@ -144,6 +146,10 @@ const i18n = {
     noToken: "டோக்கன் இல்லை. மீண்டும் லாகின் செய்யவும்.",
     sessionExpired: "செஷன் முடிந்தது. மீண்டும் லாகின் செய்யவும்.",
     offlineNoCache: "ஆஃப்லைன். சேமித்த ப்ரோஃபைல் இல்லை.",
+
+    syncPending: "சிங்க் நிலுவையில்",
+    syncing: "சிங்க் ஆகிறது…",
+    syncDone: "சிங்க் முடிந்தது",
   },
 };
 
@@ -195,21 +201,15 @@ function Card({
   );
 }
 
-function StatusChip({ online, label }: { online: boolean; label: string }) {
+// ✅ icon-only network indicator (no text)
+function StatusChip({ online }: { online: boolean }) {
   return (
-    <View className="flex-row items-center gap-2">
-      <Ionicons
-        name={online ? "wifi" : "wifi-outline"}
-        size={16}
-        color={online ? UI.green : UI.red}
-      />
-      <Text
-        className="text-sm font-semibold"
-        style={{ color: online ? UI.green : UI.red }}
-      >
-        {label}
-      </Text>
-    </View>
+    <Ionicons
+      name={online ? "wifi" : "wifi-outline"}
+      size={18}
+      color={online ? UI.green : UI.red}
+      accessibilityLabel={online ? "Online" : "Offline"}
+    />
   );
 }
 
@@ -367,7 +367,6 @@ function ActionRow({
             <Text className="text-base font-bold" style={{ color: UI.text }} numberOfLines={1}>
               {title}
             </Text>
-
             <Text className="mt-0.5 text-sm" style={{ color: UI.muted }} numberOfLines={2}>
               {subtitle}
             </Text>
@@ -426,10 +425,18 @@ async function readOwnerCache(ownerId: number): Promise<OwnerApiRes | null> {
   }
 }
 
+async function clearOwnerCaches() {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const del = keys.filter((k) => k === LAST_OWNER_ID_KEY || k.startsWith(OWNER_CACHE_PREFIX));
+    if (del.length) await AsyncStorage.multiRemove(del);
+  } catch {}
+}
+
 async function isOnlineNow(): Promise<boolean> {
   const s = await NetInfo.fetch();
   const connected = !!s.isConnected;
-  const reachable = s.isInternetReachable; // can be null
+  const reachable = s.isInternetReachable;
   return reachable === null ? connected : connected && reachable;
 }
 
@@ -438,10 +445,7 @@ async function isOnlineNow(): Promise<boolean> {
 async function fetchMe(token: string): Promise<MeApiRes> {
   const res = await fetch(ME_API, {
     method: "GET",
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
   });
 
   if (res.status === 401) throw new Error("UNAUTHORIZED");
@@ -461,10 +465,7 @@ async function fetchMe(token: string): Promise<MeApiRes> {
 async function fetchOwnerById(ownerDbId: number, token?: string): Promise<OwnerApiRes> {
   const res = await fetch(`${OWNER_API_BASE}/${encodeURIComponent(String(ownerDbId))}`, {
     method: "GET",
-    headers: {
-      Accept: "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
   });
 
   if (!res.ok) {
@@ -480,40 +481,148 @@ async function fetchOwnerById(ownerDbId: number, token?: string): Promise<OwnerA
 export default function WildDashboard() {
   const insets = useSafeAreaInsets();
   const trace = useTrace();
+  const dispatch = useAppDispatch();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [lang, setLang] = useState<Lang>("ta");
   const t = i18n[lang];
 
-  // ✅ real network state
   const [online, setOnline] = useState(true);
+
+  // ✅ sync indicator
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [showDone, setShowDone] = useState(false);
+  const flushingRef = useRef(false);
+  const doneTimerRef = useRef<any>(null);
 
   const lastCrateId = useMemo(() => trace.events?.[0]?.crateId ?? "", [trace.events]);
 
-  // ✅ profile state
   const [ownerDbId, setOwnerDbId] = useState<number | null>(null);
   const [me, setMe] = useState<MeApiRes | null>(null);
   const [profile, setProfile] = useState<OwnerApiRes | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
 
-  // ✅ network listener
+  const refreshPendingCount = async (): Promise<number> => {
+    try {
+      const c = await getQueueCount();
+      setPendingCount(c);
+      return c;
+    } catch {
+      return pendingCount;
+    }
+  };
+
+  const flashDoneAndHide = () => {
+    setShowDone(true);
+    if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
+    doneTimerRef.current = setTimeout(() => {
+      setShowDone(false);
+    }, 2000);
+  };
+
+  const doFlushQueue = async (ownerIdForPatch?: number | null) => {
+    if (flushingRef.current) return;
+
+    const before = await refreshPendingCount();
+    if (!before || before <= 0) {
+      setSyncing(false);
+      setShowDone(false);
+      return;
+    }
+
+    if (!online) return;
+
+    flushingRef.current = true;
+    setSyncing(true);
+    setShowDone(false);
+
+    let remaining = before;
+    setPendingCount(remaining);
+
+    try {
+      await flushQueue(async (payload: any) => {
+        const patched: any = { ...(payload || {}) };
+        if (!patched.ownerId && ownerIdForPatch) patched.ownerId = ownerIdForPatch;
+
+        await dispatch(submitCatchLog(patched as any)).unwrap();
+
+        remaining = Math.max(0, remaining - 1);
+        setPendingCount(remaining);
+      });
+    } catch {
+      // keep pending
+    } finally {
+      const after = await refreshPendingCount();
+      setSyncing(false);
+      flushingRef.current = false;
+
+      if (before > 0 && after === 0) {
+        flashDoneAndHide();
+      }
+    }
+  };
+
+  // ✅ network listener + auto flush
   useEffect(() => {
-    const sub = NetInfo.addEventListener((s) => {
+    let alive = true;
+
+    const sub = NetInfo.addEventListener(async (s) => {
       const connected = !!s.isConnected;
       const reachable = s.isInternetReachable;
       const on = reachable === null ? connected : connected && reachable;
+
+      if (!alive) return;
       setOnline(on);
+
+      if (on) {
+        const oid = ownerDbId || (await readLastOwnerId());
+        await doFlushQueue(oid || null);
+      }
     });
-    return () => sub();
-  }, []);
+
+    (async () => {
+      await refreshPendingCount();
+      const onNow = await isOnlineNow();
+      if (!alive) return;
+      setOnline(onNow);
+      if (onNow) {
+        const oid = ownerDbId || (await readLastOwnerId());
+        await doFlushQueue(oid || null);
+      }
+    })();
+
+    return () => {
+      alive = false;
+      sub();
+      if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatch, ownerDbId]);
+
+  const showSync = pendingCount > 0 || syncing || showDone;
+
+  const syncUi = useMemo(() => {
+    if (syncing) {
+      return {
+        icon: "sync-outline" as const,
+        color: UI.blue,
+        text: `${t.syncing} (${pendingCount})`,
+      };
+    }
+    return {
+      icon: online ? ("cloud-upload-outline" as const) : ("cloud-offline-outline" as const),
+      color: UI.red,
+      text: `${t.syncPending}: ${pendingCount}`,
+    };
+  }, [syncing, pendingCount, online, t]);
 
   const loadProfile = async () => {
     setLoadingProfile(true);
     setProfileError(null);
 
     try {
-      // 1) Always try to show cached profile immediately (offline support)
       const lastId = await readLastOwnerId();
       if (lastId) {
         const cached = await readOwnerCache(lastId);
@@ -523,7 +632,6 @@ export default function WildDashboard() {
         }
       }
 
-      // 2) Need token to know “who is logged in” and to refresh profile
       const token = await readTokenFromStorage();
       if (!token) {
         if (!profile && !lastId) {
@@ -533,7 +641,6 @@ export default function WildDashboard() {
         return;
       }
 
-      // 3) If offline, stop here (cache already shown)
       const onNow = await isOnlineNow();
       setOnline(onNow);
       if (!onNow) {
@@ -541,20 +648,19 @@ export default function WildDashboard() {
         return;
       }
 
-      // 4) Online: fetch current user from /api/me
       const meData = await fetchMe(token);
       setMe(meData);
       setOwnerDbId(meData.id);
 
-      // 5) Fetch full owner profile
       const ownerData = await fetchOwnerById(meData.id, token);
       setProfile(ownerData);
 
-      // 6) Cache it for offline use
       await saveOwnerCache(meData.id, ownerData);
+      await refreshPendingCount();
     } catch (e: any) {
       if (e?.message === "UNAUTHORIZED") {
         await clearAuthStorage();
+        await clearOwnerCaches();
         setMe(null);
         setProfile(null);
         setOwnerDbId(null);
@@ -574,10 +680,12 @@ export default function WildDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ reload when app comes foreground (after logout/login)
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active") loadProfile();
+      if (state === "active") {
+        loadProfile();
+        refreshPendingCount();
+      }
     });
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -608,7 +716,6 @@ export default function WildDashboard() {
     };
   }, [profile, me, ownerDbId]);
 
-  // ✅ UPDATED greeting voice line
   const greeted = useRef(false);
   useEffect(() => {
     if (greeted.current) return;
@@ -631,17 +738,54 @@ export default function WildDashboard() {
     <SafeAreaView style={{ flex: 1, backgroundColor: UI.bg }} edges={["top", "left", "right"]}>
       <ProfileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} user={user} lang={lang} />
 
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
-        contentContainerClassName="px-4 pb-6"
-      >
+      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }} contentContainerClassName="px-4 pb-6">
         {/* Header */}
         <View className="pt-3 flex-row items-center justify-between">
           <Text className="text-lg font-bold" style={{ color: UI.text }}>
             {t.title}
           </Text>
-          <StatusChip online={online} label={online ? t.online : t.offline} />
+
+          <View className="flex-row items-center">
+            {/* ✅ show pending/syncing in header (small) ONLY when NOT showDone */}
+            {showSync && !showDone && (
+              <Pressable
+                onPress={async () => {
+                  await haptic();
+                  if (syncing) return;
+                  if (!online) return;
+                  const oid = ownerDbId || (await readLastOwnerId());
+                  await doFlushQueue(oid || null);
+                }}
+                className="flex-row items-center rounded-full px-2 py-2 active:opacity-70"
+                hitSlop={8}
+              >
+                <Ionicons name={syncUi.icon as any} size={18} color={syncUi.color} />
+                <Text className="ml-2 text-xs font-semibold" style={{ color: syncUi.color }}>
+                  {syncUi.text}
+                </Text>
+              </Pressable>
+            )}
+
+            <View style={{ width: showSync && !showDone ? 8 : 0 }} />
+
+            <StatusChip online={online} />
+          </View>
         </View>
+
+        {/* ✅ BIG "SYNC DONE" banner (2 seconds) */}
+        {showDone && (
+          <View className="mt-3">
+            <View
+              className="flex-row items-center justify-center rounded-2xl px-4 py-3 border"
+              style={{ backgroundColor: UI.greenSoft, borderColor: "#bfe8cd" }}
+            >
+              <Ionicons name="checkmark-circle" size={24} color={UI.green} />
+              <Text className="ml-2 text-base font-extrabold" style={{ color: UI.green }}>
+                {t.syncDone}
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Profile card */}
         <Card className="mt-4">
