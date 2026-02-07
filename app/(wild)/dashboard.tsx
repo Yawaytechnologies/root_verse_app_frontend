@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { router } from "expo-router";
 import {
   ActivityIndicator,
-  Alert,
   AppState,
   Image,
   Modal,
@@ -105,10 +104,6 @@ const i18n = {
     sessionExpired: "Session expired. Please login again.",
     offlineNoCache: "Offline. No cached profile found.",
 
-    logout: "Logout",
-    logoutConfirm: "Do you want to logout?",
-    cancel: "Cancel",
-
     syncPending: "Sync pending",
     syncing: "Syncing…",
     syncDone: "SYNC DONE",
@@ -151,10 +146,6 @@ const i18n = {
     noToken: "டோக்கன் இல்லை. மீண்டும் லாகின் செய்யவும்.",
     sessionExpired: "செஷன் முடிந்தது. மீண்டும் லாகின் செய்யவும்.",
     offlineNoCache: "ஆஃப்லைன். சேமித்த ப்ரோஃபைல் இல்லை.",
-
-    logout: "லாக்அவுட்",
-    logoutConfirm: "லாக்அவுட் செய்ய வேண்டுமா?",
-    cancel: "ரத்து",
 
     syncPending: "சிங்க் நிலுவையில்",
     syncing: "சிங்க் ஆகிறது…",
@@ -359,7 +350,13 @@ function ActionRow({
   };
 
   return (
-    <Pressable onPressIn={onPressIn} onLongPress={onLongPress} delayLongPress={350} onPress={onTap} className="active:opacity-85">
+    <Pressable
+      onPressIn={onPressIn}
+      onLongPress={onLongPress}
+      delayLongPress={350}
+      onPress={onTap}
+      className="active:opacity-85"
+    >
       <Card>
         <View className="px-4 py-4 flex-row items-center">
           <View className="h-12 w-12 rounded-xl items-center justify-center" style={{ backgroundColor: UI.blueSoft }}>
@@ -520,7 +517,6 @@ export default function WildDashboard() {
   const flashDoneAndHide = () => {
     setShowDone(true);
     if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
-    // ✅ 조금 பெரிய "Sync done" show longer
     doneTimerRef.current = setTimeout(() => {
       setShowDone(false);
     }, 2000);
@@ -607,7 +603,6 @@ export default function WildDashboard() {
 
   const showSync = pendingCount > 0 || syncing || showDone;
 
-  // ✅ red pending, blue syncing
   const syncUi = useMemo(() => {
     if (syncing) {
       return {
@@ -622,38 +617,6 @@ export default function WildDashboard() {
       text: `${t.syncPending}: ${pendingCount}`,
     };
   }, [syncing, pendingCount, online, t]);
-
-  const onLogout = () => {
-    Alert.alert(
-      t.logout,
-      t.logoutConfirm,
-      [
-        { text: t.cancel, style: "cancel" },
-        {
-          text: t.logout,
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await haptic();
-              Speech.stop();
-
-              await clearAuthStorage();
-              await clearOwnerCaches();
-
-              setMe(null);
-              setProfile(null);
-              setOwnerDbId(null);
-
-              router.replace("/(auth)/otp" as const);
-            } catch {
-              router.replace("/(auth)/otp" as const);
-            }
-          },
-        },
-      ],
-      { cancelable: true }
-    );
-  };
 
   const loadProfile = async () => {
     setLoadingProfile(true);
@@ -806,11 +769,6 @@ export default function WildDashboard() {
             <View style={{ width: showSync && !showDone ? 8 : 0 }} />
 
             <StatusChip online={online} />
-
-            <View style={{ width: 6 }} />
-            <Pressable onPress={onLogout} className="rounded-full px-2 py-2 active:opacity-70" hitSlop={8}>
-              <Ionicons name="log-out-outline" size={20} color={UI.text} />
-            </Pressable>
           </View>
         </View>
 
@@ -907,7 +865,10 @@ export default function WildDashboard() {
             </View>
 
             {!!lastCrateId && (
-              <View className="mt-2 rounded-xl px-3 py-2 border" style={{ backgroundColor: UI.greenSoft, borderColor: "#bfe8cd" }}>
+              <View
+                className="mt-2 rounded-xl px-3 py-2 border"
+                style={{ backgroundColor: UI.greenSoft, borderColor: "#bfe8cd" }}
+              >
                 <Text className="text-sm" style={{ color: UI.text }}>
                   Last Sticker: <Text style={{ fontWeight: "800" }}>{String(lastCrateId)}</Text>
                 </Text>
