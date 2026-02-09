@@ -16,11 +16,14 @@ import loginReducer from "./login.slice";
 import meReducer from "./me.slice";
 import registrationReducer from "./registration.slice";
 
+// ✅ auth session (persisted token)
+import authSessionReducer from "./authSession.slice";
+
 // ---- quality ----
-import qcFillReducer from "../quality/qcFill.slice"; // ✅ ADD
+import qcFillReducer from "../quality/qcFill.slice";
+import qcOverviewReducer from "../quality/qcOverview.slice";
 import qrDetailsReducer from "../quality/qrDetails.slice";
 import qualityCheckerReducer from "../qualityChecker/qualityChecker.slice";
-import qcOverviewReducer from "../quality/qcOverview.slice";
 
 // ---- ui ----
 import themeReducer from "../theme.slice";
@@ -41,14 +44,17 @@ export const store = configureStore({
     login: loginReducer,
     me: meReducer,
 
+    // ✅ persisted session (THIS WAS MISSING)
+    authSession: authSessionReducer,
+
     // ✅ QC auth
     qualityAuth: qualityAuthReducer,
     qualityChecker: qualityCheckerReducer,
 
     // ✅ quality
     qrDetails: qrDetailsReducer,
-    qcFill: qcFillReducer, // ✅ ADD
-    qcOverview: qcOverviewReducer, // ✅ ADD
+    qcFill: qcFillReducer,
+    qcOverview: qcOverviewReducer,
 
     // ui
     theme: themeReducer,

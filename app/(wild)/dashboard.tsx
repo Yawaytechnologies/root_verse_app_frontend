@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { router } from "expo-router";
 import {
   ActivityIndicator,
-  Alert,
   AppState,
   Image,
   Modal,
@@ -108,10 +107,6 @@ const i18n = {
     sessionExpired: "Session expired. Please login again.",
     offlineNoCache: "Offline. No cached profile found.",
 
-    logout: "Logout",
-    logoutConfirm: "Do you want to logout?",
-    cancel: "Cancel",
-
     syncPending: "Sync pending",
     syncing: "Syncing…",
     syncDone: "SYNC DONE",
@@ -154,10 +149,6 @@ const i18n = {
     noToken: "டோக்கன் இல்லை. மீண்டும் லாகின் செய்யவும்.",
     sessionExpired: "செஷன் முடிந்தது. மீண்டும் லாகின் செய்யவும்.",
     offlineNoCache: "ஆஃப்லைன். சேமித்த ப்ரோஃபைல் இல்லை.",
-
-    logout: "லாக்அவுட்",
-    logoutConfirm: "லாக்அவுட் செய்ய வேண்டுமா?",
-    cancel: "ரத்து",
 
     syncPending: "சிங்க் நிலுவையில்",
     syncing: "சிங்க் ஆகிறது…",
