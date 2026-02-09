@@ -1,7 +1,13 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import NetInfo from "@react-native-community/netinfo";
+import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
+import * as Speech from "expo-speech";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   Image,
   Modal,
@@ -10,24 +16,32 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import * as Speech from "expo-speech";
-import * as Haptics from "expo-haptics";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import NetInfo from "@react-native-community/netinfo";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 import { useTrace } from "../../src/data/wild/trace.store";
+
+// ✅ sync (same queue used by catchlog screen)
+import { submitCatchLog } from "../../src/services/wild/catchLog.slice";
+import { logoutSession } from "../../src/store/auth/authSession.slice";
+import { useAppDispatch } from "../../src/store/hooks";
+import { flushQueue, getQueueCount } from "../../src/utils/offlineQueue";
 
 type Lang = "ta" | "en";
 
 const TOKEN_KEY = "auth_token";
 
+// ✅ CHANGE THIS to your actual login screen route if different
+// Example possibilities:
+// "/(auth)/login" | "/(auth)" | "/(auth)/index"
+const AUTH_LOGIN_ROUTE = "/(auth)/login" as const;
+
 const API_BASE = "https://rootverse-backend-5qoo.onrender.com";
 const ME_API = `${API_BASE}/api/me`;
 const OWNER_API_BASE = `${API_BASE}/api/owner/fetch`;
 
-// ✅ offline cache keys
 const LAST_OWNER_ID_KEY = "rv_last_owner_id";
 const OWNER_CACHE_PREFIX = "rv_owner_cache:";
 
@@ -63,8 +77,6 @@ type MeApiRes = {
 const i18n = {
   en: {
     title: "Wild Fisher",
-    online: "Online",
-    offline: "Offline",
     hint: "Tap to open. Long-press to hear again.",
 
     myDetails: "My Details",
@@ -83,7 +95,6 @@ const i18n = {
     catchLogSub: "Record catch details",
     catchLogVoice: "Tap New Catch Log",
 
-    // ✅ UPDATED TEXT
     scanDetails: "Scan & View Catch Log Details",
     scanDetailsSub: "Scan QR to view catch log details",
     scanDetailsVoice: "Tap Scan and View Catch Log Details",
@@ -102,11 +113,17 @@ const i18n = {
     noToken: "No token found. Please login again.",
     sessionExpired: "Session expired. Please login again.",
     offlineNoCache: "Offline. No cached profile found.",
+
+    logout: "Logout",
+    logoutConfirm: "Do you want to logout?",
+    cancel: "Cancel",
+
+    syncPending: "Sync pending",
+    syncing: "Syncing…",
+    syncDone: "SYNC DONE",
   },
   ta: {
     title: "Wild Fisher",
-    online: "ஆன்லைன்",
-    offline: "ஆஃப்லைன்",
     hint: "தட்டி திறக்கவும். நீண்ட தட்டலில் மீண்டும் கேட்கலாம்.",
 
     myDetails: "என் விவரங்கள்",
@@ -125,10 +142,10 @@ const i18n = {
     catchLogSub: "மீன் பிடிப்பு விவரங்களை பதிவு",
     catchLogVoice: "புதிய பிடிப்பு பதிவு என்று தட்டுங்கள்",
 
-    // ✅ UPDATED TEXT
     scanDetails: "ஸ்கேன் & பிடிப்பு பதிவு விவரங்கள்",
     scanDetailsSub: "QR ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்களை பார்க்கவும்",
-    scanDetailsVoice: "ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்கள் பார்க்க தட்டுங்கள்",
+    scanDetailsVoice:
+      "ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்கள் பார்க்க தட்டுங்கள்",
 
     trips: "என் பயணங்கள்",
     tripsSub: "பயண பட்டியலை பார்க்கவும்",
@@ -144,6 +161,14 @@ const i18n = {
     noToken: "டோக்கன் இல்லை. மீண்டும் லாகின் செய்யவும்.",
     sessionExpired: "செஷன் முடிந்தது. மீண்டும் லாகின் செய்யவும்.",
     offlineNoCache: "ஆஃப்லைன். சேமித்த ப்ரோஃபைல் இல்லை.",
+
+    logout: "லாக்அவுட்",
+    logoutConfirm: "லாக்அவுட் செய்ய வேண்டுமா?",
+    cancel: "ரத்து",
+
+    syncPending: "சிங்க் நிலுவையில்",
+    syncing: "சிங்க் ஆகிறது…",
+    syncDone: "சிங்க் முடிந்தது",
   },
 };
 
@@ -195,21 +220,15 @@ function Card({
   );
 }
 
-function StatusChip({ online, label }: { online: boolean; label: string }) {
+// ✅ icon-only network indicator (no text)
+function StatusChip({ online }: { online: boolean }) {
   return (
-    <View className="flex-row items-center gap-2">
-      <Ionicons
-        name={online ? "wifi" : "wifi-outline"}
-        size={16}
-        color={online ? UI.green : UI.red}
-      />
-      <Text
-        className="text-sm font-semibold"
-        style={{ color: online ? UI.green : UI.red }}
-      >
-        {label}
-      </Text>
-    </View>
+    <Ionicons
+      name={online ? "wifi" : "wifi-outline"}
+      size={18}
+      color={online ? UI.green : UI.red}
+      accessibilityLabel={online ? "Online" : "Offline"}
+    />
   );
 }
 
@@ -237,15 +256,26 @@ function ProfileDrawer({
   const t = i18n[lang];
 
   return (
-    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={open}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
       <Pressable onPress={onClose} className="flex-1 bg-black/40">
-        <Pressable onPress={() => {}} className="absolute left-0 top-0 h-full w-[86%] bg-white">
+        <Pressable
+          onPress={() => {}}
+          className="absolute left-0 top-0 h-full w-[86%] bg-white"
+        >
           <ScrollView contentContainerClassName="px-4 pt-6 pb-10">
             <View className="flex-row items-center justify-between">
               <Text className="text-xl font-bold" style={{ color: UI.text }}>
                 {t.myDetails}
               </Text>
-              <Pressable onPress={onClose} className="rounded-full p-2 active:opacity-70">
+              <Pressable
+                onPress={onClose}
+                className="rounded-full p-2 active:opacity-70"
+              >
                 <Ionicons name="close" size={24} color={UI.text} />
               </Pressable>
             </View>
@@ -256,7 +286,11 @@ function ProfileDrawer({
                 style={{ backgroundColor: UI.blue }}
               >
                 {user.avatarUrl ? (
-                  <Image source={{ uri: user.avatarUrl }} style={{ width: 64, height: 64 }} resizeMode="cover" />
+                  <Image
+                    source={{ uri: user.avatarUrl }}
+                    style={{ width: 64, height: 64 }}
+                    resizeMode="cover"
+                  />
                 ) : (
                   <Text className="text-white font-extrabold text-lg">
                     {(user.name || "—")
@@ -270,15 +304,27 @@ function ProfileDrawer({
               </View>
 
               <View className="flex-1">
-                <Text className="text-lg font-bold" style={{ color: UI.text }} numberOfLines={1}>
+                <Text
+                  className="text-lg font-bold"
+                  style={{ color: UI.text }}
+                  numberOfLines={1}
+                >
                   {user.name}
                 </Text>
-                <Text className="text-sm" style={{ color: UI.muted }} numberOfLines={1}>
+                <Text
+                  className="text-sm"
+                  style={{ color: UI.muted }}
+                  numberOfLines={1}
+                >
                   {user.role} · {user.ownerId}
                 </Text>
 
                 {!!(user.district || user.state) && (
-                  <Text className="mt-1 text-sm" style={{ color: UI.muted }} numberOfLines={1}>
+                  <Text
+                    className="mt-1 text-sm"
+                    style={{ color: UI.muted }}
+                    numberOfLines={1}
+                  >
                     {[user.district, user.state].filter(Boolean).join(", ")}
                   </Text>
                 )}
@@ -297,7 +343,10 @@ function ProfileDrawer({
                     <Text className="text-sm" style={{ color: UI.muted }}>
                       {x.k}
                     </Text>
-                    <Text className="mt-1 text-base" style={{ color: UI.text, fontWeight: "700" }}>
+                    <Text
+                      className="mt-1 text-base"
+                      style={{ color: UI.text, fontWeight: "700" }}
+                    >
                       {x.v}
                     </Text>
                   </View>
@@ -310,7 +359,9 @@ function ProfileDrawer({
               className="mt-6 rounded-2xl px-4 py-4 active:opacity-90"
               style={{ backgroundColor: UI.blue }}
             >
-              <Text className="text-center text-white font-semibold text-base">{t.close}</Text>
+              <Text className="text-center text-white font-semibold text-base">
+                {t.close}
+              </Text>
             </Pressable>
           </ScrollView>
         </Pressable>
@@ -359,16 +410,26 @@ function ActionRow({
     >
       <Card>
         <View className="px-4 py-4 flex-row items-center">
-          <View className="h-12 w-12 rounded-xl items-center justify-center" style={{ backgroundColor: UI.blueSoft }}>
+          <View
+            className="h-12 w-12 rounded-xl items-center justify-center"
+            style={{ backgroundColor: UI.blueSoft }}
+          >
             <Ionicons name={icon} size={24} color={UI.blue} />
           </View>
 
           <View className="ml-3 flex-1">
-            <Text className="text-base font-bold" style={{ color: UI.text }} numberOfLines={1}>
+            <Text
+              className="text-base font-bold"
+              style={{ color: UI.text }}
+              numberOfLines={1}
+            >
               {title}
             </Text>
-
-            <Text className="mt-0.5 text-sm" style={{ color: UI.muted }} numberOfLines={2}>
+            <Text
+              className="mt-0.5 text-sm"
+              style={{ color: UI.muted }}
+              numberOfLines={2}
+            >
               {subtitle}
             </Text>
           </View>
@@ -393,7 +454,15 @@ async function readTokenFromStorage(): Promise<string | null> {
 }
 
 async function clearAuthStorage() {
-  const keys = [TOKEN_KEY, "access_token", "token"];
+  // ✅ remove all common token keys so it can’t “auto-login”
+  const keys = [
+    TOKEN_KEY,
+    "access_token",
+    "token",
+    "refresh_token",
+    "refreshToken",
+    "id_token",
+  ];
   await Promise.all(keys.map((k) => AsyncStorage.removeItem(k)));
 }
 
@@ -426,10 +495,20 @@ async function readOwnerCache(ownerId: number): Promise<OwnerApiRes | null> {
   }
 }
 
+async function clearOwnerCaches() {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const del = keys.filter(
+      (k) => k === LAST_OWNER_ID_KEY || k.startsWith(OWNER_CACHE_PREFIX),
+    );
+    if (del.length) await AsyncStorage.multiRemove(del);
+  } catch {}
+}
+
 async function isOnlineNow(): Promise<boolean> {
   const s = await NetInfo.fetch();
   const connected = !!s.isConnected;
-  const reachable = s.isInternetReachable; // can be null
+  const reachable = s.isInternetReachable;
   return reachable === null ? connected : connected && reachable;
 }
 
@@ -438,38 +517,46 @@ async function isOnlineNow(): Promise<boolean> {
 async function fetchMe(token: string): Promise<MeApiRes> {
   const res = await fetch(ME_API, {
     method: "GET",
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
   });
 
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`ME API failed: ${res.status} ${res.statusText} ${txt}`.trim());
+    throw new Error(
+      `ME API failed: ${res.status} ${res.statusText} ${txt}`.trim(),
+    );
   }
 
   const json: any = await res.json();
   const me: any = json?.user ?? json?.data?.user ?? json?.data ?? json;
 
   const id = Number(me?.id);
-  if (!Number.isFinite(id) || id <= 0) throw new Error("ME API returned invalid user id");
+  if (!Number.isFinite(id) || id <= 0)
+    throw new Error("ME API returned invalid user id");
   return { ...me, id } as MeApiRes;
 }
 
-async function fetchOwnerById(ownerDbId: number, token?: string): Promise<OwnerApiRes> {
-  const res = await fetch(`${OWNER_API_BASE}/${encodeURIComponent(String(ownerDbId))}`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+async function fetchOwnerById(
+  ownerDbId: number,
+  token?: string,
+): Promise<OwnerApiRes> {
+  const res = await fetch(
+    `${OWNER_API_BASE}/${encodeURIComponent(String(ownerDbId))}`,
+    {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     },
-  });
+  );
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`Owner API failed: ${res.status} ${res.statusText} ${txt}`.trim());
+    throw new Error(
+      `Owner API failed: ${res.status} ${res.statusText} ${txt}`.trim(),
+    );
   }
 
   return (await res.json()) as OwnerApiRes;
@@ -480,40 +567,206 @@ async function fetchOwnerById(ownerDbId: number, token?: string): Promise<OwnerA
 export default function WildDashboard() {
   const insets = useSafeAreaInsets();
   const trace = useTrace();
+  const dispatch = useAppDispatch();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [lang, setLang] = useState<Lang>("ta");
   const t = i18n[lang];
 
-  // ✅ real network state
   const [online, setOnline] = useState(true);
 
-  const lastCrateId = useMemo(() => trace.events?.[0]?.crateId ?? "", [trace.events]);
+  // ✅ sync indicator
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [showDone, setShowDone] = useState(false);
+  const flushingRef = useRef(false);
+  // guard to indicate an in-progress logout/navigation away
+  const loggingOutRef = useRef(false);
+  const doneTimerRef = useRef<any>(null);
 
-  // ✅ profile state
+  const lastCrateId = useMemo(
+    () => trace.events?.[0]?.crateId ?? "",
+    [trace.events],
+  );
+
   const [ownerDbId, setOwnerDbId] = useState<number | null>(null);
   const [me, setMe] = useState<MeApiRes | null>(null);
   const [profile, setProfile] = useState<OwnerApiRes | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
 
-  // ✅ network listener
+  const refreshPendingCount = async (): Promise<number> => {
+    try {
+      const c = await getQueueCount();
+      setPendingCount(c);
+      return c;
+    } catch {
+      return pendingCount;
+    }
+  };
+
+  const flashDoneAndHide = () => {
+    setShowDone(true);
+    if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
+    doneTimerRef.current = setTimeout(() => {
+      setShowDone(false);
+    }, 2000);
+  };
+
+  const doFlushQueue = async (ownerIdForPatch?: number | null) => {
+    if (flushingRef.current) return;
+
+    const before = await refreshPendingCount();
+    if (!before || before <= 0) {
+      setSyncing(false);
+      setShowDone(false);
+      return;
+    }
+
+    if (!online) return;
+
+    flushingRef.current = true;
+    setSyncing(true);
+    setShowDone(false);
+
+    let remaining = before;
+    setPendingCount(remaining);
+
+    try {
+      await flushQueue(async (payload: any) => {
+        const patched: any = { ...(payload || {}) };
+        if (!patched.ownerId && ownerIdForPatch)
+          patched.ownerId = ownerIdForPatch;
+
+        await dispatch(submitCatchLog(patched as any)).unwrap();
+
+        remaining = Math.max(0, remaining - 1);
+        setPendingCount(remaining);
+      });
+    } catch {
+      // keep pending
+    } finally {
+      const after = await refreshPendingCount();
+      setSyncing(false);
+      flushingRef.current = false;
+
+      if (before > 0 && after === 0) {
+        flashDoneAndHide();
+      }
+    }
+  };
+
+  // ✅ network listener + auto flush
   useEffect(() => {
-    const sub = NetInfo.addEventListener((s) => {
+    let alive = true;
+
+    const sub = NetInfo.addEventListener(async (s) => {
       const connected = !!s.isConnected;
       const reachable = s.isInternetReachable;
       const on = reachable === null ? connected : connected && reachable;
+
+      if (!alive) return;
       setOnline(on);
+
+      if (on) {
+        const oid = ownerDbId || (await readLastOwnerId());
+        await doFlushQueue(oid || null);
+      }
     });
-    return () => sub();
-  }, []);
+
+    (async () => {
+      await refreshPendingCount();
+      const onNow = await isOnlineNow();
+      if (!alive) return;
+      setOnline(onNow);
+      if (onNow) {
+        const oid = ownerDbId || (await readLastOwnerId());
+        await doFlushQueue(oid || null);
+      }
+    })();
+
+    return () => {
+      alive = false;
+      sub();
+      if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatch, ownerDbId]);
+
+  const showSync = pendingCount > 0 || syncing || showDone;
+
+  // ✅ red pending, blue syncing
+  const syncUi = useMemo(() => {
+    if (syncing) {
+      return {
+        icon: "sync-outline" as const,
+        color: UI.blue,
+        text: `${t.syncing} (${pendingCount})`,
+      };
+    }
+    return {
+      icon: online
+        ? ("cloud-upload-outline" as const)
+        : ("cloud-offline-outline" as const),
+      color: UI.red,
+      text: `${t.syncPending}: ${pendingCount}`,
+    };
+  }, [syncing, pendingCount, online, t]);
+
+  const onLogout = () => {
+    Alert.alert(
+      t.logout,
+      t.logoutConfirm,
+      [
+        { text: t.cancel, style: "cancel" },
+        {
+          text: t.logout,
+          style: "destructive",
+          onPress: async () => {
+            // mark logout flow started to prevent other redirects from racing
+            loggingOutRef.current = true;
+            try {
+              await haptic();
+              Speech.stop();
+
+              // ✅ clear local token + caches (this is your token "expire")
+              await clearAuthStorage();
+              await clearOwnerCaches();
+
+              // clear redux session/token as well
+              try {
+                // best-effort: clear persisted session in store
+                // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                await dispatch(logoutSession()).unwrap();
+              } catch {}
+
+              setMe(null);
+              setProfile(null);
+              setOwnerDbId(null);
+
+              // ✅ go to LOGIN (not OTP)
+              router.replace(AUTH_LOGIN_ROUTE);
+            } catch {
+              router.replace(AUTH_LOGIN_ROUTE);
+            }
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  };
 
   const loadProfile = async () => {
     setLoadingProfile(true);
     setProfileError(null);
 
+    // if a logout/navigation-away is in progress, don't attempt redirects or network work
+    if (loggingOutRef.current) {
+      setLoadingProfile(false);
+      return;
+    }
+
     try {
-      // 1) Always try to show cached profile immediately (offline support)
       const lastId = await readLastOwnerId();
       if (lastId) {
         const cached = await readOwnerCache(lastId);
@@ -523,17 +776,15 @@ export default function WildDashboard() {
         }
       }
 
-      // 2) Need token to know “who is logged in” and to refresh profile
       const token = await readTokenFromStorage();
       if (!token) {
         if (!profile && !lastId) {
           setProfileError(t.noToken);
-          router.replace("/(auth)/otp" as const);
+          if (!loggingOutRef.current) router.replace(AUTH_LOGIN_ROUTE);
         }
         return;
       }
 
-      // 3) If offline, stop here (cache already shown)
       const onNow = await isOnlineNow();
       setOnline(onNow);
       if (!onNow) {
@@ -541,25 +792,24 @@ export default function WildDashboard() {
         return;
       }
 
-      // 4) Online: fetch current user from /api/me
       const meData = await fetchMe(token);
       setMe(meData);
       setOwnerDbId(meData.id);
 
-      // 5) Fetch full owner profile
       const ownerData = await fetchOwnerById(meData.id, token);
       setProfile(ownerData);
 
-      // 6) Cache it for offline use
       await saveOwnerCache(meData.id, ownerData);
+      await refreshPendingCount();
     } catch (e: any) {
       if (e?.message === "UNAUTHORIZED") {
         await clearAuthStorage();
+        await clearOwnerCaches();
         setMe(null);
         setProfile(null);
         setOwnerDbId(null);
         setProfileError(t.sessionExpired);
-        router.replace("/(auth)/otp" as const);
+        if (!loggingOutRef.current) router.replace(AUTH_LOGIN_ROUTE);
         return;
       }
 
@@ -574,10 +824,12 @@ export default function WildDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ reload when app comes foreground (after logout/login)
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active") loadProfile();
+      if (state === "active") {
+        loadProfile();
+        refreshPendingCount();
+      }
     });
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -588,12 +840,18 @@ export default function WildDashboard() {
 
     const name = src?.username ? String(src.username) : "—";
     const role = src?.rootverse_type ? String(src.rootverse_type) : "—";
-    const ownerIdLabel = src?.owner_id ? String(src.owner_id) : ownerDbId ? `ID-${ownerDbId}` : "—";
+    const ownerIdLabel = src?.owner_id
+      ? String(src.owner_id)
+      : ownerDbId
+        ? `ID-${ownerDbId}`
+        : "—";
 
     const phone = src?.phone_no ? String(src.phone_no) : "—";
     const email = src?.email ? String(src.email) : "—";
     const address = src?.address ? String(src.address) : "—";
-    const avatarUrl = src?.profile_picture_url ? String(src.profile_picture_url) : undefined;
+    const avatarUrl = src?.profile_picture_url
+      ? String(src.profile_picture_url)
+      : undefined;
 
     return {
       name,
@@ -608,7 +866,6 @@ export default function WildDashboard() {
     };
   }, [profile, me, ownerDbId]);
 
-  // ✅ UPDATED greeting voice line
   const greeted = useRef(false);
   useEffect(() => {
     if (greeted.current) return;
@@ -620,7 +877,7 @@ export default function WildDashboard() {
         lang === "ta"
           ? "புதிய பயணம். புதிய பிடிப்பு பதிவு. ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்கள். என் பயணங்கள்."
           : "New Trip. New Catch Log. Scan and View Catch Log Details. My Trips.",
-        lang
+        lang,
       );
     }, 650);
 
@@ -628,8 +885,16 @@ export default function WildDashboard() {
   }, [lang]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: UI.bg }} edges={["top", "left", "right"]}>
-      <ProfileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} user={user} lang={lang} />
+    <SafeAreaView
+      style={{ flex: 1, backgroundColor: UI.bg }}
+      edges={["top", "left", "right"]}
+    >
+      <ProfileDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        user={user}
+        lang={lang}
+      />
 
       <ScrollView
         contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
@@ -640,8 +905,67 @@ export default function WildDashboard() {
           <Text className="text-lg font-bold" style={{ color: UI.text }}>
             {t.title}
           </Text>
-          <StatusChip online={online} label={online ? t.online : t.offline} />
+
+          <View className="flex-row items-center">
+            {/* ✅ show pending/syncing in header (small) ONLY when NOT showDone */}
+            {showSync && !showDone && (
+              <Pressable
+                onPress={async () => {
+                  await haptic();
+                  if (syncing) return;
+                  if (!online) return;
+                  const oid = ownerDbId || (await readLastOwnerId());
+                  await doFlushQueue(oid || null);
+                }}
+                className="flex-row items-center rounded-full px-2 py-2 active:opacity-70"
+                hitSlop={8}
+              >
+                <Ionicons
+                  name={syncUi.icon as any}
+                  size={18}
+                  color={syncUi.color}
+                />
+                <Text
+                  className="ml-2 text-xs font-semibold"
+                  style={{ color: syncUi.color }}
+                >
+                  {syncUi.text}
+                </Text>
+              </Pressable>
+            )}
+
+            <View style={{ width: showSync && !showDone ? 8 : 0 }} />
+
+            <StatusChip online={online} />
+
+            <View style={{ width: 6 }} />
+            <Pressable
+              onPress={onLogout}
+              className="rounded-full px-2 py-2 active:opacity-70"
+              hitSlop={8}
+            >
+              <Ionicons name="log-out-outline" size={20} color={UI.text} />
+            </Pressable>
+          </View>
         </View>
+
+        {/* ✅ BIG "SYNC DONE" banner (2 seconds) */}
+        {showDone && (
+          <View className="mt-3">
+            <View
+              className="flex-row items-center justify-center rounded-2xl px-4 py-3 border"
+              style={{ backgroundColor: UI.greenSoft, borderColor: "#bfe8cd" }}
+            >
+              <Ionicons name="checkmark-circle" size={24} color={UI.green} />
+              <Text
+                className="ml-2 text-base font-extrabold"
+                style={{ color: UI.green }}
+              >
+                {t.syncDone}
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Profile card */}
         <Card className="mt-4">
@@ -657,7 +981,11 @@ export default function WildDashboard() {
                   style={{ backgroundColor: UI.blue }}
                 >
                   {user.avatarUrl ? (
-                    <Image source={{ uri: user.avatarUrl }} style={{ width: 56, height: 56 }} resizeMode="cover" />
+                    <Image
+                      source={{ uri: user.avatarUrl }}
+                      style={{ width: 56, height: 56 }}
+                      resizeMode="cover"
+                    />
                   ) : (
                     <Text className="text-white font-extrabold text-lg">
                       {(user.name || "—")
@@ -671,33 +999,59 @@ export default function WildDashboard() {
                 </View>
 
                 <View style={{ flex: 1 }}>
-                  <Text className="text-base font-bold" style={{ color: UI.text }} numberOfLines={1}>
+                  <Text
+                    className="text-base font-bold"
+                    style={{ color: UI.text }}
+                    numberOfLines={1}
+                  >
                     {user.name}
                   </Text>
 
-                  <Text className="text-sm" style={{ color: UI.muted }} numberOfLines={1}>
+                  <Text
+                    className="text-sm"
+                    style={{ color: UI.muted }}
+                    numberOfLines={1}
+                  >
                     {user.role} · {user.ownerId}
                   </Text>
 
                   {!!(user.district || user.state) && (
-                    <Text className="mt-0.5 text-sm" style={{ color: UI.muted }} numberOfLines={1}>
+                    <Text
+                      className="mt-0.5 text-sm"
+                      style={{ color: UI.muted }}
+                      numberOfLines={1}
+                    >
                       {[user.district, user.state].filter(Boolean).join(", ")}
                     </Text>
                   )}
                 </View>
               </View>
 
-              {loadingProfile ? <ActivityIndicator /> : <Ionicons name="chevron-forward" size={22} color={UI.muted} />}
+              {loadingProfile ? (
+                <ActivityIndicator />
+              ) : (
+                <Ionicons name="chevron-forward" size={22} color={UI.muted} />
+              )}
             </View>
 
-            <View className="mt-3 rounded-xl px-3 py-2" style={{ backgroundColor: UI.blueSoft }}>
+            <View
+              className="mt-3 rounded-xl px-3 py-2"
+              style={{ backgroundColor: UI.blueSoft }}
+            >
               {loadingProfile ? (
-                <Text className="text-sm font-semibold" style={{ color: UI.blue }}>
+                <Text
+                  className="text-sm font-semibold"
+                  style={{ color: UI.blue }}
+                >
                   {t.loadingProfile}
                 </Text>
               ) : profileError ? (
                 <View className="flex-row items-center justify-between">
-                  <Text className="text-sm font-semibold flex-1 pr-2" style={{ color: UI.red }} numberOfLines={2}>
+                  <Text
+                    className="text-sm font-semibold flex-1 pr-2"
+                    style={{ color: UI.red }}
+                    numberOfLines={2}
+                  >
                     {profileError}
                   </Text>
                   <Pressable
@@ -708,13 +1062,19 @@ export default function WildDashboard() {
                     className="rounded-full px-3 py-1 border"
                     style={{ borderColor: UI.border, backgroundColor: UI.card }}
                   >
-                    <Text className="text-sm font-semibold" style={{ color: UI.text }}>
+                    <Text
+                      className="text-sm font-semibold"
+                      style={{ color: UI.text }}
+                    >
                       {t.retry}
                     </Text>
                   </Pressable>
                 </View>
               ) : (
-                <Text className="text-sm font-semibold" style={{ color: UI.blue }}>
+                <Text
+                  className="text-sm font-semibold"
+                  style={{ color: UI.blue }}
+                >
                   {t.hint}
                 </Text>
               )}
@@ -723,10 +1083,16 @@ export default function WildDashboard() {
             {!!lastCrateId && (
               <View
                 className="mt-2 rounded-xl px-3 py-2 border"
-                style={{ backgroundColor: UI.greenSoft, borderColor: "#bfe8cd" }}
+                style={{
+                  backgroundColor: UI.greenSoft,
+                  borderColor: "#bfe8cd",
+                }}
               >
                 <Text className="text-sm" style={{ color: UI.text }}>
-                  Last Sticker: <Text style={{ fontWeight: "800" }}>{String(lastCrateId)}</Text>
+                  Last Sticker:{" "}
+                  <Text style={{ fontWeight: "800" }}>
+                    {String(lastCrateId)}
+                  </Text>
                 </Text>
               </View>
             )}
