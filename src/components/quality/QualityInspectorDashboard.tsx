@@ -81,6 +81,9 @@ function upper(v: any) {
   return String(v ?? "").trim().toUpperCase();
 }
 
+const TAB_ORDER: TabKey[] = ["scanner", "checked", "pending", "rejected"];
+const tabIndexOf = (t: TabKey) => TAB_ORDER.indexOf(t);
+
 export default function QualityInspectorDashboard({ division, inspector }: Props) {
   const insets = useSafeAreaInsets();
   const theme = useMemo(() => getTheme(division), [division]);
@@ -96,7 +99,13 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
       !cleanName(qc?.district_name);
 
     if (needsQcProfile) dispatch(fetchQcMe());
-  }, [dispatch, qc?.checker_code, qc?.checker_name, qc?.state_name, qc?.district_name]);
+  }, [
+    dispatch,
+    qc?.checker_code,
+    qc?.checker_name,
+    qc?.state_name,
+    qc?.district_name,
+  ]);
 
   const mergedInspector: InspectorInfo = useMemo(() => {
     const name = inspector?.name || qc?.checker_name || "Inspector";
@@ -109,7 +118,8 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
       state_id: inspector.state_id ?? qc?.state_id,
       district_id: inspector.district_id ?? qc?.district_id,
       state_name: cleanName(inspector.state_name) ?? cleanName(qc?.state_name),
-      district_name: cleanName(inspector.district_name) ?? cleanName(qc?.district_name),
+      district_name:
+        cleanName(inspector.district_name) ?? cleanName(qc?.district_name),
     };
   }, [inspector, qc]);
 
@@ -131,7 +141,8 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
         .filter((x) => upper(x.payload?.division) === upper(division))
         .filter((x) => {
           if (!ymd) return true;
-          const eventAt = (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
+          const eventAt =
+            (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
           return toYmdLocal(eventAt) === ymd;
         });
 
@@ -216,6 +227,85 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
     router.replace("/(auth)/login"); // change if your route differs
   };
 
+  /* =======================
+     ✅ Smooth tab animation
+     - underline slides
+     - content fades + slides in
+  ======================= */
+  const tabAnim = useRef(new Animated.Value(tabIndexOf(tab))).current; // 0..3
+  const contentAnim = useRef(new Animated.Value(1)).current; // 0..1
+  const [tabsWidth, setTabsWidth] = useState(0);
+
+  const tabW = useMemo(() => {
+    const w = tabsWidth > 0 ? tabsWidth : 360; // fallback
+    return w / 4;
+  }, [tabsWidth]);
+
+  const activeBarColor =
+    tab === "scanner"
+      ? theme.scannerActive
+      : tab === "checked"
+      ? theme.completedActive
+      : tab === "pending"
+      ? theme.pendingActive
+      : theme.rejectedActive;
+
+  const setTabSmooth = (next: TabKey) => {
+    if (next === tab) return;
+
+    // underline
+    Animated.spring(tabAnim, {
+      toValue: tabIndexOf(next),
+      useNativeDriver: true,
+      speed: 18,
+      bounciness: 6,
+    }).start();
+
+    // content
+    contentAnim.stopAnimation(() => {
+      contentAnim.setValue(0);
+      setTab(next);
+      Animated.timing(contentAnim, {
+        toValue: 1,
+        duration: 220,
+        useNativeDriver: true,
+      }).start();
+    });
+  };
+
+  const contentStyle = {
+    opacity: contentAnim,
+    transform: [
+      {
+        translateX: contentAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [14, 0],
+        }),
+      },
+      {
+        translateY: contentAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [6, 0],
+        }),
+      },
+    ],
+  } as const;
+
+  const underlineStyle = {
+    position: "absolute" as const,
+    bottom: 0,
+    left: 0,
+    height: 3,
+    width: tabW,
+    borderRadius: 999,
+    backgroundColor: activeBarColor,
+    transform: [
+      {
+        translateX: Animated.multiply(tabAnim, tabW),
+      },
+    ],
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#030712" }} edges={["top"]}>
       {/* TOP HEADER */}
@@ -230,7 +320,14 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
         }}
       >
         {/* Row 1: icon + title on left, logout on right */}
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 14,
+          }}
+        >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
             <View
               style={{
@@ -248,8 +345,10 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
             </View>
 
             <View style={{ flex: 1 }}>
-              <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>Quality Inspector</Text>
-              <Text style={{ color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
+              <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>
+                Quality Inspector
+              </Text>
+              <Text style={{ color: "rgba(255,255,255,0.55)", marginTop: 4 }}>
                 {mergedInspector.divisionLabel}
               </Text>
             </View>
@@ -280,8 +379,8 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
           </Animated.View>
         </View>
 
-        {/* Row 2: ✅ Toggle placed BELOW the icon (no unwanted left gap) */}
-        <View style={{ marginTop: 6, flexDirection: "row", alignItems: "center", justifyContent: "flex-start" }}>
+        {/* Row 2: Toggle below icon */}
+        <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", justifyContent: "flex-start" }}>
           <Pressable
             onPress={() => setLang((p) => (p === "en" ? "ta" : "en"))}
             style={{
@@ -301,8 +400,8 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
 
             <View
               style={{
-                height: 16,
-                width: 36,
+                height: 12,
+                width: 26,
                 borderRadius: 999,
                 backgroundColor: "rgba(255,255,255,0.10)",
                 borderWidth: 1,
@@ -322,7 +421,9 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               />
             </View>
 
-            <Text style={{ color: "rgba(255,255,255,0.75)", fontWeight: "900", fontSize: 10 }}>தமிழ்</Text>
+            <Text style={{ color: "rgba(255,255,255,0.75)", fontWeight: "900", fontSize: 10 }}>
+              தமிழ்
+            </Text>
           </Pressable>
         </View>
       </View>
@@ -370,14 +471,22 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
           </View>
         </View>
 
-        <View style={{ backgroundColor: "#071228", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" }}>
+        {/* Tabs (smooth underline) */}
+        <View
+          style={{
+            backgroundColor: "#071228",
+            borderBottomWidth: 1,
+            borderBottomColor: "rgba(255,255,255,0.06)",
+          }}
+          onLayout={(e) => setTabsWidth(e.nativeEvent.layout.width)}
+        >
           <View style={{ flexDirection: "row" }}>
             <MiniTab
               active={tab === "scanner"}
               label={lang === "en" ? "Scan" : "ஸ்கேன்"}
               icon="scan-outline"
               activeColor={theme.scannerActive}
-              onPress={() => setTab("scanner")}
+              onPress={() => setTabSmooth("scanner")}
               lang={lang}
             />
             <MiniTab
@@ -385,7 +494,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               label={lang === "en" ? "Checked" : "சோதித்தது"}
               icon="checkmark-circle-outline"
               activeColor={theme.completedActive}
-              onPress={() => setTab("checked")}
+              onPress={() => setTabSmooth("checked")}
               lang={lang}
             />
             <MiniTab
@@ -393,7 +502,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               label={lang === "en" ? "Pending" : "நிலுவையில்"}
               icon="time-outline"
               activeColor={theme.pendingActive}
-              onPress={() => setTab("pending")}
+              onPress={() => setTabSmooth("pending")}
               lang={lang}
             />
             <MiniTab
@@ -401,13 +510,17 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               label={lang === "en" ? "Rejected" : "நிராகரிப்பு"}
               icon="close-circle-outline"
               activeColor={theme.rejectedActive}
-              onPress={() => setTab("rejected")}
+              onPress={() => setTabSmooth("rejected")}
               lang={lang}
             />
           </View>
+
+          {/* ✅ single smooth underline */}
+          <Animated.View style={underlineStyle} />
         </View>
 
-        <View style={{ paddingHorizontal: 16, paddingVertical: 14 }}>
+        {/* Content (smooth fade/slide) */}
+        <Animated.View style={[{ paddingHorizontal: 16, paddingVertical: 14 }, contentStyle]}>
           {tab === "scanner" ? (
             <QcScannerScreen
               division={division}
@@ -436,7 +549,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               onChangeDate={setSelectedDate}
               onEditItem={(draft) => {
                 setEditDraft(draft);
-                setTab("scanner");
+                setTabSmooth("scanner");
               }}
             />
           ) : (
@@ -448,7 +561,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               onChangeDate={setSelectedDate}
             />
           )}
-        </View>
+        </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -549,7 +662,8 @@ function MiniTab({
         </Text>
       </View>
 
-      <View style={{ marginTop: 8, height: 3, width: "100%", backgroundColor: active ? activeColor : "transparent" }} />
+      {/* (removed per-tab underline, now it's a single animated underline) */}
+      <View style={{ marginTop: 8, height: 3, width: "100%", backgroundColor: "transparent" }} />
     </Pressable>
   );
 }
