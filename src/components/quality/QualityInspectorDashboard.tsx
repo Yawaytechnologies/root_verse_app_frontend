@@ -15,14 +15,18 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 
 import QcListScreen from "./QcListScreen";
+import QcScannerScreen from "./QcScannerScreen";
+
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import {
   clearQc,
   fetchQcMe,
   selectInspector as selectQcInspector,
-  TOKEN_KEY,
+  TOKEN_KEY, // QC token key
 } from "../../store/qualityAuth/qualityAuth.slice";
-import QcScannerScreen from "./QcScannerScreen";
+
+// ✅ GLOBAL auth session (owner token/session)
+import { logoutSession } from "../../store/auth/authSession.slice";
 
 import {
   getQcFillQueue,
@@ -84,6 +88,40 @@ function upper(v: any) {
 const TAB_ORDER: TabKey[] = ["scanner", "checked", "pending", "rejected"];
 const tabIndexOf = (t: TabKey) => TAB_ORDER.indexOf(t);
 
+/* ===========================
+   ✅ GLOBAL CLEAR HELPERS
+   Why: QC logout must clear OWNER session too,
+   otherwise app falls back to Wild dashboard and blinks.
+=========================== */
+const LEGACY_TOKEN_KEYS = [
+  "auth_token",
+  "access_token",
+  "token",
+  "refresh_token",
+  "refreshToken",
+  "id_token",
+];
+
+const LAST_OWNER_ID_KEY = "rv_last_owner_id";
+const OWNER_CACHE_PREFIX = "rv_owner_cache:";
+
+async function clearOwnerCaches() {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const del = keys.filter(
+      (k) => k === LAST_OWNER_ID_KEY || k.startsWith(OWNER_CACHE_PREFIX),
+    );
+    if (del.length) await AsyncStorage.multiRemove(del);
+  } catch {}
+}
+
+async function clearAllAuthStorage() {
+  try {
+    await AsyncStorage.multiRemove([TOKEN_KEY, ...LEGACY_TOKEN_KEYS]);
+  } catch {}
+  await clearOwnerCaches();
+}
+
 export default function QualityInspectorDashboard({ division, inspector }: Props) {
   const insets = useSafeAreaInsets();
   const theme = useMemo(() => getTheme(division), [division]);
@@ -91,7 +129,35 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   const dispatch = useAppDispatch();
   const qc = useAppSelector(selectQcInspector);
 
+  /* ===========================
+     ✅ Logout guard (LOCAL)
+     This prevents QC screen effects while logout is running.
+     (Owner token clearing is what stops Wild fallback.)
+  =========================== */
+  const loggingOutRef = useRef(false);
+  const redirectedRef = useRef(false);
+  const aliveRef = useRef(true);
+  const [loggingOutUI, setLoggingOutUI] = useState(false);
+
+  const safeReplaceOnce = (path: string) => {
+    if (redirectedRef.current) return;
+    redirectedRef.current = true;
+    router.replace(path as any);
+  };
+
   useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+
+  /* ===========================
+     ✅ Fetch QC profile (stop during logout)
+  =========================== */
+  useEffect(() => {
+    if (loggingOutRef.current) return;
+
     const needsQcProfile =
       !qc?.checker_code ||
       !qc?.checker_name ||
@@ -127,14 +193,26 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   const [lang, setLang] = useState<"en" | "ta">("en");
 
   const [selectedDate, setSelectedDate] = useState<string>(() => todayYmd());
-  const [editDraft, setEditDraft] = useState<{ qrCode: string; payload: any } | null>(null);
+  const [editDraft, setEditDraft] = useState<{
+    qrCode: string;
+    payload: any;
+  } | null>(null);
 
   const zoneText = useMemo(() => formatZone(mergedInspector), [mergedInspector]);
-  const [counts, setCounts] = useState({ total: 0, checked: 0, pending: 0, rejected: 0 });
+  const [counts, setCounts] = useState({
+    total: 0,
+    checked: 0,
+    pending: 0,
+    rejected: 0,
+  });
 
   const refreshCounts = async () => {
     try {
+      if (loggingOutRef.current) return;
+
       const q: QcFillQueuedItem[] = await getQcFillQueue();
+      if (loggingOutRef.current || !aliveRef.current) return;
+
       const ymd = String(selectedDate || "").trim();
 
       const divisionItems = q
@@ -142,7 +220,10 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
         .filter((x) => {
           if (!ymd) return true;
           const eventAt =
-            (x.synced ? x.syncedAt : undefined) || x.updatedAt || x.createdAt || 0;
+            (x.synced ? x.syncedAt : undefined) ||
+            x.updatedAt ||
+            x.createdAt ||
+            0;
           return toYmdLocal(eventAt) === ymd;
         });
 
@@ -157,6 +238,8 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
         else rejected += 1;
       }
 
+      if (loggingOutRef.current || !aliveRef.current) return;
+
       setCounts({
         total: divisionItems.length,
         checked,
@@ -169,6 +252,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   };
 
   useEffect(() => {
+    if (loggingOutRef.current) return;
     refreshCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [division, tab, selectedDate]);
@@ -177,6 +261,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
     let alive = true;
     const t = setInterval(() => {
       if (!alive) return;
+      if (loggingOutRef.current) return;
       refreshCounts();
     }, 1200);
 
@@ -203,6 +288,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   const logoutScale = useRef(new Animated.Value(1)).current;
 
   const pressIn = () => {
+    if (loggingOutRef.current) return;
     Animated.spring(logoutScale, {
       toValue: 0.96,
       useNativeDriver: true,
@@ -219,25 +305,49 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
     }).start();
   };
 
+  /* ===========================
+     ✅ THE IMPORTANT PART
+     QC logout must clear:
+     - QC token + QC redux
+     - OWNER session (authSession) + legacy token keys
+     - owner caches so Wild dashboard can't "revive"
+  =========================== */
   const handleLogout = async () => {
+    if (loggingOutRef.current) return;
+
+    loggingOutRef.current = true;
+    setLoggingOutUI(true);
+
     try {
-      await AsyncStorage.removeItem(TOKEN_KEY);
-    } catch {}
-    dispatch(clearQc());
-    router.replace("/(auth)/login"); // change if your route differs
+      // 1) clear QC redux now (stops QC requests)
+      dispatch(clearQc());
+
+      // 2) clear owner session (global)
+      try {
+        await dispatch(logoutSession()).unwrap();
+      } catch {
+        // ignore
+      }
+
+      // 3) clear all possible stored tokens + owner caches
+      await clearAllAuthStorage();
+    } catch {
+      // ignore
+    } finally {
+      // 4) redirect once
+      safeReplaceOnce("/(auth)/login");
+    }
   };
 
   /* =======================
      ✅ Smooth tab animation
-     - underline slides
-     - content fades + slides in
   ======================= */
-  const tabAnim = useRef(new Animated.Value(tabIndexOf(tab))).current; // 0..3
-  const contentAnim = useRef(new Animated.Value(1)).current; // 0..1
+  const tabAnim = useRef(new Animated.Value(tabIndexOf(tab))).current;
+  const contentAnim = useRef(new Animated.Value(1)).current;
   const [tabsWidth, setTabsWidth] = useState(0);
 
   const tabW = useMemo(() => {
-    const w = tabsWidth > 0 ? tabsWidth : 360; // fallback
+    const w = tabsWidth > 0 ? tabsWidth : 360;
     return w / 4;
   }, [tabsWidth]);
 
@@ -253,7 +363,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   const setTabSmooth = (next: TabKey) => {
     if (next === tab) return;
 
-    // underline
     Animated.spring(tabAnim, {
       toValue: tabIndexOf(next),
       useNativeDriver: true,
@@ -261,7 +370,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
       bounciness: 6,
     }).start();
 
-    // content
     contentAnim.stopAnimation(() => {
       contentAnim.setValue(0);
       setTab(next);
@@ -299,11 +407,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
     width: tabW,
     borderRadius: 999,
     backgroundColor: activeBarColor,
-    transform: [
-      {
-        translateX: Animated.multiply(tabAnim, tabW),
-      },
-    ],
+    transform: [{ translateX: Animated.multiply(tabAnim, tabW) }],
   };
 
   return (
@@ -319,7 +423,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
           borderBottomColor: "rgba(255,255,255,0.06)",
         }}
       >
-        {/* Row 1: icon + title on left, logout on right */}
         <View
           style={{
             flexDirection: "row",
@@ -354,8 +457,14 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
             </View>
           </View>
 
-          <Animated.View style={{ transform: [{ scale: logoutScale }] }}>
+          <Animated.View
+            style={{
+              transform: [{ scale: logoutScale }],
+              opacity: loggingOutUI ? 0.55 : 1,
+            }}
+          >
             <Pressable
+              disabled={loggingOutUI}
               onPress={handleLogout}
               onPressIn={pressIn}
               onPressOut={pressOut}
@@ -371,16 +480,33 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
                 gap: 8,
               }}
             >
-              <Ionicons name="log-out-outline" size={16} color="rgba(255,255,255,0.85)" />
-              <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900", fontSize: 12 }}>
-                Logout
+              <Ionicons
+                name="log-out-outline"
+                size={16}
+                color="rgba(255,255,255,0.85)"
+              />
+              <Text
+                style={{
+                  color: "rgba(255,255,255,0.85)",
+                  fontWeight: "900",
+                  fontSize: 12,
+                }}
+              >
+                {loggingOutUI ? "Logging out..." : "Logout"}
               </Text>
             </Pressable>
           </Animated.View>
         </View>
 
-        {/* Row 2: Toggle below icon */}
-        <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", justifyContent: "flex-start" }}>
+        {/* Toggle below icon */}
+        <View
+          style={{
+            marginTop: 10,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "flex-start",
+          }}
+        >
           <Pressable
             onPress={() => setLang((p) => (p === "en" ? "ta" : "en"))}
             style={{
@@ -396,7 +522,15 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               gap: 8,
             }}
           >
-            <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900", fontSize: 12 }}>EN</Text>
+            <Text
+              style={{
+                color: "rgba(255,255,255,0.85)",
+                fontWeight: "900",
+                fontSize: 12,
+              }}
+            >
+              EN
+            </Text>
 
             <View
               style={{
@@ -421,7 +555,13 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               />
             </View>
 
-            <Text style={{ color: "rgba(255,255,255,0.75)", fontWeight: "900", fontSize: 10 }}>
+            <Text
+              style={{
+                color: "rgba(255,255,255,0.75)",
+                fontWeight: "900",
+                fontSize: 10,
+              }}
+            >
               தமிழ்
             </Text>
           </Pressable>
@@ -429,7 +569,10 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
       </View>
 
       {/* BODY */}
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24, flexGrow: 1 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 24, flexGrow: 1 }}
+      >
         <View
           style={{
             backgroundColor: theme.bannerFrom,
@@ -441,37 +584,79 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: "white", fontSize: 28, fontWeight: "900", letterSpacing: -0.2 }}>
+              <Text
+                style={{
+                  color: "white",
+                  fontSize: 28,
+                  fontWeight: "900",
+                  letterSpacing: -0.2,
+                }}
+              >
                 {mergedInspector.name}
               </Text>
 
-              <Text style={{ color: "rgba(255,255,255,0.92)", marginTop: 3, fontSize: 13 }}>
-                {lang === "en" ? "Quality Inspector" : "தர ஆய்வாளர்"} • {zoneText}
+              <Text
+                style={{
+                  color: "rgba(255,255,255,0.92)",
+                  marginTop: 3,
+                  fontSize: 13,
+                }}
+              >
+                {lang === "en" ? "Quality Inspector" : "தர ஆய்வாளர்"} •{" "}
+                {zoneText}
               </Text>
 
-              <Text style={{ color: "rgba(255,255,255,0.85)", marginTop: 2, fontSize: 12.5 }}>
+              <Text
+                style={{
+                  color: "rgba(255,255,255,0.85)",
+                  marginTop: 2,
+                  fontSize: 12.5,
+                }}
+              >
                 {lang === "en" ? "ID" : "ஐடி"}: {mergedInspector.id}
               </Text>
 
-              <Text style={{ color: "rgba(255,255,255,0.85)", marginTop: 6, fontSize: 12.5 }}>
+              <Text
+                style={{
+                  color: "rgba(255,255,255,0.85)",
+                  marginTop: 6,
+                  fontSize: 12.5,
+                }}
+              >
                 Date: {selectedDate}
               </Text>
             </View>
 
             <View style={{ width: 150, gap: 8 }}>
               <View style={{ flexDirection: "row", gap: 8 }}>
-                <StatBox label={lang === "en" ? "Total" : "மொத்தம்"} value={counts.total} bg="#3E86E0" />
-                <StatBox label={lang === "en" ? "Checked" : "சோதித்தது"} value={counts.checked} bg="#34A987" />
+                <StatBox
+                  label={lang === "en" ? "Total" : "மொத்தம்"}
+                  value={counts.total}
+                  bg="#3E86E0"
+                />
+                <StatBox
+                  label={lang === "en" ? "Checked" : "சோதித்தது"}
+                  value={counts.checked}
+                  bg="#34A987"
+                />
               </View>
               <View style={{ flexDirection: "row", gap: 8 }}>
-                <StatBox label={lang === "en" ? "Pending" : "நிலுவை"} value={counts.pending} bg="#D29B3B" />
-                <StatBox label={lang === "en" ? "Rejected" : "நிராகரி"} value={counts.rejected} bg="#CF5A5A" />
+                <StatBox
+                  label={lang === "en" ? "Pending" : "நிலுவை"}
+                  value={counts.pending}
+                  bg="#D29B3B"
+                />
+                <StatBox
+                  label={lang === "en" ? "Rejected" : "நிராகரி"}
+                  value={counts.rejected}
+                  bg="#CF5A5A"
+                />
               </View>
             </View>
           </View>
         </View>
 
-        {/* Tabs (smooth underline) */}
+        {/* Tabs */}
         <View
           style={{
             backgroundColor: "#071228",
@@ -515,12 +700,13 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
             />
           </View>
 
-          {/* ✅ single smooth underline */}
           <Animated.View style={underlineStyle} />
         </View>
 
-        {/* Content (smooth fade/slide) */}
-        <Animated.View style={[{ paddingHorizontal: 16, paddingVertical: 14 }, contentStyle]}>
+        {/* Content */}
+        <Animated.View
+          style={[{ paddingHorizontal: 16, paddingVertical: 14 }, contentStyle]}
+        >
           {tab === "scanner" ? (
             <QcScannerScreen
               division={division}
@@ -529,7 +715,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
               editDraft={editDraft}
               onEditDraftConsumed={() => setEditDraft(null)}
               onAfterSubmit={() => {
-                refreshCounts();
+                if (!loggingOutRef.current) refreshCounts();
               }}
             />
           ) : tab === "checked" ? (
@@ -567,7 +753,15 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   );
 }
 
-function StatBox({ label, value, bg }: { label: string; value: number; bg: string }) {
+function StatBox({
+  label,
+  value,
+  bg,
+}: {
+  label: string;
+  value: number;
+  bg: string;
+}) {
   return (
     <View
       style={{
@@ -585,7 +779,9 @@ function StatBox({ label, value, bg }: { label: string; value: number; bg: strin
         elevation: 8,
       }}
     >
-      <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>{value}</Text>
+      <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>
+        {value}
+      </Text>
 
       <Text
         numberOfLines={1}
@@ -597,7 +793,9 @@ function StatBox({ label, value, bg }: { label: string; value: number; bg: strin
           lineHeight: 11,
           marginTop: 2,
           textAlign: "center",
-          ...(Platform.OS === "android" ? ({ includeFontPadding: false } as any) : null),
+          ...(Platform.OS === "android"
+            ? ({ includeFontPadding: false } as any)
+            : null),
         }}
       >
         {label}
@@ -643,7 +841,11 @@ function MiniTab({
           gap: 8,
         }}
       >
-        <Ionicons name={icon} size={17} color={active ? activeColor : "rgba(255,255,255,0.55)"} />
+        <Ionicons
+          name={icon}
+          size={17}
+          color={active ? activeColor : "rgba(255,255,255,0.55)"}
+        />
 
         <Text
           numberOfLines={1}
@@ -655,15 +857,23 @@ function MiniTab({
             fontSize: isTamil ? 11 : 14,
             lineHeight: isTamil ? 13 : 16,
             textAlign: "left",
-            ...(Platform.OS === "android" ? ({ includeFontPadding: false } as any) : null),
+            ...(Platform.OS === "android"
+              ? ({ includeFontPadding: false } as any)
+              : null),
           }}
         >
           {label}
         </Text>
       </View>
 
-      {/* (removed per-tab underline, now it's a single animated underline) */}
-      <View style={{ marginTop: 8, height: 3, width: "100%", backgroundColor: "transparent" }} />
+      <View
+        style={{
+          marginTop: 8,
+          height: 3,
+          width: "100%",
+          backgroundColor: "transparent",
+        }}
+      />
     </Pressable>
   );
 }
