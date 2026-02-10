@@ -1,5 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { router } from "expo-router";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Platform,
@@ -9,16 +11,14 @@ import {
   TextInput,
   View,
 } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
-import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
 
-import NetInfo from "@react-native-community/netinfo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import NetInfo from "@react-native-community/netinfo";
 
 import { createTrip as createTripDummy } from "../../../src/data/wild/trips.dummy";
-import { useAppDispatch } from "../../../src/store/hooks";
 import { createTrip as createTripThunk } from "../../../src/features/trip/tripSlice";
 import type { TripCreatePayload } from "../../../src/services/wild/tripApi";
+import { useAppDispatch, useAppSelector } from "../../../src/store/hooks";
 
 type Lang = "ta" | "en";
 
@@ -119,8 +119,7 @@ const i18n = {
     plannedTripDT: "திட்டமிட்ட பயண தேதி & நேரம்",
     crewDetails: "குழு விவரங்கள்",
     crewMembers: "குழு உறுப்பினர்கள்",
-    crewHelp:
-      "குறை / கூட்டு பட்டன்களை பயன்படுத்தவும் (குறைந்தபட்சம் 0)",
+    crewHelp: "குறை / கூட்டு பட்டன்களை பயன்படுத்தவும் (குறைந்தபட்சம் 0)",
 
     qrCount: "QR எண்ணிக்கை",
     qrCountPH: "உதா: 10",
@@ -259,7 +258,28 @@ type MeCache = {
 async function readMeCache(): Promise<MeCache | null> {
   try {
     const raw = await AsyncStorage.getItem(ME_CACHE_KEY);
-    if (!raw) return null;
+    if (!raw) {
+      // fallback: try to read from global keys saved by me.slice
+      const ownerCode = String(
+        (await AsyncStorage.getItem("owner_code")) || "",
+      ).trim();
+      const ownerIdStr = String(
+        (await AsyncStorage.getItem("owner_id")) || "",
+      ).trim();
+      const ownerDbId = ownerIdStr ? Number(ownerIdStr) : 0;
+
+      if (ownerCode && ownerDbId) {
+        return {
+          ownerName: "",
+          registrationNo: "",
+          ownerCode,
+          ownerDbId,
+        };
+      }
+
+      return null;
+    }
+
     const p = JSON.parse(raw);
     if (!p || typeof p !== "object") return null;
     return {
@@ -295,7 +315,9 @@ async function fetchMeFromApi(): Promise<MeCache> {
   const json: any = await res.json();
   const u = json?.user ?? json?.data ?? json ?? {};
 
-  const ownerName = String(u?.username ?? u?.owner_name ?? u?.name ?? "").trim();
+  const ownerName = String(
+    u?.username ?? u?.owner_name ?? u?.name ?? "",
+  ).trim();
   const ownerCode = String(u?.owner_id ?? u?.owner_code ?? "").trim();
   const registrationNo = String(
     u?.govt_id ??
@@ -303,16 +325,11 @@ async function fetchMeFromApi(): Promise<MeCache> {
       u?.reg_no ??
       u?.registrationNo ??
       u?.vessel_reg_no ??
-      ""
+      "",
   ).trim();
 
   const ownerDbIdRaw =
-    u?.id ??
-    u?.owner_db_id ??
-    u?.ownerId ??
-    u?.owner_dbid ??
-    u?.owner_db ??
-    0;
+    u?.id ?? u?.owner_db_id ?? u?.ownerId ?? u?.owner_dbid ?? u?.owner_db ?? 0;
   const ownerDbId = Number(ownerDbIdRaw || 0);
 
   return { ownerName, ownerCode, registrationNo, ownerDbId };
@@ -352,9 +369,13 @@ type VesselItem = { id: number; name: string; code?: string | null };
 
 const VESSEL_CACHE_PREFIX = "RV_VESSELS_CACHE_OWNER_V1_";
 
-async function readVesselsCache(ownerDbId: number): Promise<VesselItem[] | null> {
+async function readVesselsCache(
+  ownerDbId: number,
+): Promise<VesselItem[] | null> {
   try {
-    const raw = await AsyncStorage.getItem(`${VESSEL_CACHE_PREFIX}${ownerDbId}`);
+    const raw = await AsyncStorage.getItem(
+      `${VESSEL_CACHE_PREFIX}${ownerDbId}`,
+    );
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as VesselItem[]) : null;
@@ -367,7 +388,7 @@ async function writeVesselsCache(ownerDbId: number, items: VesselItem[]) {
   try {
     await AsyncStorage.setItem(
       `${VESSEL_CACHE_PREFIX}${ownerDbId}`,
-      JSON.stringify(items)
+      JSON.stringify(items),
     );
   } catch {}
 }
@@ -400,7 +421,7 @@ async function geoGet<T>(path: string): Promise<T> {
   const json = await safeJson(res);
   if (!res.ok)
     throw new Error(
-      json?.message || json?.error || `GET ${path} failed (${res.status})`
+      json?.message || json?.error || `GET ${path} failed (${res.status})`,
     );
   return unwrapData<T>(json);
 }
@@ -434,7 +455,9 @@ function EntityPickerSheet<T extends PickerBase>({
     return options.filter(
       (x) =>
         x.name.toLowerCase().includes(t) ||
-        String(x.code || "").toLowerCase().includes(t)
+        String(x.code || "")
+          .toLowerCase()
+          .includes(t),
     );
   }, [q, options]);
 
@@ -563,7 +586,9 @@ async function patchOwnerCodeInTripQueue(ownerCode: string) {
   if (patched > 0) await saveTripQueue(next);
   return patched;
 }
-async function flushTripQueue(send: (payload: TripCreatePayload) => Promise<any>) {
+async function flushTripQueue(
+  send: (payload: TripCreatePayload) => Promise<any>,
+) {
   const items = await loadTripQueue();
   if (!items.length) return { sent: 0, left: 0 };
 
@@ -614,11 +639,11 @@ export default function NewTripRequest() {
         name,
         code: mapMethodToApi(name),
       })),
-    []
+    [],
   );
   const methodSel = useMemo(
     () => methodOptions.find((x) => x.name === method) ?? null,
-    [method, methodOptions]
+    [method, methodOptions],
   );
 
   // ✅ Vessel
@@ -656,38 +681,71 @@ export default function NewTripRequest() {
 
   const dieselCost = useMemo(
     () => toNum(dieselLiters) * toNum(dieselRate),
-    [dieselLiters, dieselRate]
+    [dieselLiters, dieselRate],
   );
-  const iceCost = useMemo(() => toNum(iceKg) * toNum(iceRate), [iceKg, iceRate]);
+  const iceCost = useMemo(
+    () => toNum(iceKg) * toNum(iceRate),
+    [iceKg, iceRate],
+  );
   const totalCost = useMemo(() => dieselCost + iceCost, [dieselCost, iceCost]);
 
   const plannedStr = plannedDT ? formatDateTime(plannedDT) : "";
-  const returnStr = expectedReturn ? formatDateTime(expectedReturn).split(" ")[0] : "";
+  const returnStr = expectedReturn
+    ? formatDateTime(expectedReturn).split(" ")[0]
+    : "";
 
   const [posting, setPosting] = useState(false);
 
-  const [isOnline, setIsOnline] = useState(true);
+  // ✅ Global network state from Redux
+  const globalNetworkState = useAppSelector(
+    (s: any) => s.network?.isOnline ?? true,
+  );
+  const [isOnline, setIsOnline] = useState<boolean>(() => globalNetworkState);
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
 
-  const methodRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
-  const vesselRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
-  const stateRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
-  const districtRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
-  const locationRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
+  const methodRef = useRef<BottomSheetModal>(
+    null,
+  ) as React.RefObject<BottomSheetModal>;
+  const vesselRef = useRef<BottomSheetModal>(
+    null,
+  ) as React.RefObject<BottomSheetModal>;
+  const stateRef = useRef<BottomSheetModal>(
+    null,
+  ) as React.RefObject<BottomSheetModal>;
+  const districtRef = useRef<BottomSheetModal>(
+    null,
+  ) as React.RefObject<BottomSheetModal>;
+  const locationRef = useRef<BottomSheetModal>(
+    null,
+  ) as React.RefObject<BottomSheetModal>;
 
   const flushingRef = useRef(false);
 
-  // Load /me cache
+  // Load /me cache (runs once on mount)
   useEffect(() => {
     let alive = true;
     (async () => {
-      const cached = await readMeCache();
-      if (!alive || !cached) return;
-      if (cached.ownerName) setOwnerName(cached.ownerName);
-      if (cached.registrationNo) setRegistrationNo(cached.registrationNo);
-      if (cached.ownerCode) setOwnerCode(cached.ownerCode);
-      if (cached.ownerDbId) setOwnerDbId(Number(cached.ownerDbId));
+      try {
+        const cached = await readMeCache();
+        if (!alive) return;
+
+        if (cached) {
+          if (cached.ownerName) setOwnerName(cached.ownerName);
+          if (cached.registrationNo) setRegistrationNo(cached.registrationNo);
+          if (cached.ownerCode) setOwnerCode(cached.ownerCode);
+          if (cached.ownerDbId) setOwnerDbId(Number(cached.ownerDbId));
+          setMeLoading(false);
+          setMeError(null);
+        } else {
+          // cache miss - will try online fetch if network available
+          setMeLoading(false);
+        }
+      } catch (e: any) {
+        if (!alive) return;
+        setMeLoading(false);
+        setMeError(String(e?.message || e));
+      }
     })();
     return () => {
       alive = false;
@@ -705,10 +763,8 @@ export default function NewTripRequest() {
 
     refreshCount();
 
-    NetInfo.fetch().then((s) => {
-      const online = !!s.isConnected && (s.isInternetReachable ?? true);
-      if (alive) setIsOnline(online);
-    });
+    // ✅ Use global network state
+    setIsOnline(globalNetworkState);
 
     const unsub = NetInfo.addEventListener((state) => {
       const online = !!state.isConnected && (state.isInternetReachable ?? true);
@@ -721,12 +777,15 @@ export default function NewTripRequest() {
       alive = false;
       unsub();
     };
-  }, []);
+  }, [globalNetworkState]);
 
-  // Fetch /me online
+  // Fetch /me online (only if cache didn't provide data)
   useEffect(() => {
     let alive = true;
     if (!isOnline) return;
+
+    // if cache already loaded ownerCode, skip online fetch
+    if (ownerCode && ownerDbId) return;
 
     (async () => {
       setMeLoading(true);
@@ -756,7 +815,7 @@ export default function NewTripRequest() {
     return () => {
       alive = false;
     };
-  }, [isOnline]);
+  }, [isOnline, ownerCode, ownerDbId]);
 
   // Load vessels by ownerDbId (cache first, then refresh online)
   useEffect(() => {
@@ -780,14 +839,14 @@ export default function NewTripRequest() {
       setVesselsLoading(true);
       try {
         const data = await geoGet<any>(
-          `/api/vessels/owner/${encodeURIComponent(String(ownerDbId))}`
+          `/api/vessels/owner/${encodeURIComponent(String(ownerDbId))}`,
         );
 
         const arr = Array.isArray(data)
           ? data
           : Array.isArray((data as any)?.data)
-          ? (data as any).data
-          : [];
+            ? (data as any).data
+            : [];
 
         const list: VesselItem[] = arr
           .map((x: any) => {
@@ -797,13 +856,21 @@ export default function NewTripRequest() {
                 x?.reg_no ??
                 x?.vessel_reg_no ??
                 x?.registrationNo ??
-                ""
+                "",
             ).trim();
 
-            const code = String(x?.vessel_code ?? x?.vessel_id ?? x?.code ?? "").trim() || null;
+            const code =
+              String(x?.vessel_code ?? x?.vessel_id ?? x?.code ?? "").trim() ||
+              null;
 
             const name =
-              reg && code ? `${reg} (${code})` : reg ? reg : code ? String(code) : `Vessel ${id}`;
+              reg && code
+                ? `${reg} (${code})`
+                : reg
+                  ? reg
+                  : code
+                    ? String(code)
+                    : `Vessel ${id}`;
 
             return { id, name, code };
           })
@@ -818,6 +885,11 @@ export default function NewTripRequest() {
         if (vesselSel && !list.some((v) => v.id === vesselSel.id)) {
           setVesselSel(list[0] ?? null);
         }
+      } catch (e: any) {
+        // log but don't crash on network errors - cache is sufficient
+        console.warn("[VESSEL FETCH]", String(e?.message || e));
+        if (!alive) return;
+        // keep cached vessels, don't overwrite on error
       } finally {
         if (alive) setVesselsLoading(false);
       }
@@ -839,7 +911,11 @@ export default function NewTripRequest() {
       setStatesLoading(true);
       try {
         const data = await geoGet<any>("/api/states");
-        const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        const arr = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.data)
+            ? data.data
+            : [];
         const list: StateItem[] = arr
           .map((x: any) => ({
             id: Number(x.id),
@@ -850,6 +926,9 @@ export default function NewTripRequest() {
 
         if (!alive) return;
         setStates(list);
+      } catch (e: any) {
+        // log but don't crash on network errors
+        console.warn("[STATES FETCH]", String(e?.message || e));
       } finally {
         if (alive) setStatesLoading(false);
       }
@@ -876,9 +955,13 @@ export default function NewTripRequest() {
       setDistrictsLoading(true);
       try {
         const data = await geoGet<any>(
-          `/api/states/${encodeURIComponent(String(stateSel.id))}/districts`
+          `/api/states/${encodeURIComponent(String(stateSel.id))}/districts`,
         );
-        const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        const arr = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.data)
+            ? data.data
+            : [];
         const list: DistrictItem[] = arr
           .map((x: any) => ({
             id: Number(x.id),
@@ -890,6 +973,9 @@ export default function NewTripRequest() {
 
         if (!alive) return;
         setDistricts(list);
+      } catch (e: any) {
+        // log but don't crash on network errors
+        console.warn("[DISTRICTS FETCH]", String(e?.message || e));
       } finally {
         if (alive) setDistrictsLoading(false);
       }
@@ -914,9 +1000,13 @@ export default function NewTripRequest() {
       setLocationsLoading(true);
       try {
         const data = await geoGet<any>(
-          `/api/locations/district/${encodeURIComponent(String(districtSel.id))}`
+          `/api/locations/district/${encodeURIComponent(String(districtSel.id))}`,
         );
-        const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        const arr = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.data)
+            ? data.data
+            : [];
         const list: LocationItem[] = arr
           .map((x: any) => ({
             id: Number(x.id),
@@ -931,6 +1021,9 @@ export default function NewTripRequest() {
 
         if (!alive) return;
         setLocations(list);
+      } catch (e: any) {
+        // log but don't crash on network errors
+        console.warn("[LOCATIONS FETCH]", String(e?.message || e));
       } finally {
         if (alive) setLocationsLoading(false);
       }
@@ -961,7 +1054,8 @@ export default function NewTripRequest() {
         await patchOwnerCodeInTripQueue(ownerCode);
 
         await flushTripQueue(async (payload) => {
-          if (!payload.owner_code) throw new Error("owner_code missing (waiting for /me)");
+          if (!payload.owner_code)
+            throw new Error("owner_code missing (waiting for /me)");
           await dispatch(createTripThunk(payload as any)).unwrap();
         });
 
@@ -1020,7 +1114,10 @@ export default function NewTripRequest() {
       count: crewCount,
 
       ...(INCLUDE_STATE_DISTRICT_IN_PAYLOAD
-        ? { state_id: Number(locationSel.state_id), district_id: Number(locationSel.district_id) }
+        ? {
+            state_id: Number(locationSel.state_id),
+            district_id: Number(locationSel.district_id),
+          }
         : {}),
     };
 
@@ -1066,7 +1163,7 @@ export default function NewTripRequest() {
       router.replace("/(wild)/trips" as const);
       Alert.alert(
         t.sent,
-        `${t.status}: ${created?.approval_status ?? "PENDING"}\n${t.totalCost}: ${money(totalCost)}`
+        `${t.status}: ${created?.approval_status ?? "PENDING"}\n${t.totalCost}: ${money(totalCost)}`,
       );
     } catch (e: any) {
       const msg = String(e?.message || e);
@@ -1112,7 +1209,9 @@ export default function NewTripRequest() {
       <EntityPickerSheet
         title={t.state}
         value={stateSel as any}
-        options={states.map((s) => ({ ...s, code: s.state_code ?? null })) as any}
+        options={
+          states.map((s) => ({ ...s, code: s.state_code ?? null })) as any
+        }
         loading={statesLoading}
         onSelect={(v: any) => setStateSel(v)}
         sheetRef={stateRef}
@@ -1121,7 +1220,9 @@ export default function NewTripRequest() {
       <EntityPickerSheet
         title={t.district}
         value={districtSel as any}
-        options={districts.map((d) => ({ ...d, code: d.district_code ?? null })) as any}
+        options={
+          districts.map((d) => ({ ...d, code: d.district_code ?? null })) as any
+        }
         loading={districtsLoading}
         onSelect={(v: any) => setDistrictSel(v)}
         sheetRef={districtRef}
@@ -1130,7 +1231,9 @@ export default function NewTripRequest() {
       <EntityPickerSheet
         title={t.nearStation}
         value={locationSel as any}
-        options={locations.map((l) => ({ ...l, code: l.location_code ?? null })) as any}
+        options={
+          locations.map((l) => ({ ...l, code: l.location_code ?? null })) as any
+        }
         loading={locationsLoading}
         onSelect={(v: any) => setLocationSel(v)}
         sheetRef={locationRef}
@@ -1155,13 +1258,18 @@ export default function NewTripRequest() {
                 {isOnline ? t.online : t.offline}
               </Text>
               {syncing ? (
-                <Text className="text-[11px] text-[#7a6f66]"> • {t.syncing}</Text>
+                <Text className="text-[11px] text-[#7a6f66]">
+                  {" "}
+                  • {t.syncing}
+                </Text>
               ) : null}
             </View>
 
             {meLoading ? (
               <View className="mt-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2">
-                <Text className="text-xs font-semibold text-blue-800">{t.meLoading}</Text>
+                <Text className="text-xs font-semibold text-blue-800">
+                  {t.meLoading}
+                </Text>
               </View>
             ) : null}
 
@@ -1215,7 +1323,9 @@ export default function NewTripRequest() {
 
         {/* Trip Details */}
         <View className="mt-4">
-          <Text className="text-base font-bold text-[#2b2b2b]">{t.tripDetails}</Text>
+          <Text className="text-base font-bold text-[#2b2b2b]">
+            {t.tripDetails}
+          </Text>
 
           <Card className="mt-3 p-4">
             <Label>{t.tripName}</Label>
@@ -1238,7 +1348,9 @@ export default function NewTripRequest() {
                   >
                     {vesselSel?.name || t.select}
                   </Text>
-                  <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
+                  <Text className="mt-1 text-[11px] text-[#b1a59a]">
+                    {t.tapToSelect}
+                  </Text>
                 </Pressable>
               </FieldBox>
             </View>
@@ -1258,7 +1370,9 @@ export default function NewTripRequest() {
                   >
                     {method || t.select}
                   </Text>
-                  <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
+                  <Text className="mt-1 text-[11px] text-[#b1a59a]">
+                    {t.tapToSelect}
+                  </Text>
                 </Pressable>
               </FieldBox>
             </View>
@@ -1266,9 +1380,14 @@ export default function NewTripRequest() {
             {/* State */}
             <View className="mt-3">
               <FieldBox>
-                <Pressable onPress={() => stateRef.current?.present()} className="active:opacity-80">
+                <Pressable
+                  onPress={() => stateRef.current?.present()}
+                  className="active:opacity-80"
+                >
                   <Label>{t.state}</Label>
-                  <Text className={`mt-1 text-base ${stateSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                  <Text
+                    className={`mt-1 text-base ${stateSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}
+                  >
                     {stateSel?.name || t.select}
                   </Text>
                 </Pressable>
@@ -1286,7 +1405,9 @@ export default function NewTripRequest() {
                   className="active:opacity-80"
                 >
                   <Label>{t.district}</Label>
-                  <Text className={`mt-1 text-base ${districtSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                  <Text
+                    className={`mt-1 text-base ${districtSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}
+                  >
                     {districtSel?.name || t.select}
                   </Text>
                 </Pressable>
@@ -1298,23 +1419,30 @@ export default function NewTripRequest() {
               <FieldBox>
                 <Pressable
                   onPress={() => {
-                    if (!districtSel?.id) return Alert.alert(t.title, t.errDistrict);
+                    if (!districtSel?.id)
+                      return Alert.alert(t.title, t.errDistrict);
                     locationRef.current?.present();
                   }}
                   className="active:opacity-80"
                 >
                   <Label>{t.nearStation}</Label>
-                  <Text className={`mt-1 text-base ${locationSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                  <Text
+                    className={`mt-1 text-base ${locationSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}
+                  >
                     {locationSel?.name || t.select}
                   </Text>
 
                   {locationSel ? (
                     <Text className="mt-1 text-[11px] text-[#7a6f66]">
-                      Payload near_station(name): {locationSel.name} | payload location_id: {locationSel.id} | derived
-                      state_id: {locationSel.state_id} | derived district_id: {locationSel.district_id}
+                      Payload near_station(name): {locationSel.name} | payload
+                      location_id: {locationSel.id} | derived state_id:{" "}
+                      {locationSel.state_id} | derived district_id:{" "}
+                      {locationSel.district_id}
                     </Text>
                   ) : (
-                    <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
+                    <Text className="mt-1 text-[11px] text-[#b1a59a]">
+                      {t.tapToSelect}
+                    </Text>
                   )}
                 </Pressable>
               </FieldBox>
@@ -1323,9 +1451,14 @@ export default function NewTripRequest() {
             {/* Planned datetime */}
             <View className="mt-3">
               <FieldBox>
-                <Pressable onPress={() => setShowPlannedDate(true)} className="active:opacity-80">
+                <Pressable
+                  onPress={() => setShowPlannedDate(true)}
+                  className="active:opacity-80"
+                >
                   <Label>{t.plannedTripDT}</Label>
-                  <Text className={`mt-1 text-base ${plannedStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                  <Text
+                    className={`mt-1 text-base ${plannedStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}
+                  >
                     {plannedStr || t.select}
                   </Text>
                 </Pressable>
@@ -1337,7 +1470,8 @@ export default function NewTripRequest() {
                   mode="date"
                   display={Platform.OS === "ios" ? "spinner" : "default"}
                   onChange={(e, date) => {
-                    if ((e as any).type === "dismissed") return setShowPlannedDate(false);
+                    if ((e as any).type === "dismissed")
+                      return setShowPlannedDate(false);
                     setShowPlannedDate(false);
                     if (date) {
                       const base = plannedDT ?? new Date();
@@ -1356,7 +1490,8 @@ export default function NewTripRequest() {
                   mode="time"
                   display={Platform.OS === "ios" ? "spinner" : "default"}
                   onChange={(e, date) => {
-                    if ((e as any).type === "dismissed") return setShowPlannedTime(false);
+                    if ((e as any).type === "dismissed")
+                      return setShowPlannedTime(false);
                     setShowPlannedTime(false);
                     if (date) {
                       const base = plannedDT ?? new Date();
@@ -1373,15 +1508,23 @@ export default function NewTripRequest() {
 
         {/* Crew */}
         <View className="mt-4">
-          <Text className="text-base font-bold text-[#2b2b2b]">{t.crewDetails}</Text>
+          <Text className="text-base font-bold text-[#2b2b2b]">
+            {t.crewDetails}
+          </Text>
 
           <Card className="mt-3 p-4">
             <View className="flex-row items-start">
               <View className="flex-1 pr-3">
-                <Text className="text-sm font-semibold text-[#2b2b2b]" numberOfLines={1}>
+                <Text
+                  className="text-sm font-semibold text-[#2b2b2b]"
+                  numberOfLines={1}
+                >
                   {t.crewMembers}: {crewCount}
                 </Text>
-                <Text className="mt-1 text-[11px] text-[#7a6f66]" numberOfLines={2}>
+                <Text
+                  className="mt-1 text-[11px] text-[#7a6f66]"
+                  numberOfLines={2}
+                >
                   {t.crewHelp}
                 </Text>
               </View>
@@ -1393,7 +1536,9 @@ export default function NewTripRequest() {
                   className="h-10 w-10 items-center justify-center rounded-full border border-[#ead7c8] bg-white active:opacity-80"
                   style={{ opacity: crewCount === 0 ? 0.45 : 1 }}
                 >
-                  <Text className="text-base font-extrabold text-[#2b2b2b]">−</Text>
+                  <Text className="text-base font-extrabold text-[#2b2b2b]">
+                    −
+                  </Text>
                 </Pressable>
 
                 <View style={{ width: 10 }} />
@@ -1402,7 +1547,9 @@ export default function NewTripRequest() {
                   onPress={() => setCrewCount((c) => c + 1)}
                   className="h-10 w-10 items-center justify-center rounded-full border border-[#a06b2a] bg-[#fff3e7] active:opacity-80"
                 >
-                  <Text className="text-base font-extrabold text-[#7a4a12]">+</Text>
+                  <Text className="text-base font-extrabold text-[#7a4a12]">
+                    +
+                  </Text>
                 </Pressable>
               </View>
             </View>
@@ -1411,13 +1558,20 @@ export default function NewTripRequest() {
 
         {/* Planning + Costs */}
         <View className="mt-4">
-          <Text className="text-base font-bold text-[#2b2b2b]">{t.planning}</Text>
+          <Text className="text-base font-bold text-[#2b2b2b]">
+            {t.planning}
+          </Text>
 
           <Card className="mt-3 p-4">
             <FieldBox>
-              <Pressable onPress={() => setShowReturnPicker(true)} className="active:opacity-80">
+              <Pressable
+                onPress={() => setShowReturnPicker(true)}
+                className="active:opacity-80"
+              >
                 <Label>{t.expectedReturn}</Label>
-                <Text className={`mt-1 text-base ${returnStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                <Text
+                  className={`mt-1 text-base ${returnStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}
+                >
                   {returnStr || t.select}
                 </Text>
               </Pressable>
@@ -1429,7 +1583,8 @@ export default function NewTripRequest() {
                 mode="date"
                 display={Platform.OS === "ios" ? "spinner" : "default"}
                 onChange={(e, date) => {
-                  if ((e as any).type === "dismissed") return setShowReturnPicker(false);
+                  if ((e as any).type === "dismissed")
+                    return setShowReturnPicker(false);
                   setShowReturnPicker(false);
                   if (date) setExpectedReturn(date);
                 }}
@@ -1444,7 +1599,9 @@ export default function NewTripRequest() {
                   value={qrCount}
                   onChangeText={(v) => setQrCount(onlyInt(v))}
                   placeholder={t.qrCountPH}
-                  keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
+                  keyboardType={
+                    Platform.OS === "ios" ? "number-pad" : "numeric"
+                  }
                   inputMode="numeric"
                   className="mt-1 text-base text-[#2b2b2b]"
                 />
@@ -1452,29 +1609,39 @@ export default function NewTripRequest() {
             </View>
 
             <View className="mt-4">
-              <Text className="text-sm font-bold text-[#2b2b2b]">{t.suppliesCost}</Text>
+              <Text className="text-sm font-bold text-[#2b2b2b]">
+                {t.suppliesCost}
+              </Text>
 
               <View className="mt-3">
                 <Label>{t.diesel}</Label>
                 <View className="mt-2 flex-row gap-3">
                   <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
-                    <Text className="text-[11px] text-[#7a6f66]">{t.liters}</Text>
+                    <Text className="text-[11px] text-[#7a6f66]">
+                      {t.liters}
+                    </Text>
                     <TextInput
                       value={dieselLiters}
                       onChangeText={(v) => setDieselLiters(onlyDecimal(v))}
                       placeholder="e.g. 120"
-                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
+                      keyboardType={
+                        Platform.OS === "ios" ? "decimal-pad" : "numeric"
+                      }
                       inputMode="decimal"
                       className="mt-1 text-base text-[#2b2b2b]"
                     />
                   </View>
                   <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
-                    <Text className="text-[11px] text-[#7a6f66]">{t.ratePerLiter}</Text>
+                    <Text className="text-[11px] text-[#7a6f66]">
+                      {t.ratePerLiter}
+                    </Text>
                     <TextInput
                       value={dieselRate}
                       onChangeText={(v) => setDieselRate(onlyDecimal(v))}
                       placeholder="e.g. 95"
-                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
+                      keyboardType={
+                        Platform.OS === "ios" ? "decimal-pad" : "numeric"
+                      }
                       inputMode="decimal"
                       className="mt-1 text-base text-[#2b2b2b]"
                     />
@@ -1497,18 +1664,24 @@ export default function NewTripRequest() {
                       value={iceKg}
                       onChangeText={(v) => setIceKg(onlyDecimal(v))}
                       placeholder="e.g. 60"
-                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
+                      keyboardType={
+                        Platform.OS === "ios" ? "decimal-pad" : "numeric"
+                      }
                       inputMode="decimal"
                       className="mt-1 text-base text-[#2b2b2b]"
                     />
                   </View>
                   <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
-                    <Text className="text-[11px] text-[#7a6f66]">{t.ratePerKg}</Text>
+                    <Text className="text-[11px] text-[#7a6f66]">
+                      {t.ratePerKg}
+                    </Text>
                     <TextInput
                       value={iceRate}
                       onChangeText={(v) => setIceRate(onlyDecimal(v))}
                       placeholder="e.g. 15"
-                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
+                      keyboardType={
+                        Platform.OS === "ios" ? "decimal-pad" : "numeric"
+                      }
                       inputMode="decimal"
                       className="mt-1 text-base text-[#2b2b2b]"
                     />
@@ -1524,8 +1697,12 @@ export default function NewTripRequest() {
 
               <View className="mt-4 rounded-2xl border border-[#a06b2a] bg-[#fff3e7] px-4 py-3">
                 <Text className="text-xs text-[#7a4a12]">{t.totalCost}</Text>
-                <Text className="mt-1 text-lg font-extrabold text-[#2b2b2b]">{money(totalCost)}</Text>
-                <Text className="mt-1 text-[11px] text-[#7a6f66]">{t.totalHelp}</Text>
+                <Text className="mt-1 text-lg font-extrabold text-[#2b2b2b]">
+                  {money(totalCost)}
+                </Text>
+                <Text className="mt-1 text-[11px] text-[#7a6f66]">
+                  {t.totalHelp}
+                </Text>
               </View>
             </View>
           </Card>
@@ -1539,7 +1716,9 @@ export default function NewTripRequest() {
             className="flex-1 rounded-2xl border border-[#ead7c8] bg-white p-4 active:opacity-80"
             style={{ opacity: posting ? 0.7 : 1 }}
           >
-            <Text className="text-center text-[#2b2b2b] font-semibold">{t.cancel}</Text>
+            <Text className="text-center text-[#2b2b2b] font-semibold">
+              {t.cancel}
+            </Text>
           </Pressable>
 
           <Pressable
