@@ -25,8 +25,8 @@ import {
 import { fetchMe } from "../src/store/auth/me.slice";
 
 /** ✅ Network state */
-import { setNetworkOnline } from "../src/store/auth/network.slice";
 import NetInfo from "@react-native-community/netinfo";
+import { setNetworkOnline } from "../src/store/auth/network.slice";
 
 /** ✅ Toast */
 import Toast from "react-native-toast-message";
@@ -115,7 +115,8 @@ function RootLayoutInner() {
       if (meState?.loading) return;
 
       const rtype =
-        (meState && (meState.me?.rootverse_type || meState.me?.rootverse_type)) ||
+        (meState &&
+          (meState.me?.rootverse_type || meState.me?.rootverse_type)) ||
         loginState?.rootverse_type ||
         null;
 
