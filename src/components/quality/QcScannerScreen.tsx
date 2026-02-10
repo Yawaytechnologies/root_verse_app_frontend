@@ -1,7 +1,9 @@
+// src/components/quality/QcScannerScreen.tsx
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { Alert, Animated, Pressable, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as Location from "expo-location";
 
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 
@@ -118,6 +120,17 @@ function getFormQcResult(payload: any): string {
   return r;
 }
 
+type LocalLocationSnap = {
+  capturedAt: number;
+  coords: { latitude: number; longitude: number; accuracy?: number | null };
+};
+
+function toCoordString(n: any): string | null {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return null;
+  return num.toFixed(8); // backend uses string like "45.44432000"
+}
+
 function CornerBrackets({
   size = 260,
   corner = 22,
@@ -156,7 +169,6 @@ export default function QcScannerScreen({
   onEditDraftConsumed,
 }: Props) {
   const dispatch = useAppDispatch();
-
   const inspector = useAppSelector(selectInspector);
 
   const catchLog = useAppSelector(selectCatchLog);
@@ -180,6 +192,89 @@ export default function QcScannerScreen({
   const [localTab, setLocalTab] = useState<QueueTabStatus | null>(null);
   const [scanPausedUntil, setScanPausedUntil] = useState(0);
 
+  // ✅ cache GPS so submit doesn't wait
+  const [locPermGranted, setLocPermGranted] = useState<boolean>(false);
+  const [locCache, setLocCache] = useState<LocalLocationSnap | null>(null);
+  const locCacheRef = useRef<LocalLocationSnap | null>(null);
+
+  useEffect(() => {
+    locCacheRef.current = locCache;
+  }, [locCache]);
+
+  // ask location permission once (so submit won't open popup and delay)
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const p = await Location.requestForegroundPermissionsAsync();
+        if (!alive) return;
+        setLocPermGranted(!!p.granted);
+
+        // warm up last known in background (no await)
+        if (p.granted) {
+          void primeLocation(false);
+        }
+      } catch {
+        if (!alive) return;
+        setLocPermGranted(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // fast: use last known first, then current (LOW accuracy)
+  const primeLocation = async (forceNow: boolean): Promise<LocalLocationSnap | null> => {
+    if (!locPermGranted) return null;
+
+    const now = Date.now();
+    const cached = locCacheRef.current;
+    if (!forceNow && cached && now - cached.capturedAt < 2 * 60 * 1000) {
+      return cached; // fresh enough
+    }
+
+    try {
+      // 1) instant-ish
+      const last = await Location.getLastKnownPositionAsync({
+        maxAge: 2 * 60 * 1000,
+        requiredAccuracy: 200, // meters
+      });
+
+      if (last?.coords?.latitude && last?.coords?.longitude) {
+        const snap: LocalLocationSnap = {
+          capturedAt: now,
+          coords: {
+            latitude: last.coords.latitude,
+            longitude: last.coords.longitude,
+            accuracy: last.coords.accuracy ?? null,
+          },
+        };
+        setLocCache(snap);
+        return snap;
+      }
+
+      // 2) fallback (can be slow, but we won't block submit too long)
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Low, // faster
+      });
+
+      const snap: LocalLocationSnap = {
+        capturedAt: Date.now(),
+        coords: {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy ?? null,
+        },
+      };
+      setLocCache(snap);
+      return snap;
+    } catch {
+      return null;
+    }
+  };
+
   const setWildField = <K extends keyof WildFormState>(k: K, v: WildFormState[K]) =>
     setWildForm((p) => ({ ...p, [k]: v }));
   const setAquaField = <K extends keyof AquaFormState>(k: K, v: AquaFormState[K]) =>
@@ -187,7 +282,6 @@ export default function QcScannerScreen({
   const setMariField = <K extends keyof MariFormState>(k: K, v: MariFormState[K]) =>
     setMariForm((p) => ({ ...p, [k]: v }));
 
-  // view-only scanner when selectedDate is not today (but NOT when editing a HOLD draft)
   const viewOnlyByDate = useMemo(() => {
     const sel = String(selectedDate || "").trim();
     if (!sel) return false;
@@ -285,10 +379,12 @@ export default function QcScannerScreen({
     setScannedCode(c);
     setLocalTab(null);
 
+    // ✅ start GPS in background NOW (don’t await)
+    void primeLocation(false);
+
     dispatch(resetQcFill());
     dispatch(clearCatchLog());
 
-    // If view-only mode: allow only already submitted.
     try {
       const q = await getQcFillQueue();
       const found = q.find((x) => normCode(x.qrCode) === c);
@@ -333,6 +429,9 @@ export default function QcScannerScreen({
     const p = editDraft.payload || {};
 
     applyPrefillFromPayload(code, p, "pending");
+
+    // ✅ start GPS background
+    void primeLocation(false);
 
     dispatch(resetQcFill());
     dispatch(clearCatchLog());
@@ -381,7 +480,6 @@ export default function QcScannerScreen({
 
   const readOnly = (viewOnlyByDate || localFinal || serverFilled) && !editingHoldDraft;
 
-  // ✅ SPECIES REQUIRED CHECK (fish_name OR fish_id must exist)
   const speciesOk = useMemo(() => {
     const fishName = String((catchLog as any)?.fish_name || "").trim();
     const fishId = (catchLog as any)?.fish_id;
@@ -394,7 +492,6 @@ export default function QcScannerScreen({
       return;
     }
 
-    // view-only date mode blocks submit (unless editing HOLD draft)
     if (viewOnlyByDate && !editingHoldDraft) {
       Alert.alert("Already submitted", "Past/Future date selected. Submission is disabled.");
       return;
@@ -405,7 +502,6 @@ export default function QcScannerScreen({
       return;
     }
 
-    // ✅ Block submit if QR details not loaded / species missing
     if (catchLoading) {
       Alert.alert("Wait", "QR details still loading. Please wait.");
       return;
@@ -424,11 +520,27 @@ export default function QcScannerScreen({
       return;
     }
 
+    // ✅ IMPORTANT: don't block submit waiting for GPS.
+    // Try cached location, else wait max 350ms.
+    const cached = locCacheRef.current;
+    const locSnap =
+      cached ??
+      (await Promise.race([
+        primeLocation(false),
+        new Promise<LocalLocationSnap | null>((res) => setTimeout(() => res(null), 350)),
+      ]));
+
+    const latitude = locSnap ? toCoordString(locSnap.coords.latitude) : null;
+    const longitude = locSnap ? toCoordString(locSnap.coords.longitude) : null;
+
+    // ✅ send same keys backend already returns: latitude, longitude
     const finalPayload = {
       ...payload,
       checker_code: inspector.checker_code,
       quality_checker_id: inspector.id,
       division,
+      ...(latitude ? { latitude } : {}),
+      ...(longitude ? { longitude } : {}),
     };
 
     const qcResultFromForm = getFormQcResult(finalPayload);
@@ -445,6 +557,7 @@ export default function QcScannerScreen({
         createdAt,
         inspector: { id: inspector.id, checker_code: inspector.checker_code },
         catchLog: catchLog ?? null,
+        location: locSnap, // ✅ tabs/details can show this
       },
     };
 
