@@ -21,6 +21,9 @@ import {
   selectAuthSession,
 } from "../src/store/auth/authSession.slice";
 
+/** ✅ Fetch user /me data */
+import { fetchMe } from "../src/store/auth/me.slice";
+
 /** ✅ Toast */
 import Toast from "react-native-toast-message";
 
@@ -52,6 +55,13 @@ function RootLayoutInner() {
   useEffect(() => {
     dispatch(restoreSession());
   }, [dispatch]);
+
+  // ✅ fetch user data (/me) after session is restored
+  useEffect(() => {
+    if (hydrated && token) {
+      dispatch(fetchMe());
+    }
+  }, [hydrated, token, dispatch]);
 
   // auth gate + redirect
   useEffect(() => {
