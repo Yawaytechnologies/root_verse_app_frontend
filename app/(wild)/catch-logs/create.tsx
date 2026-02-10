@@ -536,12 +536,24 @@ function ownerCodeCacheKey(userId: number) {
 
 async function readOwnerCacheByUser(userId: number): Promise<number | null> {
   try {
-    const raw = await AsyncStorage.getItem(ownerDbIdCacheKey(userId));
-    const v = String(raw || "").trim();
-    if (!v) return null;
-    if (!/^\d+$/.test(v)) return null;
-    const n = Number(v);
-    return Number.isFinite(n) && n > 0 ? n : null;
+    // try per-user cache first
+    const perUser = String((await AsyncStorage.getItem(ownerDbIdCacheKey(userId))) || "").trim();
+    const v = String(perUser || "").trim();
+    if (v && /^\d+$/.test(v)) {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    }
+
+    // fallback to generic "owner_id" key (set by me.slice on login)
+    const generic = String(
+      (await AsyncStorage.getItem("owner_id")) || ""
+    ).trim();
+    if (generic && /^\d+$/.test(generic)) {
+      const n = Number(generic);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    }
+
+    return null;
   } catch {
     return null;
   }
@@ -553,9 +565,17 @@ async function writeOwnerCacheByUser(userId: number, ownerDbId: number) {
 }
 async function readOwnerCodeCacheByUser(userId: number): Promise<string> {
   try {
-    return String(
+    // try per-user cache first
+    const perUser = String(
       (await AsyncStorage.getItem(ownerCodeCacheKey(userId))) || ""
     ).trim();
+    if (perUser) return perUser;
+
+    // fallback to generic "owner_code" key (set by me.slice on login)
+    const generic = String(
+      (await AsyncStorage.getItem("owner_code")) || ""
+    ).trim();
+    return generic;
   } catch {
     return "";
   }
@@ -955,6 +975,7 @@ export default function CreateCatchLog() {
   );
 
   // Network + queue
+  const globalNetworkState = useAppSelector((s: any) => s.network?.isOnline ?? true);
   const [isOnline, setIsOnline] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -1273,6 +1294,26 @@ export default function CreateCatchLog() {
     }
   };
 
+  /* ---------------- sync global network state locally + retrigger loads when online ---------------- */
+  useEffect(() => {
+    setIsOnline(globalNetworkState);
+  }, [globalNetworkState]);
+
+  // when network comes back online, retrigger initial owner/vessels/trips loads
+  useEffect(() => {
+    if (!globalNetworkState || !meUser?.id) return;
+
+    (async () => {
+      const userId = Number(meUser.id);
+      const oid = await ensureOwnerId();
+      if (oid) await fetchOwnerVessels(oid);
+
+      const oc = normalizeOwnerCode(ownerCode);
+      if (oc) await fetchApprovedTrips(oc);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalNetworkState, meUser?.id]);
+
   /* ---------------- fish load ---------------- */
   useEffect(() => {
     let alive = true;
@@ -1309,7 +1350,7 @@ export default function CreateCatchLog() {
     };
   }, []);
 
-  /* ---------------- online / auto flush queue ---------------- */
+  /* ---------------- online / auto flush queue + detect network changes ---------------- */
   useEffect(() => {
     let alive = true;
 
@@ -1343,50 +1384,36 @@ export default function CreateCatchLog() {
 
     refreshCount();
 
-    NetInfo.fetch().then((s) => {
-      const online = !!s.isConnected && (s.isInternetReachable ?? true);
-      if (!alive) return;
-      setIsOnline(online);
-      if (online) doFlush();
-    });
-
-    const unsub = NetInfo.addEventListener((state) => {
-      const online = !!state.isConnected && (state.isInternetReachable ?? true);
-      if (!alive) return;
-      setIsOnline(online);
-      if (online) doFlush();
-    });
+    // ✅ if global network state is online, try to flush immediately
+    if (globalNetworkState) {
+      doFlush();
+    }
 
     return () => {
       alive = false;
-      unsub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispatch, meUser?.id]);
+  }, [dispatch, meUser?.id, globalNetworkState]);
 
-  /* ---------------- initial: owner -> vessels ---------------- */
+  /* ---------------- initial: owner -> vessels (retrigger when online/userId changes) ---------------- */
   useEffect(() => {
     (async () => {
       if (!meUser?.id) return;
 
-      const net = await NetInfo.fetch();
-      const online = !!net.isConnected && (net.isInternetReachable ?? true);
-      setIsOnline(online);
-
       const userId = Number(meUser?.id);
 
-      const oid = online ? await ensureOwnerId() : await readOwnerCacheByUser(userId);
+      const oid = globalNetworkState ? await ensureOwnerId() : await readOwnerCacheByUser(userId);
       if (!oid) return;
 
       const cachedV = await readVesselCache(oid);
       if (cachedV.length > 0) setVessels(cachedV);
 
-      if (online) await fetchOwnerVessels(oid);
+      if (globalNetworkState) await fetchOwnerVessels(oid);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meUser?.id]);
+  }, [meUser?.id, globalNetworkState]);
 
-  /* ---------------- ownerCode -> trips ---------------- */
+  /* ---------------- ownerCode -> trips (retrigger when online/ownerCode changes) ---------------- */
   useEffect(() => {
     (async () => {
       setTripId("");
@@ -1406,7 +1433,7 @@ export default function CreateCatchLog() {
         if (oc) setOwnerCode(oc);
       }
 
-      if (!oc && isOnline) {
+      if (!oc && globalNetworkState) {
         const loaded = await loadOwnerFromLogin();
         oc = normalizeOwnerCode(String(loaded?.code || ""));
         if (oc) setOwnerCode(oc);
@@ -1420,10 +1447,10 @@ export default function CreateCatchLog() {
       const cachedTrips = await readTripCache(oc);
       if (cachedTrips.length > 0) setTrips(cachedTrips);
 
-      if (isOnline) await fetchApprovedTrips(oc);
+      if (globalNetworkState) await fetchApprovedTrips(oc);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOnline, meUser?.id, ownerCode]);
+  }, [globalNetworkState, meUser?.id, ownerCode]);
 
   /* ---------------- ✅ Sync status ---------------- */
   const syncState: SyncState = useMemo(() => {

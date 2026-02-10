@@ -16,7 +16,7 @@ import NetInfo from "@react-native-community/netinfo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { createTrip as createTripDummy } from "../../../src/data/wild/trips.dummy";
-import { useAppDispatch } from "../../../src/store/hooks";
+import { useAppDispatch, useAppSelector } from "../../../src/store/hooks";
 import { createTrip as createTripThunk } from "../../../src/features/trip/tripSlice";
 import type { TripCreatePayload } from "../../../src/services/wild/tripApi";
 
@@ -259,7 +259,28 @@ type MeCache = {
 async function readMeCache(): Promise<MeCache | null> {
   try {
     const raw = await AsyncStorage.getItem(ME_CACHE_KEY);
-    if (!raw) return null;
+    if (!raw) {
+      // fallback: try to read from global keys saved by me.slice
+      const ownerCode = String(
+        (await AsyncStorage.getItem("owner_code")) || ""
+      ).trim();
+      const ownerIdStr = String(
+        (await AsyncStorage.getItem("owner_id")) || ""
+      ).trim();
+      const ownerDbId = ownerIdStr ? Number(ownerIdStr) : 0;
+
+      if (ownerCode && ownerDbId) {
+        return {
+          ownerName: "",
+          registrationNo: "",
+          ownerCode,
+          ownerDbId,
+        };
+      }
+
+      return null;
+    }
+
     const p = JSON.parse(raw);
     if (!p || typeof p !== "object") return null;
     return {
@@ -666,7 +687,9 @@ export default function NewTripRequest() {
 
   const [posting, setPosting] = useState(false);
 
-  const [isOnline, setIsOnline] = useState(true);
+  // ✅ Global network state from Redux
+  const globalNetworkState = useAppSelector((s: any) => s.network?.isOnline ?? true);
+  const [isOnline, setIsOnline] = useState<boolean>(() => globalNetworkState);
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
 
@@ -678,16 +701,30 @@ export default function NewTripRequest() {
 
   const flushingRef = useRef(false);
 
-  // Load /me cache
+  // Load /me cache (runs once on mount)
   useEffect(() => {
     let alive = true;
     (async () => {
-      const cached = await readMeCache();
-      if (!alive || !cached) return;
-      if (cached.ownerName) setOwnerName(cached.ownerName);
-      if (cached.registrationNo) setRegistrationNo(cached.registrationNo);
-      if (cached.ownerCode) setOwnerCode(cached.ownerCode);
-      if (cached.ownerDbId) setOwnerDbId(Number(cached.ownerDbId));
+      try {
+        const cached = await readMeCache();
+        if (!alive) return;
+
+        if (cached) {
+          if (cached.ownerName) setOwnerName(cached.ownerName);
+          if (cached.registrationNo) setRegistrationNo(cached.registrationNo);
+          if (cached.ownerCode) setOwnerCode(cached.ownerCode);
+          if (cached.ownerDbId) setOwnerDbId(Number(cached.ownerDbId));
+          setMeLoading(false);
+          setMeError(null);
+        } else {
+          // cache miss - will try online fetch if network available
+          setMeLoading(false);
+        }
+      } catch (e: any) {
+        if (!alive) return;
+        setMeLoading(false);
+        setMeError(String(e?.message || e));
+      }
     })();
     return () => {
       alive = false;
@@ -705,10 +742,8 @@ export default function NewTripRequest() {
 
     refreshCount();
 
-    NetInfo.fetch().then((s) => {
-      const online = !!s.isConnected && (s.isInternetReachable ?? true);
-      if (alive) setIsOnline(online);
-    });
+    // ✅ Use global network state
+    setIsOnline(globalNetworkState);
 
     const unsub = NetInfo.addEventListener((state) => {
       const online = !!state.isConnected && (state.isInternetReachable ?? true);
@@ -721,12 +756,15 @@ export default function NewTripRequest() {
       alive = false;
       unsub();
     };
-  }, []);
+  }, [globalNetworkState]);
 
-  // Fetch /me online
+  // Fetch /me online (only if cache didn't provide data)
   useEffect(() => {
     let alive = true;
     if (!isOnline) return;
+
+    // if cache already loaded ownerCode, skip online fetch
+    if (ownerCode && ownerDbId) return;
 
     (async () => {
       setMeLoading(true);
@@ -756,7 +794,7 @@ export default function NewTripRequest() {
     return () => {
       alive = false;
     };
-  }, [isOnline]);
+  }, [isOnline, ownerCode, ownerDbId]);
 
   // Load vessels by ownerDbId (cache first, then refresh online)
   useEffect(() => {
@@ -818,6 +856,11 @@ export default function NewTripRequest() {
         if (vesselSel && !list.some((v) => v.id === vesselSel.id)) {
           setVesselSel(list[0] ?? null);
         }
+      } catch (e: any) {
+        // log but don't crash on network errors - cache is sufficient
+        console.warn("[VESSEL FETCH]", String(e?.message || e));
+        if (!alive) return;
+        // keep cached vessels, don't overwrite on error
       } finally {
         if (alive) setVesselsLoading(false);
       }
@@ -850,6 +893,9 @@ export default function NewTripRequest() {
 
         if (!alive) return;
         setStates(list);
+      } catch (e: any) {
+        // log but don't crash on network errors
+        console.warn("[STATES FETCH]", String(e?.message || e));
       } finally {
         if (alive) setStatesLoading(false);
       }
@@ -890,6 +936,9 @@ export default function NewTripRequest() {
 
         if (!alive) return;
         setDistricts(list);
+      } catch (e: any) {
+        // log but don't crash on network errors
+        console.warn("[DISTRICTS FETCH]", String(e?.message || e));
       } finally {
         if (alive) setDistrictsLoading(false);
       }
@@ -931,6 +980,9 @@ export default function NewTripRequest() {
 
         if (!alive) return;
         setLocations(list);
+      } catch (e: any) {
+        // log but don't crash on network errors
+        console.warn("[LOCATIONS FETCH]", String(e?.message || e));
       } finally {
         if (alive) setLocationsLoading(false);
       }
