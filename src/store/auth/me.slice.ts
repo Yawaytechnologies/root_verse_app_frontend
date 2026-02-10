@@ -90,7 +90,31 @@ export const fetchMe = createAsyncThunk<
     }
 
     // some backends wrap like { success:true, data:{...} }
-    return (data?.data ?? data) as MeResponse;
+    const mePayload = (data?.data ?? data) as any;
+
+    // Persist owner_code / owner_id for parts of the app that read AsyncStorage directly
+    try {
+      const ownerCode = String(
+        mePayload?.owner_code ??
+          mePayload?.ownerCode ??
+          mePayload?.owner_code_text ??
+          "",
+      ).trim();
+      if (ownerCode) await AsyncStorage.setItem("owner_code", ownerCode);
+
+      const ownerIdCandidate =
+        mePayload?.owner_id ??
+        mePayload?.ownerId ??
+        mePayload?.ownerDbId ??
+        null;
+      if (ownerIdCandidate && String(ownerIdCandidate).trim()) {
+        await AsyncStorage.setItem("owner_id", String(ownerIdCandidate));
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    return mePayload as MeResponse;
   } catch (e: any) {
     return rejectWithValue(e?.message || "NETWORK_ERROR");
   }
