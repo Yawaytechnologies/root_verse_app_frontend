@@ -32,7 +32,10 @@ import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
 import { persistSession } from "../../src/store/auth/authSession.slice";
 
 // ✅ QC: clear old inspector + fetch new inspector after login (token-based)
-import { clearQc, fetchQcMe } from "../../src/store/qualityAuth/qualityAuth.slice";
+import {
+  clearQc,
+  fetchQcMe,
+} from "../../src/store/qualityAuth/qualityAuth.slice";
 
 const { height: SCREEN_H } = Dimensions.get("window");
 
@@ -106,7 +109,7 @@ export default function OtpScreen() {
   useEffect(() => {
     formProgress.value = withDelay(
       250,
-      withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) })
+      withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) }),
     );
   }, []);
 
@@ -128,8 +131,12 @@ export default function OtpScreen() {
   }, [sec]);
 
   const routeByStatus = (statusRaw: any, rootRaw: any) => {
-    const status = String(statusRaw || "").trim().toUpperCase();
-    const rootType = String(rootRaw || "").trim().toUpperCase();
+    const status = String(statusRaw || "")
+      .trim()
+      .toUpperCase();
+    const rootType = String(rootRaw || "")
+      .trim()
+      .toUpperCase();
 
     if (status === "PENDING_APPROVAL")
       return router.replace("/(auth)/pending" as any);
@@ -145,7 +152,10 @@ export default function OtpScreen() {
     if (rootType.includes("MARICULTURE"))
       return router.replace("/mariculture" as any);
 
-    Alert.alert("Routing error", `Unknown rootverse_type: ${rootType || "EMPTY"}`);
+    Alert.alert(
+      "Routing error",
+      `Unknown rootverse_type: ${rootType || "EMPTY"}`,
+    );
   };
 
   const onVerify = async () => {
@@ -177,13 +187,13 @@ export default function OtpScreen() {
         raw?.token,
         p?.data?.token,
         u?.token,
-        login?.token
+        login?.token,
       );
 
       if (!token) {
         Alert.alert(
           "Login error",
-          "Token not received after OTP. Your OTP verify API is not being called or response has no token."
+          "Token not received after OTP. Your OTP verify API is not being called or response has no token.",
         );
         return;
       }
@@ -196,7 +206,7 @@ export default function OtpScreen() {
         u?.status,
         p?.verification_status,
         u?.verification_status,
-        login?.status
+        login?.status,
       );
 
       let rootType = pickFirst(
@@ -204,7 +214,7 @@ export default function OtpScreen() {
         u?.rootverse_type,
         p?.rootverseType,
         u?.rootverseType,
-        login?.rootverse_type
+        login?.rootverse_type,
       );
 
       if (!rootType) {
@@ -219,19 +229,42 @@ export default function OtpScreen() {
 
       if (String(rootType).toUpperCase().includes("QUALITY_CHECKER")) {
         dispatch(clearQc());
-        await dispatch(fetchQcMe()).unwrap().catch(() => {});
+        await dispatch(fetchQcMe())
+          .unwrap()
+          .catch(() => {});
       }
 
-      routeByStatus(status, rootType);
+      // ✅ Handle special statuses - must route explicitly from OTP
+      const statusUpper = String(status || "")
+        .trim()
+        .toUpperCase();
+      if (statusUpper === "PENDING_APPROVAL") {
+        return router.replace("/(auth)/pending" as any);
+      }
+      if (statusUpper === "REJECTED") {
+        return router.replace("/(auth)/rejected" as any);
+      }
+
+      // ✅ For approved users, _layout.tsx will automatically route based on rootverse_type
+      // The token is now persisted, so _layout.tsx will detect it and route appropriately
+      // We DON'T call router.replace here to avoid double-routing conflicts
     } catch (e: any) {
       const msg = String(e?.message || e || "Login blocked");
       const m = msg.toLowerCase();
 
-      if (m.includes("pending") || m.includes("approval") || m.includes("not approved")) {
-        Alert.alert("Waiting for approval", "Admin has not approved your account yet.");
+      if (
+        m.includes("pending") ||
+        m.includes("approval") ||
+        m.includes("not approved")
+      ) {
+        Alert.alert(
+          "Waiting for approval",
+          "Admin has not approved your account yet.",
+        );
         return router.replace("/(auth)/pending" as any);
       }
-      if (m.includes("reject")) return router.replace("/(auth)/rejected" as any);
+      if (m.includes("reject"))
+        return router.replace("/(auth)/rejected" as any);
 
       if (m.includes("not found") || m.includes("no user")) {
         Alert.alert("Not registered", "Please register first.");
@@ -294,7 +327,12 @@ export default function OtpScreen() {
         <Animated.View
           pointerEvents="none"
           style={[
-            { position: "absolute", inset: 0, backgroundColor: "black", zIndex: 5 },
+            {
+              position: "absolute",
+              inset: 0,
+              backgroundColor: "black",
+              zIndex: 5,
+            },
             dimOverlayAnim,
           ]}
         />
@@ -309,7 +347,11 @@ export default function OtpScreen() {
           }}
         >
           <Animated.View style={formAnim}>
-            <BlurView intensity={22} tint="dark" style={{ borderRadius: 26, overflow: "hidden" }}>
+            <BlurView
+              intensity={22}
+              tint="dark"
+              style={{ borderRadius: 26, overflow: "hidden" }}
+            >
               <View className="bg-black/35 border border-white/10 rounded-[26px] p-5">
                 <Text className="text-slate-300 text-[11px] mb-2">OTP</Text>
 
@@ -318,16 +360,26 @@ export default function OtpScreen() {
                   <TextInput
                     ref={otpRef}
                     value={otp}
-                    onChangeText={(v) => setOtp(v.replace(/\D/g, "").slice(0, 6))}
+                    onChangeText={(v) =>
+                      setOtp(v.replace(/\D/g, "").slice(0, 6))
+                    }
                     placeholder="Enter OTP"
                     placeholderTextColor="#64748b"
                     keyboardType="number-pad"
                     className="text-white flex-1 ml-3"
-                    style={{ backgroundColor: "transparent", letterSpacing: 6, fontSize: 18 }}
+                    style={{
+                      backgroundColor: "transparent",
+                      letterSpacing: 6,
+                      fontSize: 18,
+                    }}
                   />
                   <View
                     className={`h-2.5 w-2.5 rounded-full ${
-                      otp.length === 0 ? "bg-slate-700" : otpOk ? "bg-emerald-400" : "bg-rose-400"
+                      otp.length === 0
+                        ? "bg-slate-700"
+                        : otpOk
+                          ? "bg-emerald-400"
+                          : "bg-rose-400"
                     }`}
                   />
                 </View>
@@ -338,17 +390,26 @@ export default function OtpScreen() {
                   </Text>
 
                   <Pressable onPress={onResend} disabled={sec > 0}>
-                    <Text className={`text-[11px] font-semibold ${sec > 0 ? "text-slate-500" : "text-emerald-300"}`}>
+                    <Text
+                      className={`text-[11px] font-semibold ${sec > 0 ? "text-slate-500" : "text-emerald-300"}`}
+                    >
                       Resend
                     </Text>
                   </Pressable>
                 </View>
 
-                <Pressable onPress={() => setAgree((p) => !p)} className="flex-row items-center mt-4">
+                <Pressable
+                  onPress={() => setAgree((p) => !p)}
+                  className="flex-row items-center mt-4"
+                >
                   <View className="h-5 w-5 rounded-md border border-white/20 items-center justify-center bg-white/5">
-                    {agree ? <Ionicons name="checkmark" size={14} color="#34d399" /> : null}
+                    {agree ? (
+                      <Ionicons name="checkmark" size={14} color="#34d399" />
+                    ) : null}
                   </View>
-                  <Text className="text-slate-300 text-[11px] ml-3">I confirm this OTP is mine</Text>
+                  <Text className="text-slate-300 text-[11px] ml-3">
+                    I confirm this OTP is mine
+                  </Text>
                 </Pressable>
 
                 <View className="mt-5">
@@ -362,7 +423,11 @@ export default function OtpScreen() {
                       colors={["#34d399", "#10b981", "#06b6d4"]}
                       start={{ x: 0, y: 0.5 }}
                       end={{ x: 1, y: 0.5 }}
-                      style={{ paddingVertical: 15, alignItems: "center", borderRadius: 24 }}
+                      style={{
+                        paddingVertical: 15,
+                        alignItems: "center",
+                        borderRadius: 24,
+                      }}
                     >
                       <Text className="text-black font-semibold">
                         {loading ? "Checking..." : "Verify & Continue"}
