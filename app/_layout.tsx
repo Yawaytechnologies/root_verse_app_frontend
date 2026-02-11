@@ -21,6 +21,13 @@ import {
   selectAuthSession,
 } from "../src/store/auth/authSession.slice";
 
+/** ✅ Fetch user /me data */
+import { fetchMe } from "../src/store/auth/me.slice";
+
+/** ✅ Network state */
+import NetInfo from "@react-native-community/netinfo";
+import { setNetworkOnline } from "../src/store/auth/network.slice";
+
 /** ✅ Toast */
 import Toast from "react-native-toast-message";
 
@@ -43,6 +50,10 @@ function RootLayoutInner() {
   const dispatch = useAppDispatch();
   const { token, hydrated } = useAppSelector(selectAuthSession);
 
+  // read user info to decide which home route to pick
+  const meState = useAppSelector((s: any) => s.me);
+  const loginState = useAppSelector((s: any) => s.login);
+
   // init i18n (fine to do here)
   useEffect(() => {
     initI18n().catch((e) => console.warn("i18n init failed:", e));
@@ -51,6 +62,37 @@ function RootLayoutInner() {
   // restore token from storage on app start
   useEffect(() => {
     dispatch(restoreSession());
+  }, [dispatch]);
+
+  // ✅ fetch user data (/me) after session is restored
+  useEffect(() => {
+    if (hydrated && token) {
+      dispatch(fetchMe());
+    }
+  }, [hydrated, token, dispatch]);
+
+  // ✅ global network state listener (inform all screens of online/offline changes)
+  useEffect(() => {
+    let mounted = true;
+
+    // Check initial state
+    NetInfo.fetch().then((state) => {
+      if (!mounted) return;
+      const online = !!state.isConnected && (state.isInternetReachable ?? true);
+      dispatch(setNetworkOnline(online));
+    });
+
+    // Subscribe to changes
+    const unsub = NetInfo.addEventListener((state) => {
+      if (!mounted) return;
+      const online = !!state.isConnected && (state.isInternetReachable ?? true);
+      dispatch(setNetworkOnline(online));
+    });
+
+    return () => {
+      mounted = false;
+      unsub();
+    };
   }, [dispatch]);
 
   // auth gate + redirect
@@ -67,9 +109,29 @@ function RootLayoutInner() {
       return;
     }
 
-    // token -> never show login/register/otp
+    // token -> decide post-login route based on user type
     if (token && inAuthGroup) {
-      router.replace(HOME_ROUTE);
+      // if we're still loading /me, wait until it's ready
+      if (meState?.loading) return;
+
+      const rtype =
+        (meState &&
+          (meState.me?.rootverse_type || meState.me?.rootverse_type)) ||
+        loginState?.rootverse_type ||
+        null;
+
+      const pickHomeRoute = (rt: string | null) => {
+        if (!rt) return HOME_ROUTE;
+        const up = String(rt || "").toUpperCase();
+        if (up === "QUALITY_CHECKER") return "/quality";
+        if (up === "WILD_CAPTURE") return "/(wild)/dashboard";
+        if (up === "AQUACULTURE") return "/(aqua)/tabs/dashboard";
+        if (up === "MARICULTURE") return "/mariculture";
+        return HOME_ROUTE;
+      };
+
+      const route = pickHomeRoute(rtype);
+      router.replace(route);
       return;
     }
   }, [hydrated, token, segments, router]);

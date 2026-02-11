@@ -19,6 +19,9 @@ import registrationReducer from "./registration.slice";
 // ✅ auth session (persisted token)
 import authSessionReducer from "./authSession.slice";
 
+// ✅ network state (global online/offline tracking)
+import networkReducer from "./network.slice";
+
 // ---- quality ----
 import qcFillReducer from "../quality/qcFill.slice";
 import qcOverviewReducer from "../quality/qcOverview.slice";
@@ -46,6 +49,9 @@ export const store = configureStore({
 
     // ✅ persisted session (THIS WAS MISSING)
     authSession: authSessionReducer,
+
+    // ✅ network state (global tracking)
+    network: networkReducer,
 
     // ✅ QC auth
     qualityAuth: qualityAuthReducer,
