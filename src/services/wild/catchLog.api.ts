@@ -1,5 +1,5 @@
 // src/services/wild/catchLog.api.ts
-import { httpJson, httpPutForm, appendImageToForm } from "../http";
+import { appendImageToForm, httpJson, httpPutForm } from "../http";
 
 export type QrStatusResponse = {
   crateId: string;
@@ -129,11 +129,13 @@ function makeGenericDummyCatchLogs(tripId: string): CatchLog[] {
 }
 /* ======================================================== */
 
-export async function apiCheckQrStatus(crateId: string): Promise<QrStatusResponse> {
+export async function apiCheckQrStatus(
+  crateId: string,
+): Promise<QrStatusResponse> {
   try {
     const data = await httpJson<any>(
       `https://rootverse-backend-5qoo.onrender.com/api/qrs/${encodeURIComponent(crateId)}`,
-      { method: "GET" }
+      { method: "GET" },
     );
 
     return {
@@ -153,12 +155,14 @@ export async function apiCheckQrStatus(crateId: string): Promise<QrStatusRespons
 }
 
 // ✅ NEW: Get all catchlogs for a particular trip (for Trip View screen)
-export async function apiFetchCatchLogsByTrip(tripId: string): Promise<CatchLog[]> {
+export async function apiFetchCatchLogsByTrip(
+  tripId: string,
+): Promise<CatchLog[]> {
   try {
     // ✅ API (change ONLY this path if your backend route differs)
     const data = await httpJson<any>(
       `/api/trips/${encodeURIComponent(tripId)}/catchlogs`,
-      { method: "GET" }
+      { method: "GET" },
     );
 
     // supports: array OR {data:[]} OR {data:{catchlogs:[]}}
@@ -170,7 +174,9 @@ export async function apiFetchCatchLogsByTrip(tripId: string): Promise<CatchLog[
   } catch (e) {
     // ✅ Dummy fallback only
     if (USE_DUMMY_CATCHLOG) {
-      return DUMMY_CATCHLOGS_BY_TRIP[tripId] || makeGenericDummyCatchLogs(tripId);
+      return (
+        DUMMY_CATCHLOGS_BY_TRIP[tripId] || makeGenericDummyCatchLogs(tripId)
+      );
     }
     throw e;
   }
@@ -214,17 +220,46 @@ export async function apiSubmitCatchLog(payload: CatchLogPayload) {
 
   // ✅ Time (force HH:mm:ss)
   const t =
-    payload.catchTime?.length === 5 ? `${payload.catchTime}:00` : payload.catchTime;
+    payload.catchTime?.length === 5
+      ? `${payload.catchTime}:00`
+      : payload.catchTime;
   form.append("time", t);
   form.append("catch_time", t);
 
   // ✅ Location
-  if (payload.latitude != null) form.append("latitude", String(payload.latitude));
-  if (payload.longitude != null) form.append("longitude", String(payload.longitude));
+  if (payload.latitude != null)
+    form.append("latitude", String(payload.latitude));
+  if (payload.longitude != null)
+    form.append("longitude", String(payload.longitude));
 
-  // ✅ Images
+  // ✅ Images - with error handling for invalid/missing files
+  const validImages: string[] = [];
+  const failedImages: string[] = [];
+
   for (let i = 0; i < (payload.images?.length || 0); i++) {
-    await appendImageToForm(form, "images", payload.images[i], `catch_${code}_${i + 1}.jpg`);
+    try {
+      await appendImageToForm(
+        form,
+        "images",
+        payload.images[i],
+        `catch_${code}_${i + 1}.jpg`,
+      );
+      validImages.push(payload.images[i]);
+    } catch (e: any) {
+      console.warn(
+        `[SUBMIT_CATCHLOG] Failed to append image ${i}:`,
+        String(e?.message || e),
+      );
+      failedImages.push(payload.images[i]);
+      // Continue with other images instead of failing entirely
+    }
+  }
+
+  // Log if some images failed (but don't fail the submission)
+  if (failedImages.length > 0) {
+    console.warn(
+      `[SUBMIT_CATCHLOG] ${failedImages.length} image(s) failed to attach, continuing with ${validImages.length} image(s)`,
+    );
   }
 
   // ✅ PUT /api/qrs/:crateId

@@ -29,6 +29,7 @@ import { captureRef } from "react-native-view-shot";
 
 import { submitCatchLog } from "../../../src/services/wild/catchLog.slice";
 import { useAppDispatch, useAppSelector } from "../../../src/store/hooks";
+import { ensureFileUri } from "../../../src/utils/ensureFileUri";
 
 import {
   enqueueCatchLog,
@@ -1327,41 +1328,128 @@ export default function CreateCatchLog() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalNetworkState, meUser?.id]);
 
-  /* ---------------- fish load ---------------- */
+  /* ✅ CRITICAL: load all data on mount (cache-first for offline) */
   useEffect(() => {
     let alive = true;
 
-    const loadFish = async () => {
+    const loadAllData = async () => {
+      if (!meUser?.id) return;
+
+      // ✅ Fish types
       setFishLoading(true);
-      const cached = await readFishCache();
-      if (!alive) return;
-
-      if (cached.length > 0) setFishTypes(cached);
-
-      const net = await NetInfo.fetch();
-      const online = !!net.isConnected && (net.isInternetReachable ?? true);
-      if (!online) {
-        if (alive) setFishLoading(false);
-        return;
-      }
-
       try {
-        const fresh = await fetchFishTypesFromApi();
-        if (!alive) return;
-        if (fresh.length > 0) {
-          setFishTypes(fresh);
-          await writeFishCache(fresh);
+        const cached = await readFishCache();
+        if (alive && cached.length > 0) {
+          setFishTypes(cached);
+        }
+
+        const net = await NetInfo.fetch();
+        const online = !!net.isConnected && (net.isInternetReachable ?? true);
+        if (online) {
+          try {
+            const fresh = await fetchFishTypesFromApi();
+            if (alive && fresh.length > 0) {
+              setFishTypes(fresh);
+              await writeFishCache(fresh);
+            }
+          } catch (e) {
+            console.log("[FISH FETCH ON_MOUNT]", String(e?.message || e));
+            // use cache anyway
+          }
         }
       } finally {
         if (alive) setFishLoading(false);
       }
+
+      // ✅ Owner ID from cache
+      try {
+        const userId = Number(meUser.id);
+        const cachedOwnerId = await readOwnerCacheByUser(userId);
+        if (alive && cachedOwnerId) {
+          setOwnerId(cachedOwnerId);
+        }
+
+        // ✅ Owner Code from cache
+        const cachedOwnerCode = await readOwnerCodeCacheByUser(userId);
+        if (alive && cachedOwnerCode) {
+          setOwnerCode(cachedOwnerCode);
+        }
+      } catch (e) {
+        console.log("[OWNER_CACHE_LOAD]", String(e?.message || e));
+      }
+
+      // ✅ Vessels
+      try {
+        const userId = Number(meUser.id);
+        const oid = await ensureOwnerId();
+        if (alive && oid) {
+          // Try cache first
+          const cachedV = await readVesselCache(oid);
+          if (cachedV.length > 0) {
+            setVessels(cachedV);
+          }
+
+          // Fetch fresh if online
+          const net = await NetInfo.fetch();
+          const online = !!net.isConnected && (net.isInternetReachable ?? true);
+          if (online) {
+            setVesselLoading(true);
+            try {
+              await fetchOwnerVessels(oid);
+            } catch (e) {
+              console.log("[VESSEL FETCH ON_MOUNT]", String(e?.message || e));
+              // use cache anyway
+            } finally {
+              if (alive) setVesselLoading(false);
+            }
+          }
+        }
+      } catch (e) {
+        console.log("[OWNER LOAD ON_MOUNT]", String(e?.message || e));
+      }
+
+      // ✅ Trips
+      try {
+        // Wait for owner code to be set from cache
+        let oc = ownerCode;
+        if (!oc) {
+          const userId = Number(meUser.id);
+          oc = await readOwnerCodeCacheByUser(userId);
+          if (oc && alive) {
+            setOwnerCode(oc);
+          }
+        }
+
+        if (oc) {
+          const cachedTrips = await readTripCache(oc);
+          if (cachedTrips.length > 0) {
+            setTrips(cachedTrips);
+          }
+
+          const net = await NetInfo.fetch();
+          const online = !!net.isConnected && (net.isInternetReachable ?? true);
+          if (online) {
+            setTripLoading(true);
+            try {
+              await fetchApprovedTrips(oc);
+            } catch (e) {
+              console.log("[TRIP FETCH ON_MOUNT]", String(e?.message || e));
+              // use cache anyway
+            } finally {
+              if (alive) setTripLoading(false);
+            }
+          }
+        }
+      } catch (e) {
+        console.log("[TRIP LOAD ON_MOUNT]", String(e?.message || e));
+      }
     };
 
-    loadFish();
+    loadAllData();
     return () => {
       alive = false;
     };
-  }, []);
+  }, [meUser?.id]);
 
   /* ---------------- online / auto flush queue + detect network changes ---------------- */
   useEffect(() => {
@@ -1943,6 +2031,14 @@ export default function CreateCatchLog() {
       } catch (e: any) {
         console.log("[WATERMARK FAIL]", String(e?.message || e));
         finalUri = rawUri;
+      }
+
+      // ✅ CRITICAL: Convert content:// to file:// for Android APK compatibility
+      try {
+        finalUri = await ensureFileUri(finalUri);
+      } catch (e: any) {
+        console.warn("[ENSURE_FILE_URI FAIL]", String(e?.message || e));
+        // continue with original URI if conversion fails
       }
 
       addImageToGroup(photoTargetGroupId, finalUri);
