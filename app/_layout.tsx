@@ -114,16 +114,15 @@ function RootLayoutInner() {
       // if we're still loading /me, wait until it's ready
       if (meState?.loading) return;
 
-      // ✅ Extract rootverse_type from meState.me or loginState
-      // Prefer meState (from /me endpoint) if available, otherwise use loginState
       const rtype =
-        meState?.me?.rootverse_type || loginState?.rootverse_type || null;
+        (meState &&
+          (meState.me?.rootverse_type || meState.me?.rootverse_type)) ||
+        loginState?.rootverse_type ||
+        null;
 
-      // Don't route if we don't have the rootverse_type yet
-      if (!rtype) return;
-
-      const pickHomeRoute = (rt: string) => {
-        const up = String(rt).toUpperCase();
+      const pickHomeRoute = (rt: string | null) => {
+        if (!rt) return HOME_ROUTE;
+        const up = String(rt || "").toUpperCase();
         if (up === "QUALITY_CHECKER") return "/quality";
         if (up === "WILD_CAPTURE") return "/(wild)/dashboard";
         if (up === "AQUACULTURE") return "/(aqua)/tabs/dashboard";
@@ -135,7 +134,7 @@ function RootLayoutInner() {
       router.replace(route);
       return;
     }
-  }, [hydrated, token, segments, router, meState, loginState]);
+  }, [hydrated, token, segments, router]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: "black" }}>
