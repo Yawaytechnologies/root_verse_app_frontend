@@ -1,5 +1,5 @@
 // src/store/auth/store.ts
-import { configureStore } from "@reduxjs/toolkit";
+import { combineReducers, configureStore } from "@reduxjs/toolkit";
 
 // ---- features ----
 import authReducer from "../../features/auth/authSlice";
@@ -19,7 +19,7 @@ import registrationReducer from "./registration.slice";
 // ✅ auth session (persisted token)
 import authSessionReducer from "./authSession.slice";
 
-// ✅ network state (global online/offline tracking)
+// ✅ network state
 import networkReducer from "./network.slice";
 
 // ---- quality ----
@@ -31,40 +31,57 @@ import qualityCheckerReducer from "../qualityChecker/qualityChecker.slice";
 // ---- ui ----
 import themeReducer from "../theme.slice";
 
+const appReducer = combineReducers({
+  // features
+  auth: authReducer,
+  trips: tripsReducer,
+
+  // services
+  catchLog: catchLogReducer,
+  filledQr: filledQrReducer,
+
+  // auth folder slices
+  registration: registrationReducer,
+  location: locationReducer,
+  login: loginReducer,
+  me: meReducer,
+
+  // persisted session
+  authSession: authSessionReducer,
+
+  // network
+  network: networkReducer,
+
+  // QC auth
+  qualityAuth: qualityAuthReducer,
+  qualityChecker: qualityCheckerReducer,
+
+  // quality
+  qrDetails: qrDetailsReducer,
+  qcFill: qcFillReducer,
+  qcOverview: qcOverviewReducer,
+
+  // ui
+  theme: themeReducer,
+});
+
+const rootReducer = (state: any, action: any) => {
+  if (action.type === "authSession/logout/fulfilled") {
+    // wipe whole redux tree to avoid role leak / blink
+    state = {
+      // keep app-level things if you want
+      network: state?.network,
+      theme: state?.theme,
+
+      // keep authSession hydrated true so layout doesn't freeze
+      authSession: { token: null, expiresAt: null, hydrated: true },
+    };
+  }
+  return appReducer(state, action);
+};
+
 export const store = configureStore({
-  reducer: {
-    // features
-    auth: authReducer,
-    trips: tripsReducer,
-
-    // services
-    catchLog: catchLogReducer,
-    filledQr: filledQrReducer,
-
-    // auth folder slices
-    registration: registrationReducer,
-    location: locationReducer,
-    login: loginReducer,
-    me: meReducer,
-
-    // ✅ persisted session (THIS WAS MISSING)
-    authSession: authSessionReducer,
-
-    // ✅ network state (global tracking)
-    network: networkReducer,
-
-    // ✅ QC auth
-    qualityAuth: qualityAuthReducer,
-    qualityChecker: qualityCheckerReducer,
-
-    // ✅ quality
-    qrDetails: qrDetailsReducer,
-    qcFill: qcFillReducer,
-    qcOverview: qcOverviewReducer,
-
-    // ui
-    theme: themeReducer,
-  },
+  reducer: rootReducer,
   middleware: (getDefault) =>
     getDefault({
       serializableCheck: false,

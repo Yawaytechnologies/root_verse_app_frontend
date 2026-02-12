@@ -1,5 +1,14 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit";
-import { clearSession, deriveExpiresAt, loadSession, saveSession, type StoredSession } from "./sessionStorage";
+import {
+  clearSession,
+  deriveExpiresAt,
+  loadSession,
+  saveSession,
+  type StoredSession,
+} from "./sessionStorage";
+
+const AUTH_TOKEN_KEY = "auth_token";
 
 type AuthSessionState = {
   token: string | null;
@@ -17,12 +26,14 @@ export const restoreSession = createAsyncThunk("authSession/restore", async () =
   const s = await loadSession();
   if (!s) return null;
 
-  // expired -> wipe it
   if (Date.now() >= s.expiresAt) {
     await clearSession();
+    await AsyncStorage.removeItem(AUTH_TOKEN_KEY).catch(() => { });
     return null;
   }
 
+  // keep AsyncStorage in sync (some parts still read auth_token)
+  await AsyncStorage.setItem(AUTH_TOKEN_KEY, s.token).catch(() => { });
   return s;
 });
 
@@ -35,12 +46,24 @@ export const persistSession = createAsyncThunk(
       expiresAt: deriveExpiresAt(token),
     };
     await saveSession(session);
+
+    // ✅ sync legacy token storage
+    await AsyncStorage.setItem(AUTH_TOKEN_KEY, token).catch(() => { });
+
     return session;
   }
 );
 
 export const logoutSession = createAsyncThunk("authSession/logout", async () => {
   await clearSession();
+
+  // ✅ wipe persistent keys that cause role leak / wrong routing
+  await AsyncStorage.multiRemove([
+    AUTH_TOKEN_KEY,
+    "owner_code",
+    "owner_id",
+  ]).catch(() => { });
+
   return true;
 });
 
@@ -48,7 +71,6 @@ const slice = createSlice({
   name: "authSession",
   initialState,
   reducers: {
-    // optional manual set if needed
     setToken(state, action: PayloadAction<string | null>) {
       state.token = action.payload;
     },
@@ -73,8 +95,10 @@ const slice = createSlice({
     });
 
     b.addCase(logoutSession.fulfilled, (state) => {
+      // keep hydrated true so layout doesn't freeze
       state.token = null;
       state.expiresAt = null;
+      state.hydrated = true;
     });
   },
 });
@@ -82,5 +106,5 @@ const slice = createSlice({
 export const { setToken } = slice.actions;
 export default slice.reducer;
 
-// selector helper (adjust RootState path if needed)
-export const selectAuthSession = (s: any) => s.authSession as AuthSessionState;
+export const selectAuthSession = (s: any) =>
+  s.authSession as AuthSessionState;
