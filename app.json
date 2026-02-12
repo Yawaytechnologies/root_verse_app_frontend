@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "root_verse_app",
+    "name": "OneBlue",
     "slug": "root_verse_app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -17,7 +17,12 @@
         "backgroundColor": "#E6F4FE"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.yawaytech.root_verse_app"
     },
     "web": {
       "output": "static",
@@ -50,6 +55,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "782bc067-ddb8-4fe6-933c-4d11d57ec0a3"
+      }
     }
   }
 }
