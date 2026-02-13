@@ -10,6 +10,7 @@ import {
   View,
   Alert,
   Modal,
+  PanResponder,
 } from "react-native";
 
 import {
@@ -21,6 +22,10 @@ import {
 } from "../../utils/qcFillQueue";
 
 import { FullRow, TwoColRow, type Division, type Lang } from "./QualityUI";
+
+// ✅ current QC user (to scope local queue per user)
+import { useAppSelector } from "../../store/hooks";
+import { selectInspector as selectQcInspector } from "../../store/qualityAuth/qualityAuth.slice";
 
 export type TabStatus = "pending" | "checked" | "rejected";
 
@@ -71,6 +76,7 @@ function getQcResult(p: any) {
 
 function getImages(p: any): string[] {
   const imgs =
+    p?.crate_images ||
     p?.inspection_images ||
     p?.pond_images ||
     p?.pond_condition_images ||
@@ -103,7 +109,6 @@ function getLocation(p: any): {
     local?.location?.coords ||
     {};
 
-  // coords
   const lat =
     numOrUndef(src?.latitude) ??
     numOrUndef(src?.lat) ??
@@ -128,7 +133,6 @@ function getLocation(p: any): {
     numOrUndef(local?.lng) ??
     numOrUndef(local?.lon);
 
-  // "lat,lng" string support
   const ll =
     src?.current_location ||
     src?.currentLocation ||
@@ -158,15 +162,20 @@ function getLocation(p: any): {
     (typeof src?.address === "string" ? src.address : undefined) ||
     (typeof src?.location_name === "string" ? src.location_name : undefined) ||
     (typeof src?.locationName === "string" ? src.locationName : undefined) ||
-    (typeof src?.formatted_address === "string" ? src.formatted_address : undefined) ||
+    (typeof src?.formatted_address === "string"
+      ? src.formatted_address
+      : undefined) ||
     (typeof src?.place === "string" ? src.place : undefined) ||
     (typeof local?.address === "string" ? local.address : undefined) ||
-    (typeof local?.formatted_address === "string" ? local.formatted_address : undefined);
+    (typeof local?.formatted_address === "string"
+      ? local.formatted_address
+      : undefined);
 
   if (lat2 === undefined && lng2 === undefined && !address) return null;
-
   return { lat: lat2, lng: lng2, accuracy, address };
 }
+
+const CELL_BASIS: any = { flexBasis: "14.285714%" };
 
 const HIDE_KEYS = new Set([
   "_local",
@@ -191,14 +200,12 @@ const HIDE_KEYS = new Set([
   "pond_condition_images",
   "images",
 
-  // ✅ hide inspected time field coming from payload
   "inspected_at",
   "inspectedAt",
   "inspected_at_time",
   "inspectedAtTime",
   "inspected at",
 
-  // ✅ hide raw location fields (we show clean "Location" block instead)
   "lat",
   "lng",
   "lon",
@@ -257,10 +264,7 @@ function getFormEntries(payload: any): Array<{ label: string; value: string }> {
     if (typeof v === "string" && !v.trim()) return;
     if (Array.isArray(v) && v.length === 0) return;
 
-    entries.push({
-      label: k.replace(/_/g, " "),
-      value: formatValue(v),
-    });
+    entries.push({ label: k.replace(/_/g, " "), value: formatValue(v) });
   });
 
   entries.sort((a, b) => a.label.localeCompare(b.label));
@@ -279,7 +283,7 @@ function renderTwoCol(entries: Array<{ label: string; value: string }>) {
           key={`${left.label}_${right.label}_${i}`}
           left={{ label: left.label, value: left.value }}
           right={{ label: right.label, value: right.value }}
-        />
+        />,
       );
     } else {
       rows.push(<FullRow key={`${left.label}_${i}`} label={left.label} value={left.value} />);
@@ -310,32 +314,6 @@ function fmtMonthTitle(d: Date) {
   return `${m} ${d.getFullYear()}`;
 }
 
-const CAL = {
-  overlay: "rgba(0,0,0,0.70)",
-  cardBg: "#0b1630",
-  cardTop: "rgba(255,255,255,0.04)",
-  border: "rgba(255,255,255,0.10)",
-  textSoft: "rgba(255,255,255,0.55)",
-
-  btnBg: "rgba(255,255,255,0.07)",
-  btnBorder: "rgba(255,255,255,0.12)",
-
-  dayBg: "rgba(255,255,255,0.06)",
-  dayBorder: "rgba(255,255,255,0.10)",
-
-  selBg: "rgba(59,130,246,0.35)",
-  selBorder: "rgba(59,130,246,0.70)",
-
-  todayBorder: "rgba(34,197,94,0.85)",
-  markDot: "rgba(255,255,255,0.70)",
-
-  primaryBtnBg: "rgba(59,130,246,0.25)",
-  primaryBtnBorder: "rgba(59,130,246,0.35)",
-
-  okBg: "rgba(34,197,94,0.18)",
-  okBorder: "rgba(34,197,94,0.35)",
-};
-
 export default function QcListScreen({
   division,
   lang,
@@ -353,6 +331,21 @@ export default function QcListScreen({
 
   onEditItem?: (draft: { qrCode: string; payload: any }) => void;
 }) {
+  const qcMe = useAppSelector(selectQcInspector);
+
+  const qcUserKey = useMemo(() => {
+    const v =
+      (qcMe as any)?.id ??
+      (qcMe as any)?.checker_code ??
+      (qcMe as any)?.checkerCode ??
+      (qcMe as any)?.checker_phone ??
+      (qcMe as any)?.checkerPhone ??
+      (qcMe as any)?.phone ??
+      (qcMe as any)?.mobile ??
+      "";
+    return String(v || "").trim();
+  }, [qcMe]);
+
   const [items, setItems] = useState<ListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<ListItem | null>(null);
@@ -377,22 +370,21 @@ export default function QcListScreen({
   const closeImagePreview = () => setImgOpen(false);
 
   const nextImage = () => {
-    setImgIndex((p) => {
-      if (!imgUris.length) return 0;
-      return Math.min(p + 1, imgUris.length - 1);
-    });
+    setImgIndex((p) => (imgUris.length ? Math.min(p + 1, imgUris.length - 1) : 0));
   };
 
   const prevImage = () => {
-    setImgIndex((p) => {
-      if (!imgUris.length) return 0;
-      return Math.max(p - 1, 0);
-    });
+    setImgIndex((p) => (imgUris.length ? Math.max(p - 1, 0) : 0));
   };
 
   useEffect(() => {
     setCalMonth(monthStart(ymdToDate(selectedDate)));
   }, [selectedDate]);
+
+  // ✅ clear selected when user switches
+  useEffect(() => {
+    setSelected(null);
+  }, [qcUserKey]);
 
   const todayYmd = useMemo(() => toYmdLocal(Date.now()), []);
   const todayMonthStart = useMemo(() => monthStart(new Date()), []);
@@ -400,7 +392,15 @@ export default function QcListScreen({
   const load = async () => {
     try {
       setLoading(true);
-      const q = await getQcFillQueue();
+
+      if (!qcUserKey) {
+        setItems([]);
+        setMarkedDays({});
+        setSelected(null);
+        return;
+      }
+
+      const q = await getQcFillQueue(qcUserKey);
       const ymd = String(selectedDate || "").trim();
 
       const base = (q as QcFillQueuedItem[])
@@ -461,11 +461,13 @@ export default function QcListScreen({
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [division, status, selectedDate]);
+  }, [division, status, selectedDate, qcUserKey]);
 
   const onDeleteSelected = async () => {
     if (!selected) return;
-    await removeQcFillById(selected.id);
+    if (!qcUserKey) return;
+
+    await removeQcFillById(qcUserKey, selected.id);
     setSelected(null);
     await load();
   };
@@ -478,6 +480,7 @@ export default function QcListScreen({
 
   const formEntries = useMemo(() => (selected ? getFormEntries(selected.payload) : []), [selected]);
 
+  // ✅ calendar cells (FORCE 6 WEEKS = 42 cells) => size NEVER changes, Saturday always aligns
   const calCells = useMemo(() => {
     const start = monthStart(calMonth);
     const total = daysInMonth(start);
@@ -489,7 +492,13 @@ export default function QcListScreen({
       const dt = new Date(start.getFullYear(), start.getMonth(), d);
       cells.push({ day: d, ymd: toYmdLocal(dt.getTime()) });
     }
+
+    // pad to end of week
     while (cells.length % 7 !== 0) cells.push({});
+
+    // pad to 6 rows ALWAYS
+    while (cells.length < 42) cells.push({});
+
     return cells;
   }, [calMonth]);
 
@@ -498,86 +507,87 @@ export default function QcListScreen({
     return next.getTime() <= todayMonthStart.getTime();
   }, [calMonth, todayMonthStart]);
 
-  return (
-    <View style={{ marginTop: 12, flex: 1 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-        <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>{title}</Text>
+  // ✅ swipe month (left/right) + keep arrows
+  const panResponder = useMemo(() => {
+    const TH = 40; // swipe threshold
+    return PanResponder.create({
+      onMoveShouldSetPanResponder: (_evt, g) =>
+        Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy),
+      onPanResponderRelease: (_evt, g) => {
+        if (g.dx > TH) {
+          setCalMonth((p) => addMonths(p, -1));
+          return;
+        }
+        if (g.dx < -TH) {
+          if (!canGoNextMonth) return;
+          setCalMonth((p) => addMonths(p, 1));
+        }
+      },
+    });
+  }, [canGoNextMonth]);
 
+  // ✅ calendar sizes (compact + stable)
+  const DAY_SIZE = 34;
+
+  return (
+    <View className="mt-3 flex-1">
+      {/* Header */}
+      <View className="flex-row items-center justify-between">
+        <Text className="text-white font-black text-[18px]">{title}</Text>
+
+        {/* keep this button exactly as-is (your request) */}
         <Pressable
           onPress={() => setCalOpen(true)}
-          style={{
-            paddingHorizontal: 12,
-            paddingVertical: 9,
-            borderRadius: 14,
-            backgroundColor: "rgba(255,255,255,0.06)",
-            borderWidth: 1,
-            borderColor: "rgba(255,255,255,0.10)",
-          }}
+          className="px-3 py-[9px] rounded-[14px] bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.10)]"
         >
-          <Text style={{ color: "white", fontWeight: "900" }}>{formatDmy(selectedDate)}</Text>
+          <Text className="text-white font-black">{formatDmy(selectedDate)}</Text>
         </Pressable>
       </View>
 
-      {loading && <ActivityIndicator style={{ marginTop: 14 }} />}
-
-      {!loading && items.length === 0 && (
-        <Text style={{ color: "rgba(255,255,255,0.55)", marginTop: 14 }}>
-          No inspections for this date.
-        </Text>
+      {loading && (
+        <View className="mt-3.5">
+          <ActivityIndicator />
+        </View>
       )}
 
-      <ScrollView style={{ marginTop: 12 }} contentContainerStyle={{ paddingBottom: 30 }}>
+      {!loading && items.length === 0 && (
+        <Text className="text-white/55 mt-3.5">No inspections for this date.</Text>
+      )}
+
+      <ScrollView className="mt-3" contentContainerClassName="pb-8">
         {items.map((it) => {
           const active = selected?.id === it.id;
           const allowEditDelete = it.tab === "pending";
           const imgs = getImages(it.payload);
           const loc = getLocation(it.payload);
 
-          return (
-            <View key={it.id} style={{ marginBottom: 10 }}>
-              <Pressable
-                onPress={() => setSelected(active ? null : it)}
-                style={{
-                  padding: 14,
-                  borderRadius: 18,
-                  backgroundColor: active ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.06)",
-                  borderWidth: 1,
-                  borderColor: active ? "rgba(59,130,246,0.45)" : "rgba(255,255,255,0.10)",
-                }}
-              >
-                <Text style={{ color: "white", fontWeight: "900" }}>{it.qrCode}</Text>
+          const cardClass = active
+            ? "p-3.5 rounded-[18px] bg-[rgba(59,130,246,0.15)] border border-[rgba(59,130,246,0.45)]"
+            : "p-3.5 rounded-[18px] bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.10)]";
 
-                <Text style={{ color: "rgba(255,255,255,0.65)", marginTop: 4 }}>
-                  Result: {getQcResult(it.payload) || "—"}
-                </Text>
+          return (
+            <View key={it.id} className="mb-2.5">
+              <Pressable onPress={() => setSelected(active ? null : it)} className={cardClass}>
+                <Text className="text-white font-black">{it.qrCode}</Text>
+
+                <Text className="text-white/65 mt-1">Result: {getQcResult(it.payload) || "—"}</Text>
 
                 {!!it.lastError && (
-                  <Text style={{ color: "rgba(255,120,120,0.85)", marginTop: 4 }}>
-                    Error: {it.lastError}
-                  </Text>
+                  <Text className="text-[rgba(255,120,120,0.85)] mt-1">Error: {it.lastError}</Text>
                 )}
 
-                <Text style={{ color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
+                <Text className="text-white/55 mt-0.5">
                   {it.synced ? "Submitted" : "Saved"}: {new Date(it.createdAt).toLocaleString()}
                 </Text>
 
-                <Text style={{ color: "rgba(255,255,255,0.45)", marginTop: 8, fontWeight: "800" }}>
+                <Text className="text-white/45 mt-2 font-extrabold">
                   {active ? "Tap to hide details ▲" : "Tap to view details ▼"}
                 </Text>
               </Pressable>
 
-              {/* ✅ Details only after clicking "Tap to view details" */}
+              {/* Details */}
               {active && (
-                <View
-                  style={{
-                    marginTop: 10,
-                    padding: 14,
-                    borderRadius: 18,
-                    backgroundColor: "rgba(255,255,255,0.06)",
-                    borderWidth: 1,
-                    borderColor: "rgba(255,255,255,0.10)",
-                  }}
-                >
+                <View className="mt-2.5 p-3.5 rounded-[18px] bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.10)]">
                   <TwoColRow
                     left={{ label: "Division", value: division }}
                     right={{ label: "Result", value: getQcResult(it.payload) || "—" }}
@@ -594,27 +604,16 @@ export default function QcListScreen({
                     }}
                   />
 
-                  {/* ✅ CURRENT LOCATION shown inside details */}
-                  <View style={{ marginTop: 10 }}>
-                    <Text style={{ color: "rgba(255,255,255,0.9)", fontWeight: "900", fontSize: 15 }}>
-                      Current Location
-                    </Text>
+                  {/* Location */}
+                  <View className="mt-2.5">
+                    <Text className="text-white/90 font-black text-[15px]">Current Location</Text>
 
                     {loc ? (
                       <>
-                        <FullRow
-                          label="Address"
-                          value={loc.address ? loc.address : "—"}
-                        />
+                        <FullRow label="Address" value={loc.address ? loc.address : "—"} />
                         <TwoColRow
-                          left={{
-                            label: "Latitude",
-                            value: loc.lat !== undefined ? String(loc.lat) : "—",
-                          }}
-                          right={{
-                            label: "Longitude",
-                            value: loc.lng !== undefined ? String(loc.lng) : "—",
-                          }}
+                          left={{ label: "Latitude", value: loc.lat !== undefined ? String(loc.lat) : "—" }}
+                          right={{ label: "Longitude", value: loc.lng !== undefined ? String(loc.lng) : "—" }}
                         />
                         <TwoColRow
                           left={{
@@ -628,57 +627,44 @@ export default function QcListScreen({
                         />
                       </>
                     ) : (
-                      <Text style={{ color: "rgba(255,255,255,0.55)", marginTop: 8 }}>
-                        Location not found in payload.
-                      </Text>
+                      <Text className="text-white/55 mt-2">Location not found in payload.</Text>
                     )}
                   </View>
 
                   <FullRow label="Remarks" value={it.payload?.remarks || it.payload?.qc_remarks || "—"} />
 
-                  <View style={{ marginTop: 12 }}>
-                    <Text style={{ color: "rgba(255,255,255,0.9)", fontWeight: "900", fontSize: 15 }}>
-                      Form Details
-                    </Text>
+                  {/* Form Details */}
+                  <View className="mt-3">
+                    <Text className="text-white/90 font-black text-[15px]">Form Details</Text>
 
                     {formEntries.length === 0 ? (
-                      <Text style={{ color: "rgba(255,255,255,0.55)", marginTop: 8 }}>
-                        No extra fields found in payload.
-                      </Text>
+                      <Text className="text-white/55 mt-2">No extra fields found in payload.</Text>
                     ) : (
-                      <View style={{ marginTop: 6 }}>{renderTwoCol(formEntries)}</View>
+                      <View className="mt-1.5">{renderTwoCol(formEntries)}</View>
                     )}
                   </View>
 
-                  {/* ✅ Images below details; tap -> fullscreen preview */}
+                  {/* Images */}
                   {imgs.length > 0 && (
-                    <View style={{ marginTop: 14 }}>
-                      <Text style={{ color: "rgba(255,255,255,0.9)", fontWeight: "900", fontSize: 15 }}>
-                        Images
-                      </Text>
+                    <View className="mt-3.5">
+                      <Text className="text-white/90 font-black text-[15px]">Images</Text>
 
                       <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
-                        style={{ marginTop: 10 }}
-                        contentContainerStyle={{ paddingRight: 4 }}
+                        className="mt-2.5"
+                        contentContainerClassName="pr-1"
                       >
                         {imgs.map((uri, idx) => (
                           <Pressable
                             key={`${uri}_detail_${idx}`}
                             onPress={() => openImagePreview(imgs, idx)}
-                            style={{ marginRight: 10 }}
+                            className="mr-2.5"
                             hitSlop={10}
                           >
                             <Image
                               source={{ uri }}
-                              style={{
-                                width: 140,
-                                height: 110,
-                                borderRadius: 14,
-                                borderWidth: 1,
-                                borderColor: "rgba(255,255,255,0.10)",
-                              }}
+                              className="w-[140px] h-[110px] rounded-[14px] border border-[rgba(255,255,255,0.10)]"
                               resizeMode="cover"
                             />
                           </Pressable>
@@ -687,6 +673,7 @@ export default function QcListScreen({
                     </View>
                   )}
 
+                  {/* Edit/Delete only for pending */}
                   {allowEditDelete && (
                     <>
                       <Pressable
@@ -698,28 +685,16 @@ export default function QcListScreen({
                           setSelected(null);
                           onEditItem({ qrCode: it.qrCode, payload: it.payload });
                         }}
-                        style={{
-                          marginTop: 14,
-                          padding: 14,
-                          borderRadius: 14,
-                          backgroundColor: "#2563EB",
-                          alignItems: "center",
-                        }}
+                        className="mt-3.5 p-3.5 rounded-[14px] bg-[#2563EB] items-center"
                       >
-                        <Text style={{ color: "white", fontWeight: "900" }}>Edit (Open Form)</Text>
+                        <Text className="text-white font-black">Edit (Open Form)</Text>
                       </Pressable>
 
                       <Pressable
                         onPress={onDeleteSelected}
-                        style={{
-                          marginTop: 10,
-                          padding: 14,
-                          borderRadius: 14,
-                          backgroundColor: "#DC2626",
-                          alignItems: "center",
-                        }}
+                        className="mt-2.5 p-3.5 rounded-[14px] bg-[#DC2626] items-center"
                       >
-                        <Text style={{ color: "white", fontWeight: "900" }}>Delete</Text>
+                        <Text className="text-white font-black">Delete</Text>
                       </Pressable>
                     </>
                   )}
@@ -730,40 +705,14 @@ export default function QcListScreen({
         })}
       </ScrollView>
 
-      {/* ✅ Fullscreen Image Preview Modal */}
+      {/* Fullscreen Image Preview */}
       <Modal visible={imgOpen} transparent animationType="fade" onRequestClose={closeImagePreview}>
-        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)" }}>
-          <Pressable
-            onPress={closeImagePreview}
-            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-          />
+        <View className="flex-1 bg-[rgba(0,0,0,0.92)]">
+          <Pressable onPress={closeImagePreview} className="absolute inset-0" />
 
-          <View
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              paddingTop: 18,
-              paddingHorizontal: 14,
-              paddingBottom: 10,
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              zIndex: 20,
-            }}
-          >
-            <View
-              style={{
-                paddingHorizontal: 10,
-                paddingVertical: 6,
-                borderRadius: 12,
-                backgroundColor: "rgba(255,255,255,0.08)",
-                borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.12)",
-              }}
-            >
-              <Text style={{ color: "white", fontWeight: "900", fontSize: 12 }}>
+          <View className="absolute top-0 left-0 right-0 pt-4 px-3.5 pb-2.5 flex-row items-center justify-between z-20">
+            <View className="px-2.5 py-1.5 rounded-[12px] bg-[rgba(255,255,255,0.08)] border border-[rgba(255,255,255,0.12)]">
+              <Text className="text-white font-black text-[12px]">
                 {imgUris.length ? `${imgIndex + 1} / ${imgUris.length}` : "0 / 0"}
               </Text>
             </View>
@@ -771,28 +720,15 @@ export default function QcListScreen({
             <Pressable
               onPress={closeImagePreview}
               hitSlop={10}
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 14,
-                backgroundColor: "rgba(255,255,255,0.08)",
-                borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.12)",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
+              className="w-10 h-10 rounded-[14px] bg-[rgba(255,255,255,0.08)] border border-[rgba(255,255,255,0.12)] items-center justify-center"
             >
               <Ionicons name="close" size={22} color="white" />
             </Pressable>
           </View>
 
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 10 }}>
+          <View className="flex-1 items-center justify-center px-2.5">
             {imgUris[imgIndex] ? (
-              <Image
-                source={{ uri: imgUris[imgIndex] }}
-                style={{ width: "100%", height: "78%" }}
-                resizeMode="contain"
-              />
+              <Image source={{ uri: imgUris[imgIndex] }} className="w-full h-[78%]" resizeMode="contain" />
             ) : null}
           </View>
 
@@ -801,21 +737,9 @@ export default function QcListScreen({
               <Pressable
                 onPress={prevImage}
                 hitSlop={12}
-                style={{
-                  position: "absolute",
-                  left: 12,
-                  top: "50%",
-                  marginTop: -26,
-                  width: 52,
-                  height: 52,
-                  borderRadius: 18,
-                  backgroundColor: "rgba(255,255,255,0.10)",
-                  borderWidth: 1,
-                  borderColor: "rgba(255,255,255,0.14)",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  opacity: imgIndex === 0 ? 0.35 : 1,
-                }}
+                className={`absolute left-3 top-1/2 -mt-[26px] w-[52px] h-[52px] rounded-[18px] bg-[rgba(255,255,255,0.10)] border border-[rgba(255,255,255,0.14)] items-center justify-center ${
+                  imgIndex === 0 ? "opacity-35" : "opacity-100"
+                }`}
               >
                 <Ionicons name="chevron-back" size={26} color="white" />
               </Pressable>
@@ -823,26 +747,14 @@ export default function QcListScreen({
               <Pressable
                 onPress={nextImage}
                 hitSlop={12}
-                style={{
-                  position: "absolute",
-                  right: 12,
-                  top: "50%",
-                  marginTop: -26,
-                  width: 52,
-                  height: 52,
-                  borderRadius: 18,
-                  backgroundColor: "rgba(255,255,255,0.10)",
-                  borderWidth: 1,
-                  borderColor: "rgba(255,255,255,0.14)",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  opacity: imgIndex === imgUris.length - 1 ? 0.35 : 1,
-                }}
+                className={`absolute right-3 top-1/2 -mt-[26px] w-[52px] h-[52px] rounded-[18px] bg-[rgba(255,255,255,0.10)] border border-[rgba(255,255,255,0.14)] items-center justify-center ${
+                  imgIndex === imgUris.length - 1 ? "opacity-35" : "opacity-100"
+                }`}
               >
                 <Ionicons name="chevron-forward" size={26} color="white" />
               </Pressable>
 
-              <View style={{ paddingHorizontal: 12, paddingBottom: 18 }}>
+              <View className="px-3 pb-4">
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                   {imgUris.map((uri, idx) => {
                     const isActive = idx === imgIndex;
@@ -850,16 +762,13 @@ export default function QcListScreen({
                       <Pressable
                         key={`${uri}_thumb_${idx}`}
                         onPress={() => setImgIndex(idx)}
-                        style={{
-                          marginRight: 10,
-                          borderRadius: 12,
-                          overflow: "hidden",
-                          borderWidth: 2,
-                          borderColor: isActive ? "rgba(59,130,246,0.95)" : "rgba(255,255,255,0.12)",
-                          opacity: isActive ? 1 : 0.7,
-                        }}
+                        className={`mr-2.5 rounded-[12px] overflow-hidden border-2 ${
+                          isActive
+                            ? "border-[rgba(59,130,246,0.95)] opacity-100"
+                            : "border-[rgba(255,255,255,0.12)] opacity-70"
+                        }`}
                       >
-                        <Image source={{ uri }} style={{ width: 64, height: 48 }} resizeMode="cover" />
+                        <Image source={{ uri }} className="w-[64px] h-[48px]" resizeMode="cover" />
                       </Pressable>
                     );
                   })}
@@ -870,236 +779,161 @@ export default function QcListScreen({
         </View>
       </Modal>
 
-      {/* ✅ Center Calendar Modal */}
+      {/* ✅ Center Calendar Modal (fixed height via 6-week grid + footer space) */}
       <Modal visible={calOpen} transparent animationType="fade" onRequestClose={() => setCalOpen(false)}>
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: CAL.overlay,
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-          }}
-        >
-          <Pressable
-            onPress={() => setCalOpen(false)}
-            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-          />
+        <View className="flex-1 bg-[rgba(0,0,0,0.72)] items-center justify-center px-4">
+          <Pressable onPress={() => setCalOpen(false)} className="absolute inset-0" />
 
-          <View
-            style={{
-              width: "100%",
-              maxWidth: 420,
-              borderRadius: 22,
-              overflow: "hidden",
-              backgroundColor: CAL.cardBg,
-              borderWidth: 1,
-              borderColor: CAL.border,
-              shadowColor: "#000",
-              shadowOpacity: 0.35,
-              shadowRadius: 18,
-              shadowOffset: { width: 0, height: 10 },
-              elevation: 18,
-            }}
-          >
-            <View
-              style={{
-                paddingHorizontal: 14,
-                paddingVertical: 12,
-                backgroundColor: CAL.cardTop,
-                borderBottomWidth: 1,
-                borderBottomColor: "rgba(255,255,255,0.08)",
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-              }}
-            >
-              <View>
-                <Text style={{ color: "white", fontWeight: "900", fontSize: 16 }}>Select Date</Text>
-                <Text style={{ color: CAL.textSoft, fontWeight: "800", marginTop: 2 }}>
-                  Selected: {formatDmy(selectedDate)}
+          <View className="w-full max-w-[360px] rounded-[26px] overflow-hidden bg-[#0b1630] border border-[rgba(255,255,255,0.12)]">
+            {/* header */}
+            <View className="px-4 py-3 bg-[rgba(255,255,255,0.06)] border-b border-[rgba(255,255,255,0.10)] flex-row items-center justify-between">
+              <View className="flex-1 pr-3">
+                <Text className="text-white font-black text-[15px]">Select Date</Text>
+                <Text className="text-white/60 font-extrabold text-[12px] mt-0.5">
+                  {formatDmy(selectedDate)}
                 </Text>
               </View>
 
-              <Pressable
-                onPress={() => setCalOpen(false)}
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 12,
-                  backgroundColor: CAL.btnBg,
-                  borderWidth: 1,
-                  borderColor: CAL.btnBorder,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-                hitSlop={10}
-              >
-                <Text style={{ color: "white", fontWeight: "900", fontSize: 16 }}>✕</Text>
+              {/* keep X (not the footer Close button) */}
+              <Pressable onPress={() => setCalOpen(false)} hitSlop={12} className="p-2">
+                <Ionicons name="close" size={18} color="white" />
               </Pressable>
             </View>
 
-            <View style={{ padding: 14 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            {/* body */}
+            <View className="px-4 pt-3">
+              {/* month row: arrows BACK but NOT round */}
+              <View className="flex-row items-center justify-between">
                 <Pressable
                   onPress={() => setCalMonth((p) => addMonths(p, -1))}
-                  style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 14,
-                    backgroundColor: CAL.btnBg,
-                    borderWidth: 1,
-                    borderColor: CAL.btnBorder,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                  hitSlop={10}
+                  hitSlop={14}
+                  className="p-2"
                 >
-                  <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>‹</Text>
+                  <Ionicons name="chevron-back" size={18} color="white" />
                 </Pressable>
 
-                <View style={{ alignItems: "center" }}>
-                  <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>
-                    {fmtMonthTitle(calMonth)}
-                  </Text>
-                </View>
+                <Text className="text-white font-black text-[16px]">{fmtMonthTitle(calMonth)}</Text>
 
                 <Pressable
                   onPress={() => {
-                    if (!canGoNextMonth) {
-                      Alert.alert("Locked", "Future dates are locked.");
-                      return;
-                    }
+                    if (!canGoNextMonth) return;
                     setCalMonth((p) => addMonths(p, 1));
                   }}
-                  style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 14,
-                    backgroundColor: CAL.btnBg,
-                    borderWidth: 1,
-                    borderColor: CAL.btnBorder,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    opacity: canGoNextMonth ? 1 : 0.35,
-                  }}
-                  hitSlop={10}
+                  hitSlop={14}
+                  className={`p-2 ${canGoNextMonth ? "opacity-100" : "opacity-35"}`}
                 >
-                  <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>›</Text>
+                  <Ionicons name="chevron-forward" size={18} color="white" />
                 </Pressable>
               </View>
 
-              <View style={{ flexDirection: "row", marginTop: 14 }}>
+              {/* DOW */}
+              <View className="flex-row mt-3">
                 {DOW.map((d) => (
-                  <View key={d} style={{ flex: 1, alignItems: "center" }}>
-                    <Text style={{ color: CAL.textSoft, fontWeight: "900", fontSize: 12 }}>
-                      {d.toUpperCase()}
-                    </Text>
+                  <View key={d} style={CELL_BASIS} className="items-center">
+                    <Text className="text-white/55 font-black text-[11px]">{d.toUpperCase()}</Text>
                   </View>
                 ))}
               </View>
 
-              <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 10 }}>
-                {calCells.map((c, idx) => {
-                  const isSel = !!c.ymd && c.ymd === selectedDate;
-                  const isToday = !!c.ymd && c.ymd === todayYmd;
-                  const count = c.ymd ? (markedDays[c.ymd] || 0) : 0;
-                  const isFuture = !!c.ymd && c.ymd > todayYmd;
+              {/* grid (swipe enabled) */}
+              <View {...panResponder.panHandlers} className="mt-2">
+                <View className="flex-row flex-wrap">
+                  {calCells.map((c, idx) => {
+                    const isSel = !!c.ymd && c.ymd === selectedDate;
+                    const isToday = !!c.ymd && c.ymd === todayYmd;
+                    const count = c.ymd ? markedDays[c.ymd] || 0 : 0;
+                    const isFuture = !!c.ymd && c.ymd > todayYmd;
 
-                  return (
-                    <View key={idx} style={{ width: "14.2857%", padding: 6, opacity: isFuture ? 0.35 : 1 }}>
-                      {c.day ? (
-                        <Pressable
-                          onPress={() => {
-                            if (!c.ymd) return;
-                            if (c.ymd > todayYmd) {
-                              Alert.alert("Locked", "Future dates are locked.");
-                              return;
-                            }
-                            onChangeDate(c.ymd);
-                            setCalOpen(false);
-                          }}
-                          style={{
-                            width: "100%",
-                            aspectRatio: 1,
-                            borderRadius: 999,
-                            alignItems: "center",
-                            justifyContent: "center",
-                            backgroundColor: isSel ? CAL.selBg : CAL.dayBg,
-                            borderWidth: 1.2,
-                            borderColor: isSel ? CAL.selBorder : isToday ? CAL.todayBorder : CAL.dayBorder,
-                          }}
-                          hitSlop={10}
-                        >
-                          <Text style={{ color: "white", fontWeight: "900", fontSize: 14 }}>{c.day}</Text>
+                    return (
+                      <View key={idx} style={CELL_BASIS} className={`${isFuture ? "opacity-35" : "opacity-100"} py-[6px]`}>
+                        {c.day ? (
+                          <Pressable
+                            hitSlop={10}
+                            onPress={() => {
+                              if (!c.ymd) return;
+                              if (c.ymd > todayYmd) {
+                                Alert.alert("Locked", "Future dates are locked.");
+                                return;
+                              }
+                              onChangeDate(c.ymd);
+                              setCalOpen(false);
+                            }}
+                            style={{
+                              width: DAY_SIZE,
+                              height: DAY_SIZE,
+                              alignSelf: "center",
+                              alignItems: "center",
+                              justifyContent: "center",
 
-                          {!isSel && count > 0 && (
-                            <View
-                              style={{
-                                position: "absolute",
-                                bottom: 7,
-                                width: 6,
-                                height: 6,
-                                borderRadius: 999,
-                                backgroundColor: CAL.markDot,
-                              }}
-                            />
-                          )}
+                              // ✅ default: NO circle / NO bg
+                              backgroundColor: "transparent",
+                              borderWidth: 0,
+                              borderRadius: 0,
 
-                          {isToday && !isSel && (
-                            <View
-                              style={{
-                                position: "absolute",
-                                top: 7,
-                                width: 6,
-                                height: 6,
-                                borderRadius: 999,
-                                backgroundColor: "rgba(34,197,94,0.95)",
-                              }}
-                            />
-                          )}
-                        </Pressable>
-                      ) : (
-                        <View style={{ width: "100%", aspectRatio: 1 }} />
-                      )}
-                    </View>
-                  );
-                })}
+                              // ✅ selected: highlight ONLY on click (not round)
+                              ...(isSel
+                                ? {
+                                    backgroundColor: "rgba(59,130,246,0.24)",
+                                    borderWidth: 1,
+                                    borderColor: "rgba(59,130,246,0.85)",
+                                    borderRadius: 10, // not a full circle
+                                  }
+                                : null),
+
+                              // ✅ today: ONLY today gets the round ring
+                              ...(!isSel && isToday
+                                ? {
+                                    borderWidth: 1,
+                                    borderColor: "rgba(34,197,94,0.95)",
+                                    borderRadius: DAY_SIZE / 2,
+                                  }
+                                : null),
+                            }}
+                          >
+                            <Text style={{ color: "white", fontWeight: "900", fontSize: 13 }}>
+                              {c.day}
+                            </Text>
+
+                            {!isSel && count > 0 && (
+                              <View
+                                style={{
+                                  position: "absolute",
+                                  bottom: 4,
+                                  width: 5,
+                                  height: 5,
+                                  borderRadius: 999,
+                                  backgroundColor: "rgba(255,255,255,0.78)",
+                                }}
+                              />
+                            )}
+                          </Pressable>
+                        ) : (
+                          <View style={{ width: DAY_SIZE, height: DAY_SIZE, alignSelf: "center" }} />
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
               </View>
 
-              <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+              {/* footer (ONLY Today button) */}
+              <View className="pt-3 pb-4 items-center">
                 <Pressable
                   onPress={() => {
                     onChangeDate(todayYmd);
                     setCalOpen(false);
                   }}
                   style={{
-                    flex: 1,
-                    paddingVertical: 12,
+                    width: 120, // ✅ reduced width
+                    paddingVertical: 10,
                     borderRadius: 14,
-                    backgroundColor: CAL.okBg,
+                    backgroundColor: "rgba(34,197,94,0.18)",
                     borderWidth: 1,
-                    borderColor: CAL.okBorder,
+                    borderColor: "rgba(34,197,94,0.35)",
                     alignItems: "center",
                   }}
                 >
                   <Text style={{ color: "white", fontWeight: "900" }}>Today</Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() => setCalOpen(false)}
-                  style={{
-                    flex: 1,
-                    paddingVertical: 12,
-                    borderRadius: 14,
-                    backgroundColor: CAL.primaryBtnBg,
-                    borderWidth: 1,
-                    borderColor: CAL.primaryBtnBorder,
-                    alignItems: "center",
-                  }}
-                >
-                  <Text style={{ color: "white", fontWeight: "900" }}>Close</Text>
                 </Pressable>
               </View>
             </View>

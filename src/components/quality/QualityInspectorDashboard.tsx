@@ -109,7 +109,7 @@ async function clearOwnerCaches() {
   try {
     const keys = await AsyncStorage.getAllKeys();
     const del = keys.filter(
-      (k) => k === LAST_OWNER_ID_KEY || k.startsWith(OWNER_CACHE_PREFIX),
+      (k) => k === LAST_OWNER_ID_KEY || k.startsWith(OWNER_CACHE_PREFIX)
     );
     if (del.length) await AsyncStorage.multiRemove(del);
   } catch {}
@@ -189,6 +189,20 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
     };
   }, [inspector, qc]);
 
+  // ✅ IMPORTANT: per-user key (MUST match scanner/list)
+  const qcUserKey = useMemo(() => {
+    const v =
+      (qc as any)?.id ??
+      (qc as any)?.checker_code ??
+      (qc as any)?.checkerCode ??
+      (qc as any)?.checker_phone ??
+      (qc as any)?.checkerPhone ??
+      (qc as any)?.phone ??
+      (qc as any)?.mobile ??
+      "";
+    return String(v || "").trim();
+  }, [qc]);
+
   const [tab, setTab] = useState<TabKey>("scanner");
   const [lang, setLang] = useState<"en" | "ta">("en");
 
@@ -210,7 +224,14 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
     try {
       if (loggingOutRef.current) return;
 
-      const q: QcFillQueuedItem[] = await getQcFillQueue();
+      // ✅ if user not ready, show zeros
+      if (!qcUserKey) {
+        setCounts({ total: 0, checked: 0, pending: 0, rejected: 0 });
+        return;
+      }
+
+      // ✅ FIX: read per-user queue
+      const q: QcFillQueuedItem[] = await getQcFillQueue(qcUserKey);
       if (loggingOutRef.current || !aliveRef.current) return;
 
       const ymd = String(selectedDate || "").trim();
@@ -255,7 +276,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
     if (loggingOutRef.current) return;
     refreshCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [division, tab, selectedDate]);
+  }, [division, tab, selectedDate, qcUserKey]);
 
   useEffect(() => {
     let alive = true;
@@ -270,7 +291,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
       clearInterval(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [division, selectedDate]);
+  }, [division, selectedDate, qcUserKey]);
 
   // ✅ Back closes app (android) while on dashboard
   useEffect(() => {
