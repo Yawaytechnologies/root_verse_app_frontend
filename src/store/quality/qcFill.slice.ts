@@ -39,7 +39,8 @@ const initialState: State = {
 
 const TOKEN_KEY = "auth_token";
 
-const QC_FILL_ENDPOINT = (code: string) => `/api/qrs/${encodeURIComponent(code)}/fill`;
+const QC_FILL_ENDPOINT = (code: string) =>
+  `/api/qrs/${encodeURIComponent(code)}/fill`;
 
 function normalizeQr(raw: string) {
   return String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
@@ -54,14 +55,15 @@ function guessMime(uri: string) {
 
 function toFile(uri: string, idx: number) {
   const type = guessMime(uri);
-  const ext = type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
+  const ext =
+    type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
   return { uri, name: `qc_${Date.now()}_${idx}.${ext}`, type } as any;
 }
 
 function appendScalar(form: FormData, key: string, value: any) {
   if (value === undefined || value === null) return;
   if (Array.isArray(value)) return;
-  if (typeof value === "object") return; // ✅ don't append objects
+  if (typeof value === "object") return;
 
   if (typeof value === "boolean") form.append(key, value ? "true" : "false");
   else form.append(key, String(value));
@@ -97,23 +99,44 @@ export const submitQcFill = createAsyncThunk<
 
     const inspector = (getState() as any)?.qualityAuth?.inspector;
 
-    const checkerCode =
-      inspector?.checker_code || payload?.checker_code || payload?.checkerCode || null;
+    /**
+     * ✅ IMPORTANT FRONTEND RULE:
+     * Take QC identity ONLY from logged-in inspector.
+     * Do NOT trust payload fallback.
+     */
+    const checkerCode = inspector?.checker_code || null;
+    const checkerName = inspector?.checker_name || null;
 
-    const qcIdRaw =
-      payload?.quality_checker_id || payload?.qualityCheckerId || inspector?.id || null;
+    const qcIdRaw = inspector?.id ?? null;
+    const qcId =
+      qcIdRaw !== null && qcIdRaw !== undefined ? Number(qcIdRaw) : null;
 
-    const qcId = qcIdRaw !== null && qcIdRaw !== undefined ? Number(qcIdRaw) : null;
+    // Debug proof (remove later if you want)
+    console.log("QC_ID_RAW", qcIdRaw, "QC_ID_FINAL", qcId);
+    console.log("QC_SEND_FIELDS", {
+      quality_checker_id: qcId,
+      quality_checker_code: checkerCode,
+      quality_checker_name: checkerName,
+    });
 
     if (!checkerCode) return rejectWithValue("QC_CHECKER_CODE_MISSING");
+    if (!checkerName) return rejectWithValue("QC_CHECKER_NAME_MISSING");
     if (!qcId || Number.isNaN(qcId)) return rejectWithValue("QC_ID_MISSING");
 
     const url = `${API_BASE}${QC_FILL_ENDPOINT(code)}`;
 
     const form = new FormData();
 
+    // ✅ FORCE clean numeric string for backend lookup
+    appendScalar(form, "quality_checker_id", String(Number(qcId)));
+
+    // ✅ send new keys (DB columns)
+    appendScalar(form, "quality_checker_code", checkerCode);
+    appendScalar(form, "quality_checker_name", checkerName);
+
+    // ✅ send legacy keys also (if backend still uses them)
     appendScalar(form, "checker_code", checkerCode);
-    appendScalar(form, "quality_checker_id", qcId);
+    appendScalar(form, "checker_name", checkerName);
 
     const images: string[] = (
       payload?.crate_images ??
@@ -132,13 +155,18 @@ export const submitQcFill = createAsyncThunk<
       "pond_condition_images",
       "images",
 
-      // ids
+      // qc identity fields (we append explicitly above)
       "checker_code",
-      "checkerCode",
+      "checker_name",
       "quality_checker_id",
-      "qualityCheckerId",
+      "quality_checker_code",
+      "quality_checker_name",
 
-      // ✅ internal objects (don’t send)
+      // explicitly blocked
+      "quality_checker_manager",
+      "qualityCheckerManager",
+
+      // internal objects
       "_local",
       "server_qr",
       "serverQr",
@@ -184,7 +212,8 @@ export const submitQcFill = createAsyncThunk<
     }
 
     if (!res.ok) {
-      const msg = raw?.message || raw?.error || raw?.msg || `QC_FILL_FAILED_${res.status}`;
+      const msg =
+        raw?.message || raw?.error || raw?.msg || `QC_FILL_FAILED_${res.status}`;
       return rejectWithValue(msg);
     }
 
@@ -237,7 +266,11 @@ const slice = createSlice({
 export const { resetQcFill } = slice.actions;
 export default slice.reducer;
 
-export const selectQcFillLoading = (state: RootState) => (state as any)?.qcFill?.loading ?? false;
-export const selectQcFillError = (state: RootState) => (state as any)?.qcFill?.error ?? null;
-export const selectQcFillSuccess = (state: RootState) => (state as any)?.qcFill?.success ?? false;
-export const selectQcFillLastResult = (state: RootState) => (state as any)?.qcFill?.lastResult ?? null;
+export const selectQcFillLoading = (state: RootState) =>
+  (state as any)?.qcFill?.loading ?? false;
+export const selectQcFillError = (state: RootState) =>
+  (state as any)?.qcFill?.error ?? null;
+export const selectQcFillSuccess = (state: RootState) =>
+  (state as any)?.qcFill?.success ?? false;
+export const selectQcFillLastResult = (state: RootState) =>
+  (state as any)?.qcFill?.lastResult ?? null;

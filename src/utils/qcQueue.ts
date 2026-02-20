@@ -4,24 +4,24 @@ export type QcResult = "PASS" | "HOLD" | "REJECT";
 export type QcGrade = "A" | "B" | "C" | "REJECTED";
 
 export type QcDraft = {
-  id: string; // local id
-  crateQr: string; // scanned QR / crate id
+  id: string;
+  crateQr: string;
   inspectorCode: string;
 
   qcResult: QcResult;
   qcGrade: QcGrade | null;
   qcScore: number | null;
 
-  qcReason: string | null; // reject/hold reason
+  qcReason: string | null;
   remarks: string | null;
 
-  inspectedAt: string; // ISO string
-  synced: boolean; // false for now
-  createdAt: number; // epoch ms
+  inspectedAt: string;
+  synced: boolean;
+  createdAt: number;
 };
 
-const QUEUE_KEY = "QC_QUEUE";
-const LAST_PREFIX = "QC_LAST_";
+const QUEUE_KEY_BASE = "QC_QUEUE";
+const LAST_KEY_BASE = "QC_LAST";
 
 const safeJsonParse = <T>(s: string | null, fallback: T): T => {
   try {
@@ -31,12 +31,33 @@ const safeJsonParse = <T>(s: string | null, fallback: T): T => {
   }
 };
 
+const norm = (v: any) =>
+  String(v ?? "").trim().toUpperCase().replace(/\s+/g, "");
+
 const uid = () =>
   `qc_${Date.now()}_${Math.random().toString(16).slice(2)}_${Math.random()
     .toString(16)
     .slice(2)}`;
 
-export async function enqueueQcDraft(input: Omit<QcDraft, "id" | "synced" | "createdAt">) {
+// ✅ per-user keys
+const queueKey = (inspectorCode: string) => `${QUEUE_KEY_BASE}:${norm(inspectorCode || "ANON")}`;
+const lastKey = (inspectorCode: string, crateQr: string) =>
+  `${LAST_KEY_BASE}:${norm(inspectorCode || "ANON")}:${norm(crateQr)}`;
+
+// ✅ NEW: clear all "last" keys for a user (use on logout/account switch)
+export async function clearQcDraftStorage(inspectorCode: string) {
+  const qKey = queueKey(inspectorCode);
+
+  const keys = await AsyncStorage.getAllKeys();
+  const prefix = `${LAST_KEY_BASE}:${norm(inspectorCode || "ANON")}:`;
+  const lastKeys = keys.filter((k) => k.startsWith(prefix));
+
+  await AsyncStorage.multiRemove([qKey, ...lastKeys]);
+}
+
+export async function enqueueQcDraft(
+  input: Omit<QcDraft, "id" | "synced" | "createdAt">
+) {
   const item: QcDraft = {
     id: uid(),
     synced: false,
@@ -44,25 +65,26 @@ export async function enqueueQcDraft(input: Omit<QcDraft, "id" | "synced" | "cre
     ...input,
   };
 
-  // 1) push into queue
-  const raw = await AsyncStorage.getItem(QUEUE_KEY);
+  // ✅ queue per inspector
+  const qKey = queueKey(item.inspectorCode);
+  const raw = await AsyncStorage.getItem(qKey);
   const queue = safeJsonParse<QcDraft[]>(raw, []);
-  queue.unshift(item); // latest first
-  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+  queue.unshift(item);
+  await AsyncStorage.setItem(qKey, JSON.stringify(queue));
 
-  // 2) save last QC per crate for UI display
-  await AsyncStorage.setItem(`${LAST_PREFIX}${item.crateQr}`, JSON.stringify(item));
+  // ✅ last per inspector + per crate
+  await AsyncStorage.setItem(lastKey(item.inspectorCode, item.crateQr), JSON.stringify(item));
 
   return item;
 }
 
-export async function getQcQueueCount() {
-  const raw = await AsyncStorage.getItem(QUEUE_KEY);
+export async function getQcQueueCount(inspectorCode: string) {
+  const raw = await AsyncStorage.getItem(queueKey(inspectorCode));
   const queue = safeJsonParse<QcDraft[]>(raw, []);
   return queue.filter((q) => !q.synced).length;
 }
 
-export async function getLastQcForCrate(crateQr: string) {
-  const raw = await AsyncStorage.getItem(`${LAST_PREFIX}${crateQr}`);
+export async function getLastQcForCrate(inspectorCode: string, crateQr: string) {
+  const raw = await AsyncStorage.getItem(lastKey(inspectorCode, crateQr));
   return safeJsonParse<QcDraft | null>(raw, null);
 }

@@ -1,7 +1,7 @@
 // src/utils/qcFillQueue.ts
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const KEY = "qc_fill_queue_v1";
+const KEY_BASE = "qc_fill_queue_v1";
 
 export type TabStatus = "pending" | "checked" | "rejected";
 
@@ -10,10 +10,10 @@ export type QcFillQueuedItem = {
   qrCode: string;
   payload: any;
 
-  createdAt: number; // first time created
-  updatedAt?: number; // last local edit time
+  createdAt: number;
+  updatedAt?: number;
 
-  synced: boolean; // true only when server submit succeeded
+  synced: boolean;
   syncedAt?: number;
 
   lastError?: string;
@@ -27,14 +27,20 @@ function safeArray(x: any): any[] {
   return Array.isArray(x) ? x : [];
 }
 
-async function readAll(): Promise<QcFillQueuedItem[]> {
-  const raw = await AsyncStorage.getItem(KEY);
+// ✅ per-user storage key
+function keyForUser(qcUserKey: string) {
+  const u = norm(qcUserKey || "ANON");
+  return `${KEY_BASE}:${u}`;
+}
+
+async function readAll(qcUserKey: string): Promise<QcFillQueuedItem[]> {
+  const raw = await AsyncStorage.getItem(keyForUser(qcUserKey));
   const arr = raw ? JSON.parse(raw) : [];
   return safeArray(arr) as QcFillQueuedItem[];
 }
 
-async function writeAll(items: QcFillQueuedItem[]) {
-  await AsyncStorage.setItem(KEY, JSON.stringify(items));
+async function writeAll(qcUserKey: string, items: QcFillQueuedItem[]) {
+  await AsyncStorage.setItem(keyForUser(qcUserKey), JSON.stringify(items));
 }
 
 function getQcResultFromPayload(payload: any): string {
@@ -60,8 +66,9 @@ export function deriveTabFromPayload(payload: any): TabStatus {
   if (r === "REJECT") return "rejected";
   if (r === "PASS") return "checked";
 
-  // fallback: if qc_status says HOLD/REJECTED/CHECKED
-  const st = String(payload?.qc_status ?? payload?.qcStatus ?? "").trim().toUpperCase();
+  const st = String(payload?.qc_status ?? payload?.qcStatus ?? "")
+    .trim()
+    .toUpperCase();
   if (st === "HOLD") return "pending";
   if (st === "REJECTED") return "rejected";
   if (st === "CHECKED") return "checked";
@@ -69,22 +76,27 @@ export function deriveTabFromPayload(payload: any): TabStatus {
   return "pending";
 }
 
-export async function getQcFillQueue(): Promise<QcFillQueuedItem[]> {
-  return await readAll();
+// ✅ NEW: optional helper for logout / account switch
+export async function clearQcFillQueue(qcUserKey: string) {
+  await AsyncStorage.removeItem(keyForUser(qcUserKey));
 }
 
-export async function removeQcFillById(id: string) {
-  const q = await readAll();
-  await writeAll(q.filter((x) => x.id !== id));
+export async function getQcFillQueue(qcUserKey: string): Promise<QcFillQueuedItem[]> {
+  return await readAll(qcUserKey);
+}
+
+export async function removeQcFillById(qcUserKey: string, id: string) {
+  const q = await readAll(qcUserKey);
+  await writeAll(qcUserKey, q.filter((x) => x.id !== id));
 }
 
 /**
  * ✅ Upsert LOCAL draft
  * - Always sets synced=false (HOLD rule)
  */
-export async function upsertQcFillDraft(qrCode: string, payload: any) {
+export async function upsertQcFillDraft(qcUserKey: string, qrCode: string, payload: any) {
   const code = norm(qrCode);
-  const q = await readAll();
+  const q = await readAll(qcUserKey);
 
   const now = Date.now();
   const idx = q.findIndex((x) => norm(x.qrCode) === code);
@@ -96,8 +108,6 @@ export async function upsertQcFillDraft(qrCode: string, payload: any) {
       qrCode: prev.qrCode || code,
       payload,
       updatedAt: now,
-
-      // ✅ draft = local only
       synced: false,
       syncedAt: undefined,
       lastError: (payload as any)?._local?.last_error || prev.lastError,
@@ -113,15 +123,15 @@ export async function upsertQcFillDraft(qrCode: string, payload: any) {
     });
   }
 
-  await writeAll(q);
+  await writeAll(qcUserKey, q);
 }
 
 /**
  * ✅ Mark as synced (server submit success)
  */
-export async function markQcFillSynced(qrCode: string, payload: any) {
+export async function markQcFillSynced(qcUserKey: string, qrCode: string, payload: any) {
   const code = norm(qrCode);
-  const q = await readAll();
+  const q = await readAll(qcUserKey);
 
   const now = Date.now();
   const idx = q.findIndex((x) => norm(x.qrCode) === code);
@@ -148,15 +158,20 @@ export async function markQcFillSynced(qrCode: string, payload: any) {
     });
   }
 
-  await writeAll(q);
+  await writeAll(qcUserKey, q);
 }
 
 /**
  * ✅ Mark submit failed but keep locally
  */
-export async function markQcFillFailed(qrCode: string, err: string, payload: any) {
+export async function markQcFillFailed(
+  qcUserKey: string,
+  qrCode: string,
+  err: string,
+  payload: any
+) {
   const code = norm(qrCode);
-  const q = await readAll();
+  const q = await readAll(qcUserKey);
 
   const now = Date.now();
   const idx = q.findIndex((x) => norm(x.qrCode) === code);
@@ -183,5 +198,5 @@ export async function markQcFillFailed(qrCode: string, err: string, payload: any
     });
   }
 
-  await writeAll(q);
+  await writeAll(qcUserKey, q);
 }

@@ -26,6 +26,10 @@ import {
   Select,
 } from "./common";
 
+// ✅ QC inspector from auth slice
+import { useAppSelector } from "../../../store/hooks";
+import { selectInspector as selectQcInspector } from "../../../store/qualityAuth/qualityAuth.slice";
+
 export type QCStatus = "CHECKED" | "HOLD" | "REJECTED";
 export type QcResult = "PASS" | "HOLD" | "REJECT";
 export type QualityGrade = "A" | "B" | "C";
@@ -195,6 +199,8 @@ async function captureLiveLocationStamp(extraLine?: string) {
   return extraLine ? `${l1}\n${l2}\n${extraLine}` : `${l1}\n${l2}`;
 }
 
+const POWERED_LINE = "Powered by BlueOs";
+
 export default function WildInspectionModal(props: Props) {
   const {
     visible,
@@ -213,8 +219,9 @@ export default function WildInspectionModal(props: Props) {
     readOnly,
   } = props;
 
-  const MAX_IMAGES = 3;
+  const inspector = useAppSelector(selectQcInspector);
 
+  const MAX_IMAGES = 3;
   const speciesAuto = data?.fish_name ?? "";
 
   const [capturedAtIso, setCapturedAtIso] = useState<string>("");
@@ -249,9 +256,10 @@ export default function WildInspectionModal(props: Props) {
     return { ok: true, msg: "" };
   }, [form, readOnly, isReject]);
 
-  // ✅ watermark staging (offscreen)
+  // ✅ watermark staging (fix black output)
   const watermarkRef = useRef<View | null>(null);
   const wmPromiseRef = useRef<null | { resolve: (u: string) => void }>(null);
+
   const [wmTask, setWmTask] = useState<null | { uri: string; text: string; W: number; H: number }>(null);
   const [wmBusy, setWmBusy] = useState(false);
   const [stageReady, setStageReady] = useState(false);
@@ -265,7 +273,8 @@ export default function WildInspectionModal(props: Props) {
 
     (async () => {
       try {
-        await new Promise((r) => setTimeout(r, 40));
+        await new Promise<void>((r) => requestAnimationFrame(() => r()));
+        await new Promise((r) => setTimeout(r, 180));
 
         if (stageErr) {
           if (!cancelled) wmPromiseRef.current?.resolve(wmTask.uri);
@@ -274,7 +283,7 @@ export default function WildInspectionModal(props: Props) {
 
         const outUri = await captureRef(watermarkRef, {
           format: "jpg",
-          quality: 0.9,
+          quality: 0.92,
           result: "tmpfile",
         });
 
@@ -296,7 +305,6 @@ export default function WildInspectionModal(props: Props) {
   }, [wmTask, stageReady, stageErr]);
 
   const watermarkImage = async (uri: string, stampText: string) => {
-    // ✅ safe file uri (prevents black output / load failure)
     const safeUri = await ensureFileUri(uri);
 
     const { w, h } = await getImageSizeSafe(safeUri);
@@ -362,7 +370,6 @@ export default function WildInspectionModal(props: Props) {
     }
   };
 
-  // ✅ Gallery pick + watermark (you asked BOTH capture + gallery)
   const onPickGalleryStamped = async () => {
     if (readOnly || submitLoading || wmBusy) return;
 
@@ -421,7 +428,17 @@ export default function WildInspectionModal(props: Props) {
   const buildPayload = () => {
     const qc_status = mapResultToStatus(form.qc_result);
 
+    // ✅ exact mapping to your auth slice fields
+    const quality_checker_id = inspector?.id ?? null;
+    const quality_checker_code = inspector?.checker_code ?? null;
+    const quality_checker_name = inspector?.checker_name ?? null;
+
     return {
+      // ✅ include in POST only (no UI)
+      quality_checker_id,
+      quality_checker_code,
+      quality_checker_name,
+
       qc_status,
       qc_result: form.qc_result,
       quality_grade: form.quality_grade,
@@ -438,11 +455,11 @@ export default function WildInspectionModal(props: Props) {
 
       inspected_at: capturedAtIso || null,
       images: form.images,
+      division: "WILD", // ✅ helps qcFill slice choose image field
     };
   };
 
   const codeToShow = String(scannedCode || data?.fish_code || data?.qr_code || "").trim();
-
   const t = (en: string, ta: string) => (lang === "ta" ? ta : en);
 
   return (
@@ -473,7 +490,11 @@ export default function WildInspectionModal(props: Props) {
                   </ScrollView>
                 </View>
 
-                {readOnly && <Text className="mt-2 text-amber-300 font-extrabold">{t("Already submitted (Read-only)", "ஏற்கனவே சமர்ப்பிக்கப்பட்டது (Read-only)")}</Text>}
+                {readOnly && (
+                  <Text className="mt-2 text-amber-300 font-extrabold">
+                    {t("Already submitted (Read-only)", "ஏற்கனவே சமர்ப்பிக்கப்பட்டது (Read-only)")}
+                  </Text>
+                )}
                 {!readOnly && !validation.ok && <Text className="mt-2 text-red-300 font-extrabold">{validation.msg}</Text>}
               </View>
 
@@ -615,7 +636,9 @@ export default function WildInspectionModal(props: Props) {
                 >
                   <View className="flex-row items-center justify-center">
                     <Ionicons name="camera-outline" size={18} color="white" />
-                    <Text className="text-white font-extrabold ml-2">{wmBusy ? t("Processing…", "செயலாக்கம்…") : t("Capture", "படம் எடு")}</Text>
+                    <Text className="text-white font-extrabold ml-2">
+                      {wmBusy ? t("Processing…", "செயலாக்கம்…") : t("Capture", "படம் எடு")}
+                    </Text>
                   </View>
                 </Pressable>
               </View>
@@ -664,46 +687,58 @@ export default function WildInspectionModal(props: Props) {
               </Pressable>
             )}
           </View>
+        </View>
 
-          {/* OFFSCREEN WATERMARK STAGE */}
-          {wmTask && (
+        {/* ✅ WATERMARK STAGE */}
+        {wmTask && (
+          <View
+            pointerEvents="none"
+            collapsable={false}
+            ref={(r) => {
+              watermarkRef.current = r;
+            }}
+            style={{
+              position: "absolute",
+              left: -(wmTask.W + 80),
+              top: 0,
+              width: wmTask.W,
+              height: wmTask.H,
+              backgroundColor: "#000",
+            }}
+          >
+            <Image
+              source={{ uri: wmTask.uri }}
+              style={{ width: wmTask.W, height: wmTask.H }}
+              resizeMode="cover"
+              onLoadEnd={() => setStageReady(true)}
+              onError={() => {
+                setStageErr("stage image load failed");
+                setStageReady(true);
+              }}
+            />
+
             <View
-              style={{ position: "absolute", left: -10000, top: -10000, width: wmTask.W, height: wmTask.H }}
-              collapsable={false}
-              ref={(r) => {
-                watermarkRef.current = r;
+              style={{
+                position: "absolute",
+                left: 18,
+                right: 18,
+                bottom: 18,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                borderRadius: 12,
+                backgroundColor: "rgba(0,0,0,0.55)",
               }}
             >
-              <Image
-                source={{ uri: wmTask.uri }}
-                style={{ width: wmTask.W, height: wmTask.H }}
-                resizeMode="cover"
-                onLoadEnd={() => setStageReady(true)}
-                onError={() => {
-                  setStageErr("stage image load failed");
-                  setStageReady(true);
-                }}
-              />
+              <Text style={{ color: "rgba(255,255,255,0.95)", fontWeight: "900", fontSize: 16, lineHeight: 20 }}>
+                {POWERED_LINE}
+              </Text>
 
-              <View
-                style={{
-                  position: "absolute",
-                  left: 18,
-                  right: 18,
-                  bottom: 18,
-                  paddingHorizontal: 12,
-                  paddingVertical: 10,
-                  borderRadius: 12,
-                  backgroundColor: "rgba(0,0,0,0.55)",
-                }}
-              >
-                <Text style={{ color: "white", fontWeight: "900", fontSize: 18, lineHeight: 22 }}>
-                  {wmTask.text}
-                </Text>
-              </View>
+              <Text style={{ marginTop: 4, color: "white", fontWeight: "900", fontSize: 15, lineHeight: 20 }}>
+                {wmTask.text}
+              </Text>
             </View>
-          )}
-        </View>
+          </View>
+        )}
       </View>
     </Modal>
   );

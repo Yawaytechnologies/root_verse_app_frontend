@@ -1,9 +1,11 @@
 // src/components/quality/QcScannerScreen.tsx
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { Alert, Animated, Pressable, Text, TextInput, View } from "react-native";
+import { Alert, Animated, Pressable, Text, TextInput, View, Image } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Location from "expo-location";
+import * as FileSystem from "expo-file-system";
+import * as ImageManipulator from "expo-image-manipulator";
 
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 
@@ -41,11 +43,8 @@ import {
 type Props = {
   division: Division;
   lang: Lang;
-
   selectedDate?: string;
-
   onAfterSubmit?: (qcResult: "PASS" | "HOLD" | "REJECT" | string) => void;
-
   editDraft?: { qrCode: string; payload: any } | null;
   onEditDraftConsumed?: () => void;
 };
@@ -128,34 +127,187 @@ type LocalLocationSnap = {
 function toCoordString(n: any): string | null {
   const num = Number(n);
   if (!Number.isFinite(num)) return null;
-  return num.toFixed(8); // backend uses string like "45.44432000"
+  return num.toFixed(8);
 }
 
-function CornerBrackets({
-  size = 260,
-  corner = 22,
-  thickness = 4,
-}: {
-  size?: number;
-  corner?: number;
-  thickness?: number;
-}) {
-  const c = "rgba(46,125,255,0.95)";
-  const r = 999;
+/* =========================
+   ✅ IMAGE COMPRESSION (400–800KB)
+   ========================= */
 
+const KB = 1024;
+
+function isRemoteUri(uri: string) {
+  return /^https?:\/\//i.test(String(uri || ""));
+}
+
+async function getImageDims(uri: string): Promise<{ w: number; h: number } | null> {
+  return await new Promise((resolve) => {
+    Image.getSize(
+      uri,
+      (w, h) => resolve({ w, h }),
+      () => resolve(null)
+    );
+  });
+}
+
+// your TS defs hide `size`
+const FS_ANY: any = FileSystem;
+
+async function ensureFileUri(uri: string): Promise<string> {
+  const u = String(uri || "");
+  if (!u) return u;
+
+  if (u.startsWith("content://")) {
+    const base: string | null = FS_ANY.documentDirectory ?? FS_ANY.cacheDirectory ?? null;
+    if (!base) return u;
+
+    const dest = `${base}qc_img_${Date.now()}_${Math.random().toString(16).slice(2)}.jpg`;
+
+    try {
+      await FileSystem.copyAsync({ from: u, to: dest });
+      return dest;
+    } catch {
+      return u;
+    }
+  }
+
+  return u;
+}
+
+function getSizeBytesFromInfo(info: any): number | null {
+  if (info?.exists !== true) return null;
+  const s = info?.size;
+  return typeof s === "number" && Number.isFinite(s) ? s : null;
+}
+
+async function compressToRange(
+  uri: string,
+  opts?: {
+    minKB?: number;
+    maxKB?: number;
+    width?: number;
+    startQuality?: number;
+    minQuality?: number;
+    step?: number;
+    maxTries?: number;
+  }
+): Promise<string> {
+  const {
+    minKB = 400,
+    maxKB = 800,
+    width = 1600,
+    startQuality = 0.8,
+    minQuality = 0.55,
+    step = 0.07,
+    maxTries = 6,
+  } = opts || {};
+
+  if (!uri || isRemoteUri(uri)) return uri;
+
+  const fileUri = await ensureFileUri(uri);
+
+  try {
+    const info0 = await FileSystem.getInfoAsync(fileUri, { size: true } as any);
+    const bytes0 = getSizeBytesFromInfo(info0);
+    const sizeKB0 = bytes0 ? bytes0 / KB : 0;
+    if (sizeKB0 >= minKB && sizeKB0 <= maxKB) return fileUri;
+  } catch {}
+
+  const dims = await getImageDims(fileUri);
+  const shouldResize = !!dims?.w && dims.w > width;
+  const actions: ImageManipulator.Action[] = shouldResize ? [{ resize: { width } }] : [];
+
+  let q = startQuality;
+  let bestUri = fileUri;
+
+  for (let i = 0; i < maxTries; i++) {
+    const r = await ImageManipulator.manipulateAsync(fileUri, actions, {
+      compress: q,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
+
+    bestUri = r.uri;
+
+    try {
+      const info = await FileSystem.getInfoAsync(bestUri, { size: true } as any);
+      const bytes = getSizeBytesFromInfo(info);
+      const sizeKB = bytes ? bytes / KB : 0;
+
+      if (sizeKB >= minKB && sizeKB <= maxKB) return bestUri;
+
+      if (sizeKB > maxKB) {
+        q = Math.max(minQuality, q - step);
+        continue;
+      }
+
+      return bestUri;
+    } catch {
+      return bestUri;
+    }
+  }
+
+  return bestUri;
+}
+
+async function compressImagesInPayload(payload: any): Promise<any> {
+  if (!payload || typeof payload !== "object") return payload;
+
+  const keys = ["images", "crate_images", "inspection_images", "pond_images", "pond_condition_images"];
+  const next = { ...payload };
+
+  for (const k of keys) {
+    const arr = next[k];
+    if (!Array.isArray(arr) || arr.length === 0) continue;
+
+    const out: string[] = [];
+    for (const item of arr) {
+      const uri = String(item || "");
+      if (!uri) continue;
+
+      try {
+        const compressed = await compressToRange(uri, {
+          minKB: 400,
+          maxKB: 800,
+          width: 1600,
+          startQuality: 0.8,
+          minQuality: 0.55,
+          step: 0.07,
+          maxTries: 6,
+        });
+        out.push(compressed);
+      } catch {
+        out.push(uri);
+      }
+    }
+
+    next[k] = out;
+  }
+
+  return next;
+}
+
+/* ========================= */
+
+function CornerBrackets() {
+  // fixed to match usage: 260 / corner 28 / thickness 5
+  const c = "bg-[rgba(46,125,255,0.95)]";
   return (
-    <View style={{ width: size, height: size }}>
-      <View style={{ position: "absolute", left: 0, top: 0, width: corner, height: thickness, backgroundColor: c, borderRadius: r }} />
-      <View style={{ position: "absolute", left: 0, top: 0, width: thickness, height: corner, backgroundColor: c, borderRadius: r }} />
+    <View className="w-[260px] h-[260px]">
+      {/* TL */}
+      <View className={`absolute left-0 top-0 w-[28px] h-[5px] rounded-full ${c}`} />
+      <View className={`absolute left-0 top-0 w-[5px] h-[28px] rounded-full ${c}`} />
 
-      <View style={{ position: "absolute", right: 0, top: 0, width: corner, height: thickness, backgroundColor: c, borderRadius: r }} />
-      <View style={{ position: "absolute", right: 0, top: 0, width: thickness, height: corner, backgroundColor: c, borderRadius: r }} />
+      {/* TR */}
+      <View className={`absolute right-0 top-0 w-[28px] h-[5px] rounded-full ${c}`} />
+      <View className={`absolute right-0 top-0 w-[5px] h-[28px] rounded-full ${c}`} />
 
-      <View style={{ position: "absolute", left: 0, bottom: 0, width: corner, height: thickness, backgroundColor: c, borderRadius: r }} />
-      <View style={{ position: "absolute", left: 0, bottom: 0, width: thickness, height: corner, backgroundColor: c, borderRadius: r }} />
+      {/* BL */}
+      <View className={`absolute left-0 bottom-0 w-[28px] h-[5px] rounded-full ${c}`} />
+      <View className={`absolute left-0 bottom-0 w-[5px] h-[28px] rounded-full ${c}`} />
 
-      <View style={{ position: "absolute", right: 0, bottom: 0, width: corner, height: thickness, backgroundColor: c, borderRadius: r }} />
-      <View style={{ position: "absolute", right: 0, bottom: 0, width: thickness, height: corner, backgroundColor: c, borderRadius: r }} />
+      {/* BR */}
+      <View className={`absolute right-0 bottom-0 w-[28px] h-[5px] rounded-full ${c}`} />
+      <View className={`absolute right-0 bottom-0 w-[5px] h-[28px] rounded-full ${c}`} />
     </View>
   );
 }
@@ -170,6 +322,20 @@ export default function QcScannerScreen({
 }: Props) {
   const dispatch = useAppDispatch();
   const inspector = useAppSelector(selectInspector);
+
+  // ✅ per-user key used for local queue isolation
+  const qcUserKey = useMemo(() => {
+    const v =
+      (inspector as any)?.id ??
+      (inspector as any)?.checker_code ??
+      (inspector as any)?.checkerCode ??
+      (inspector as any)?.checker_phone ??
+      (inspector as any)?.checkerPhone ??
+      (inspector as any)?.phone ??
+      (inspector as any)?.mobile ??
+      "";
+    return String(v || "").trim();
+  }, [inspector]);
 
   const catchLog = useAppSelector(selectCatchLog);
   const catchLoading = useAppSelector(selectCatchLogLoading);
@@ -192,7 +358,6 @@ export default function QcScannerScreen({
   const [localTab, setLocalTab] = useState<QueueTabStatus | null>(null);
   const [scanPausedUntil, setScanPausedUntil] = useState(0);
 
-  // ✅ cache GPS so submit doesn't wait
   const [locPermGranted, setLocPermGranted] = useState<boolean>(false);
   const [locCache, setLocCache] = useState<LocalLocationSnap | null>(null);
   const locCacheRef = useRef<LocalLocationSnap | null>(null);
@@ -201,7 +366,6 @@ export default function QcScannerScreen({
     locCacheRef.current = locCache;
   }, [locCache]);
 
-  // ask location permission once (so submit won't open popup and delay)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -209,11 +373,7 @@ export default function QcScannerScreen({
         const p = await Location.requestForegroundPermissionsAsync();
         if (!alive) return;
         setLocPermGranted(!!p.granted);
-
-        // warm up last known in background (no await)
-        if (p.granted) {
-          void primeLocation(false);
-        }
+        if (p.granted) void primeLocation(false);
       } catch {
         if (!alive) return;
         setLocPermGranted(false);
@@ -225,21 +385,17 @@ export default function QcScannerScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // fast: use last known first, then current (LOW accuracy)
   const primeLocation = async (forceNow: boolean): Promise<LocalLocationSnap | null> => {
     if (!locPermGranted) return null;
 
     const now = Date.now();
     const cached = locCacheRef.current;
-    if (!forceNow && cached && now - cached.capturedAt < 2 * 60 * 1000) {
-      return cached; // fresh enough
-    }
+    if (!forceNow && cached && now - cached.capturedAt < 2 * 60 * 1000) return cached;
 
     try {
-      // 1) instant-ish
       const last = await Location.getLastKnownPositionAsync({
         maxAge: 2 * 60 * 1000,
-        requiredAccuracy: 200, // meters
+        requiredAccuracy: 200,
       });
 
       if (last?.coords?.latitude && last?.coords?.longitude) {
@@ -255,11 +411,7 @@ export default function QcScannerScreen({
         return snap;
       }
 
-      // 2) fallback (can be slow, but we won't block submit too long)
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Low, // faster
-      });
-
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
       const snap: LocalLocationSnap = {
         capturedAt: Date.now(),
         coords: {
@@ -303,7 +455,6 @@ export default function QcScannerScreen({
   }, [viewOnlyByDate, selectedDate, warnedKey]);
 
   const scanLineY = useRef(new Animated.Value(0)).current;
-
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
@@ -379,29 +530,31 @@ export default function QcScannerScreen({
     setScannedCode(c);
     setLocalTab(null);
 
-    // ✅ start GPS in background NOW (don’t await)
     void primeLocation(false);
 
     dispatch(resetQcFill());
     dispatch(clearCatchLog());
 
+    // ✅ local queue only for this qc user
     try {
-      const q = await getQcFillQueue();
-      const found = q.find((x) => normCode(x.qrCode) === c);
-      if (found) {
-        const tab = deriveTabFromPayload(found.payload);
+      if (qcUserKey) {
+        const q = await getQcFillQueue(qcUserKey);
+        const found = q.find((x) => normCode(x.qrCode) === c);
+        if (found) {
+          const tab = deriveTabFromPayload(found.payload);
 
-        if (viewOnlyByDate && tab === "pending") {
-          Alert.alert(
-            "Only can able to scan already submitted",
-            "This QR is saved as HOLD draft (not submitted). Open it from Pending tab to edit/submit."
-          );
-          resetAll(800);
-          return;
-        }
+          if (viewOnlyByDate && tab === "pending") {
+            Alert.alert(
+              "Only can able to scan already submitted",
+              "This QR is saved as HOLD draft (not submitted). Open it from Pending tab to edit/submit."
+            );
+            resetAll(800);
+            return;
+          }
 
-        if (tab === "checked" || tab === "rejected") {
-          applyPrefillFromPayload(c, found.payload, tab);
+          if (tab === "checked" || tab === "rejected") {
+            applyPrefillFromPayload(c, found.payload, tab);
+          }
         }
       }
     } catch {}
@@ -430,7 +583,6 @@ export default function QcScannerScreen({
 
     applyPrefillFromPayload(code, p, "pending");
 
-    // ✅ start GPS background
     void primeLocation(false);
 
     dispatch(resetQcFill());
@@ -460,16 +612,15 @@ export default function QcScannerScreen({
 
     if (division === "WILD") setWildField("images", [...wildForm.images, ...uris].slice(0, max));
     else if (division === "AQUA")
-      setAquaField("images", [...(((aquaForm as any).images || []) as string[]), ...uris].slice(0, max));
-    else
-      setMariField("images", [...(((mariForm as any).images || []) as string[]), ...uris].slice(0, max));
+      setAquaField("images", [...((((aquaForm as any).images || []) as string[])), ...uris].slice(0, max));
+    else setMariField("images", [...((((mariForm as any).images || []) as string[])), ...uris].slice(0, max));
   };
 
   const removeImage = (uri: string) => {
     if (division === "WILD") setWildField("images", wildForm.images.filter((x) => x !== uri));
     else if (division === "AQUA")
-      setAquaField("images", (((aquaForm as any).images || []) as string[]).filter((x) => x !== uri));
-    else setMariField("images", (((mariForm as any).images || []) as string[]).filter((x) => x !== uri));
+      setAquaField("images", ((((aquaForm as any).images || []) as string[])).filter((x) => x !== uri));
+    else setMariField("images", ((((mariForm as any).images || []) as string[])).filter((x) => x !== uri));
   };
 
   const serverStatus = upper((catchLog as any)?.status);
@@ -520,8 +671,11 @@ export default function QcScannerScreen({
       return;
     }
 
-    // ✅ IMPORTANT: don't block submit waiting for GPS.
-    // Try cached location, else wait max 350ms.
+    if (!qcUserKey) {
+      Alert.alert("QC user missing", "QC user key not ready. Please logout/login again.");
+      return;
+    }
+
     const cached = locCacheRef.current;
     const locSnap =
       cached ??
@@ -533,9 +687,15 @@ export default function QcScannerScreen({
     const latitude = locSnap ? toCoordString(locSnap.coords.latitude) : null;
     const longitude = locSnap ? toCoordString(locSnap.coords.longitude) : null;
 
-    // ✅ send same keys backend already returns: latitude, longitude
+    let processedPayload = payload;
+    try {
+      processedPayload = await compressImagesInPayload(payload);
+    } catch {
+      processedPayload = payload;
+    }
+
     const finalPayload = {
-      ...payload,
+      ...processedPayload,
       checker_code: inspector.checker_code,
       quality_checker_id: inspector.id,
       division,
@@ -557,13 +717,13 @@ export default function QcScannerScreen({
         createdAt,
         inspector: { id: inspector.id, checker_code: inspector.checker_code },
         catchLog: catchLog ?? null,
-        location: locSnap, // ✅ tabs/details can show this
+        location: locSnap,
       },
     };
 
     if (qcResultFromForm === "HOLD") {
       try {
-        await upsertQcFillDraft(scannedCode, {
+        await upsertQcFillDraft(qcUserKey, scannedCode, {
           ...localPayloadBase,
           _local: {
             ...(localPayloadBase as any)._local,
@@ -603,7 +763,7 @@ export default function QcScannerScreen({
         },
       };
 
-      await markQcFillSynced(scannedCode, syncedPayload);
+      await markQcFillSynced(qcUserKey, scannedCode, syncedPayload);
 
       Alert.alert("Success", res?.message || "QC submitted");
       onAfterSubmit?.(qcResult);
@@ -622,7 +782,7 @@ export default function QcScannerScreen({
       };
 
       try {
-        await markQcFillFailed(scannedCode, errText, failedPayload);
+        await markQcFillFailed(qcUserKey, scannedCode, errText, failedPayload);
       } catch {}
 
       Alert.alert("Submit failed", `${errText}\n\nSaved locally. Edit/retry from the list.`);
@@ -631,58 +791,39 @@ export default function QcScannerScreen({
 
   if (!cameraPerm) {
     return (
-      <View style={{ padding: 16 }}>
-        <Text style={{ color: "white" }}>Requesting camera permission…</Text>
+      <View className="p-4">
+        <Text className="text-white">Requesting camera permission…</Text>
       </View>
     );
   }
 
   if (!cameraPerm.granted) {
     return (
-      <View style={{ padding: 16 }}>
-        <Text style={{ color: "white", fontWeight: "900", fontSize: 16 }}>Camera permission required</Text>
-        <Text style={{ color: "rgba(255,255,255,0.7)", marginTop: 8 }}>
+      <View className="p-4">
+        <Text className="text-white font-black text-[16px]">Camera permission required</Text>
+        <Text className="text-white/70 mt-2">
           Enable camera permission to scan QR codes.
         </Text>
 
         <Pressable
           onPress={requestCameraPerm}
-          style={{
-            marginTop: 14,
-            paddingVertical: 12,
-            borderRadius: 14,
-            backgroundColor: "rgba(46,125,255,0.25)",
-            borderWidth: 1,
-            borderColor: "rgba(46,125,255,0.5)",
-            alignItems: "center",
-          }}
+          className="mt-4 py-3 rounded-[14px] items-center bg-[rgba(46,125,255,0.25)] border border-[rgba(46,125,255,0.5)]"
         >
-          <Text style={{ color: "white", fontWeight: "900" }}>Allow Camera</Text>
+          <Text className="text-white font-black">Allow Camera</Text>
         </Pressable>
       </View>
     );
   }
 
   return (
-    <View style={{ flex: 1, paddingTop: 10 }}>
-      <Text style={{ color: "white", fontSize: 22, fontWeight: "900" }}>
+    <View className="flex-1 pt-2.5">
+      <Text className="text-white text-[22px] font-black">
         QC Scanner ({division})
       </Text>
 
-      <View
-        style={{
-          marginTop: 10,
-          alignSelf: "center",
-          width: "92%",
-          maxWidth: 380,
-          padding: 10,
-          borderRadius: 18,
-          backgroundColor: "rgba(255,255,255,0.06)",
-          borderWidth: 1,
-          borderColor: "rgba(255,255,255,0.10)",
-        }}
-      >
-        <Text style={{ color: "rgba(255,255,255,0.75)", fontWeight: "800", marginBottom: 6, fontSize: 12 }}>
+      {/* Manual Code */}
+      <View className="mt-2.5 self-center w-[92%] max-w-[380px] p-2.5 rounded-[18px] bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.10)]">
+        <Text className="text-white/75 font-extrabold mb-1.5 text-[12px]">
           Enter QR Code manually
         </Text>
 
@@ -693,18 +834,7 @@ export default function QcScannerScreen({
           placeholderTextColor="rgba(255,255,255,0.35)"
           autoCapitalize="characters"
           autoCorrect={false}
-          style={{
-            borderRadius: 14,
-            paddingHorizontal: 12,
-            paddingVertical: 10,
-            backgroundColor: "rgba(0,0,0,0.35)",
-            borderWidth: 1,
-            borderColor: "rgba(255,255,255,0.15)",
-            color: "white",
-            fontWeight: "900",
-            letterSpacing: 0.5,
-            fontSize: 13,
-          }}
+          className="rounded-[14px] px-3 py-2.5 bg-[rgba(0,0,0,0.35)] border border-[rgba(255,255,255,0.15)] text-white font-black tracking-[0.5px] text-[13px]"
         />
 
         <Pressable
@@ -717,55 +847,24 @@ export default function QcScannerScreen({
             openForCode(code);
             setManualCode("");
           }}
-          style={{
-            marginTop: 8,
-            paddingVertical: 10,
-            borderRadius: 14,
-            backgroundColor: "rgba(46,125,255,0.35)",
-            borderWidth: 1,
-            borderColor: "rgba(46,125,255,0.55)",
-            alignItems: "center",
-          }}
+          className="mt-2.5 py-2.5 rounded-[14px] items-center bg-[rgba(46,125,255,0.35)] border border-[rgba(46,125,255,0.55)]"
         >
-          <Text style={{ color: "white", fontWeight: "900", fontSize: 13 }}>Use Code</Text>
+          <Text className="text-white font-black text-[13px]">Use Code</Text>
         </Pressable>
       </View>
 
-      <View
-        style={{
-          marginTop: 10,
-          marginBottom: 10,
-          alignSelf: "center",
-          width: "92%",
-          maxWidth: 380,
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 10,
-        }}
-      >
-        <View style={{ flex: 1, height: 1, backgroundColor: "rgba(255,255,255,0.15)" }} />
-        <Text style={{ color: "rgba(255,255,255,0.65)", fontWeight: "900", fontSize: 12, letterSpacing: 1 }}>
-          OR
-        </Text>
-        <View style={{ flex: 1, height: 1, backgroundColor: "rgba(255,255,255,0.15)" }} />
+      {/* OR divider */}
+      <View className="mt-2.5 mb-2.5 self-center w-[92%] max-w-[380px] flex-row items-center justify-center gap-2.5">
+        <View className="flex-1 h-[1px] bg-[rgba(255,255,255,0.15)]" />
+        <Text className="text-white/65 font-black text-[12px] tracking-[1px]">OR</Text>
+        <View className="flex-1 h-[1px] bg-[rgba(255,255,255,0.15)]" />
       </View>
 
-      <View
-        style={{
-          alignSelf: "center",
-          width: "92%",
-          maxWidth: 380,
-          borderRadius: 24,
-          overflow: "hidden",
-          borderWidth: 1,
-          borderColor: "rgba(255,255,255,0.10)",
-          backgroundColor: "rgba(0,0,0,0.35)",
-        }}
-      >
-        <View style={{ height: 300 }}>
+      {/* Camera Box */}
+      <View className="self-center w-[92%] max-w-[380px] rounded-[24px] overflow-hidden border border-[rgba(255,255,255,0.10)] bg-[rgba(0,0,0,0.35)]">
+        <View className="h-[300px]">
           <CameraView
-            style={{ flex: 1 }}
+            className="flex-1"
             facing="back"
             barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
             onBarcodeScanned={(e: any) => {
@@ -780,42 +879,20 @@ export default function QcScannerScreen({
             }}
           />
 
-          <View
-            pointerEvents="none"
-            style={{
-              position: "absolute",
-              inset: 0 as any,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <View style={{ width: 260, height: 260 }}>
-              <CornerBrackets size={260} corner={28} thickness={5} />
+          <View pointerEvents="none" className="absolute inset-0 items-center justify-center">
+            <View className="w-[260px] h-[260px]">
+              <CornerBrackets />
 
+              {/* ⚠️ needs style for animated transform (no tailwind alternative) */}
               <Animated.View
-                style={{
-                  position: "absolute",
-                  left: 12,
-                  right: 12,
-                  height: 2,
-                  borderRadius: 999,
-                  backgroundColor: "rgba(46,125,255,0.95)",
-                  transform: [{ translateY: scanTranslateY }],
-                  top: 16,
-                }}
+                className="absolute left-3 right-3 top-4 h-[2px] rounded-full bg-[rgba(46,125,255,0.95)]"
+                style={{ transform: [{ translateY: scanTranslateY }] }}
               />
 
-              <View
-                style={{
-                  position: "absolute",
-                  inset: 8,
-                  borderRadius: 18,
-                  backgroundColor: "rgba(0,0,0,0.10)",
-                }}
-              />
+              <View className="absolute inset-2 rounded-[18px] bg-[rgba(0,0,0,0.10)]" />
             </View>
 
-            <Text style={{ marginTop: 8, color: "rgba(255,255,255,0.85)", fontWeight: "900", fontSize: 13 }}>
+            <Text className="mt-2 text-white/85 font-black text-[13px]">
               {lang === "en" ? "Align QR inside the box" : "QR-ஐ பெட்டிக்குள் வைத்துப் ஸ்கேன் செய்யவும்"}
             </Text>
           </View>

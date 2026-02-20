@@ -2,20 +2,21 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import { ENV } from "../../config/env";
 
-// ✅ IMPORTANT: import types from the REAL store file (the one that exports `store`)
 import type { AppDispatch, RootState } from "./store";
-// If this path is wrong in your project, change it to the correct one.
-// Example alternatives:
-// import type { RootState, AppDispatch } from "../../store/store";
-// import type { RootState, AppDispatch } from "../store";
 
-export type RootverseType = "WILD_CAPTURE" | "AQUACULTURE" | "MARICULTURE";
+export type RootverseType =
+  | "WILD_CAPTURE"
+  | "AQUACULTURE"
+  | "MARICULTURE"
+  | "QUALITY_CHECKER"
+  | string;
 
 export type MeResponse = {
   id: number;
   username: string | null;
   phone_no: string;
   rootverse_type: RootverseType;
+  status?: string;
   verification_status?: string;
   address?: string | null;
   [key: string]: any;
@@ -33,8 +34,8 @@ const initialState: State = {
   me: null,
 };
 
-// ✅ Use ONE token key across app (login + me + any api)
-export const TOKEN_KEY = "auth_token"; // keep this SAME in login.slice.ts too
+// ✅ ONE token key across app
+export const TOKEN_KEY = "auth_token";
 
 async function readTokenFromStorage() {
   try {
@@ -46,25 +47,23 @@ async function readTokenFromStorage() {
 
 /**
  * ✅ fetchMe:
- * - Prefer token from redux (state.login.token)
- * - Fallback to AsyncStorage
- * - Adds strong dispatch typing to remove UnknownAction errors
+ * Prefer token from authSession.token
+ * Fallback to login.token
+ * Fallback to AsyncStorage auth_token
  */
 export const fetchMe = createAsyncThunk<
   MeResponse,
   void,
-  {
-    state: RootState;
-    dispatch: AppDispatch;
-    rejectValue: string;
-  }
+  { state: RootState; dispatch: AppDispatch; rejectValue: string }
 >("me/fetch", async (_, { getState, rejectWithValue }) => {
   try {
     const state = getState();
 
-    const tokenFromRedux = state.login?.token ?? null;
+    const tokenFromAuthSession = state.authSession?.token ?? null;
+    const tokenFromLogin = (state as any).login?.token ?? null;
     const tokenFromStorage = await readTokenFromStorage();
-    const token = tokenFromRedux || tokenFromStorage;
+
+    const token = tokenFromAuthSession || tokenFromLogin || tokenFromStorage;
 
     if (!token) return rejectWithValue("NO_TOKEN");
 
@@ -78,10 +77,10 @@ export const fetchMe = createAsyncThunk<
 
     const text = await res.text();
     let data: any = null;
+
     try {
       data = text ? JSON.parse(text) : null;
     } catch {
-      // backend returned non-json
       return rejectWithValue("ME_NOT_JSON");
     }
 
@@ -89,30 +88,27 @@ export const fetchMe = createAsyncThunk<
       return rejectWithValue(data?.error || data?.message || "ME_FETCH_FAILED");
     }
 
-    // some backends wrap like { success:true, data:{...} }
     const mePayload = (data?.data ?? data) as any;
 
-    // Persist owner_code / owner_id for parts of the app that read AsyncStorage directly
+    // Persist owner_code / owner_id for parts of app that read AsyncStorage directly
     try {
       const ownerCode = String(
         mePayload?.owner_code ??
-          mePayload?.ownerCode ??
-          mePayload?.owner_code_text ??
-          "",
+        mePayload?.ownerCode ??
+        mePayload?.owner_code_text ??
+        ""
       ).trim();
       if (ownerCode) await AsyncStorage.setItem("owner_code", ownerCode);
 
       const ownerIdCandidate =
-        mePayload?.owner_id ??
-        mePayload?.ownerId ??
-        mePayload?.ownerDbId ??
-        null;
+        mePayload?.owner_id ?? mePayload?.ownerId ?? mePayload?.ownerDbId ?? null;
       if (ownerIdCandidate && String(ownerIdCandidate).trim()) {
         await AsyncStorage.setItem("owner_id", String(ownerIdCandidate));
       }
-    } catch {
-      // ignore storage errors
-    }
+    } catch { }
+
+    console.log("[ME] rootverse_type:", mePayload?.rootverse_type);
+    console.log("[ME] status:", mePayload?.status || mePayload?.verification_status);
 
     return mePayload as MeResponse;
   } catch (e: any) {
@@ -141,6 +137,7 @@ const meSlice = createSlice({
     });
     b.addCase(fetchMe.rejected, (s, a) => {
       s.loading = false;
+      s.me = null;
       s.error = (a.payload as string) || "ME_FETCH_FAILED";
     });
   },
