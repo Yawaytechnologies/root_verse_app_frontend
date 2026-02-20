@@ -16,10 +16,7 @@ import {
   Text,
   View,
 } from "react-native";
-import {
-  SafeAreaView,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useTrace } from "../../src/data/wild/trace.store";
 
@@ -37,6 +34,9 @@ const TOKEN_KEY = "auth_token";
 // Example possibilities:
 // "/(auth)/login" | "/(auth)" | "/(auth)/index"
 const AUTH_LOGIN_ROUTE = "/(auth)/login" as const;
+
+// ✅ FIX: Vessel form is in app/(wild)/vessels/create.tsx
+const VESSEL_REGISTER_ROUTE = "/(wild)/vessels/create" as const;
 
 const API_BASE = "https://rootverse-backend-5qoo.onrender.com";
 const ME_API = `${API_BASE}/api/me`;
@@ -91,6 +91,11 @@ const i18n = {
     newTripSub: "Create new trip request",
     newTripVoice: "Tap New Trip",
 
+    // ✅ NEW: Vessel registration
+    vesselReg: "Vessel Registration",
+    vesselRegSub: "Register vessel details",
+    vesselRegVoice: "Tap Vessel Registration",
+
     catchLog: "New Catch Log",
     catchLogSub: "Record catch details",
     catchLogVoice: "Tap New Catch Log",
@@ -138,14 +143,18 @@ const i18n = {
     newTripSub: "பயணம் கோரிக்கை உருவாக்கவும்",
     newTripVoice: "புதிய பயணம் என்று தட்டுங்கள்",
 
+    // ✅ NEW: Vessel registration
+    vesselReg: "கப்பல் பதிவு",
+    vesselRegSub: "கப்பல் விவரங்களை பதிவு செய்யவும்",
+    vesselRegVoice: "கப்பல் பதிவு என்று தட்டுங்கள்",
+
     catchLog: "புதிய பிடிப்பு பதிவு",
     catchLogSub: "மீன் பிடிப்பு விவரங்களை பதிவு",
     catchLogVoice: "புதிய பிடிப்பு பதிவு என்று தட்டுங்கள்",
 
     scanDetails: "ஸ்கேன் & பிடிப்பு பதிவு விவரங்கள்",
     scanDetailsSub: "QR ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்களை பார்க்கவும்",
-    scanDetailsVoice:
-      "ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்கள் பார்க்க தட்டுங்கள்",
+    scanDetailsVoice: "ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்கள் பார்க்க தட்டுங்கள்",
 
     trips: "என் பயணங்கள்",
     tripsSub: "பயண பட்டியலை பார்க்கவும்",
@@ -190,7 +199,7 @@ async function haptic() {
 }
 
 const UI = {
-  bg: "#f5f7fb",
+  bg: "#f4f7ff",
   card: "#ffffff",
   border: "#d9e2ef",
   text: "#0f172a",
@@ -201,6 +210,15 @@ const UI = {
   greenSoft: "#eafaf0",
   red: "#dc2626",
   redSoft: "#fee2e2",
+  shadow: "rgba(2, 6, 23, 0.08)",
+};
+
+const CARD_SHADOW = {
+  shadowColor: UI.shadow,
+  shadowOpacity: 1,
+  shadowRadius: 14,
+  shadowOffset: { width: 0, height: 10 },
+  elevation: 4,
 };
 
 function Card({
@@ -213,7 +231,10 @@ function Card({
   return (
     <View
       className={`rounded-2xl border ${className}`}
-      style={{ backgroundColor: UI.card, borderColor: UI.border }}
+      style={[
+        { backgroundColor: UI.card, borderColor: UI.border },
+        CARD_SHADOW,
+      ]}
     >
       {children}
     </View>
@@ -454,7 +475,6 @@ async function readTokenFromStorage(): Promise<string | null> {
 }
 
 async function clearAuthStorage() {
-  // ✅ remove all common token keys so it can’t “auto-login”
   const keys = [
     TOKEN_KEY,
     "access_token",
@@ -635,8 +655,7 @@ export default function WildDashboard() {
     try {
       await flushQueue(async (payload: any) => {
         const patched: any = { ...(payload || {}) };
-        if (!patched.ownerId && ownerIdForPatch)
-          patched.ownerId = ownerIdForPatch;
+        if (!patched.ownerId && ownerIdForPatch) patched.ownerId = ownerIdForPatch;
 
         await dispatch(submitCatchLog(patched as any)).unwrap();
 
@@ -735,7 +754,6 @@ export default function WildDashboard() {
 
               // clear redux session/token as well
               try {
-                // best-effort: clear persisted session in store
                 // eslint-disable-next-line @typescript-eslint/no-floating-promises
                 await dispatch(logoutSession()).unwrap();
               } catch {}
@@ -875,8 +893,8 @@ export default function WildDashboard() {
       if (AppState.currentState !== "active") return;
       speak(
         lang === "ta"
-          ? "புதிய பயணம். புதிய பிடிப்பு பதிவு. ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்கள். என் பயணங்கள்."
-          : "New Trip. New Catch Log. Scan and View Catch Log Details. My Trips.",
+          ? "புதிய பயணம். கப்பல் பதிவு. புதிய பிடிப்பு பதிவு. ஸ்கேன் செய்து பிடிப்பு பதிவு விவரங்கள். என் பயணங்கள்."
+          : "New Trip. Vessel Registration. New Catch Log. Scan and View Catch Log Details. My Trips.",
         lang,
       );
     }, 650);
@@ -900,52 +918,70 @@ export default function WildDashboard() {
         contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
         contentContainerClassName="px-4 pb-6"
       >
-        {/* Header */}
-        <View className="pt-3 flex-row items-center justify-between">
-          <Text className="text-lg font-bold" style={{ color: UI.text }}>
-            {t.title}
-          </Text>
+        {/* Header (polished container) */}
+        <View className="pt-3">
+          <View
+            className="rounded-3xl border px-4 py-3 flex-row items-center justify-between"
+            style={{ backgroundColor: UI.card, borderColor: UI.border }}
+          >
+            <View className="flex-row items-center">
+              <View
+                className="h-10 w-10 rounded-2xl items-center justify-center"
+                style={{ backgroundColor: UI.blueSoft }}
+              >
+                <Ionicons name="fish-outline" size={22} color={UI.blue} />
+              </View>
+              <View className="ml-3">
+                <Text className="text-base font-extrabold" style={{ color: UI.text }}>
+                  {t.title}
+                </Text>
+                <Text className="text-xs" style={{ color: UI.muted }}>
+                  {lang === "ta" ? "டாஷ்போர்டு" : "Dashboard"}
+                </Text>
+              </View>
+            </View>
 
-          <View className="flex-row items-center">
-            {/* ✅ show pending/syncing in header (small) ONLY when NOT showDone */}
-            {showSync && !showDone && (
+            <View className="flex-row items-center">
+              {/* ✅ show pending/syncing in header (small) ONLY when NOT showDone */}
+              {showSync && !showDone && (
+                <Pressable
+                  onPress={async () => {
+                    await haptic();
+                    if (syncing) return;
+                    if (!online) return;
+                    const oid = ownerDbId || (await readLastOwnerId());
+                    await doFlushQueue(oid || null);
+                  }}
+                  className="flex-row items-center rounded-full px-2 py-2 active:opacity-70"
+                  hitSlop={8}
+                >
+                  <Ionicons
+                    name={syncUi.icon as any}
+                    size={18}
+                    color={syncUi.color}
+                  />
+                  <Text
+                    className="ml-2 text-xs font-semibold"
+                    style={{ color: syncUi.color }}
+                  >
+                    {syncUi.text}
+                  </Text>
+                </Pressable>
+              )}
+
+              <View style={{ width: showSync && !showDone ? 10 : 0 }} />
+
+              <StatusChip online={online} />
+
+              <View style={{ width: 8 }} />
               <Pressable
-                onPress={async () => {
-                  await haptic();
-                  if (syncing) return;
-                  if (!online) return;
-                  const oid = ownerDbId || (await readLastOwnerId());
-                  await doFlushQueue(oid || null);
-                }}
-                className="flex-row items-center rounded-full px-2 py-2 active:opacity-70"
+                onPress={onLogout}
+                className="rounded-full px-2 py-2 active:opacity-70"
                 hitSlop={8}
               >
-                <Ionicons
-                  name={syncUi.icon as any}
-                  size={18}
-                  color={syncUi.color}
-                />
-                <Text
-                  className="ml-2 text-xs font-semibold"
-                  style={{ color: syncUi.color }}
-                >
-                  {syncUi.text}
-                </Text>
+                <Ionicons name="log-out-outline" size={20} color={UI.text} />
               </Pressable>
-            )}
-
-            <View style={{ width: showSync && !showDone ? 8 : 0 }} />
-
-            <StatusChip online={online} />
-
-            <View style={{ width: 6 }} />
-            <Pressable
-              onPress={onLogout}
-              className="rounded-full px-2 py-2 active:opacity-70"
-              hitSlop={8}
-            >
-              <Ionicons name="log-out-outline" size={20} color={UI.text} />
-            </Pressable>
+            </View>
           </View>
         </View>
 
@@ -1090,9 +1126,7 @@ export default function WildDashboard() {
               >
                 <Text className="text-sm" style={{ color: UI.text }}>
                   Last Sticker:{" "}
-                  <Text style={{ fontWeight: "800" }}>
-                    {String(lastCrateId)}
-                  </Text>
+                  <Text style={{ fontWeight: "800" }}>{String(lastCrateId)}</Text>
                 </Text>
               </View>
             )}
@@ -1129,6 +1163,16 @@ export default function WildDashboard() {
               voiceHint={t.newTripVoice}
               lang={lang}
               onPress={() => router.push("/(wild)/trips/create" as const)}
+            />
+
+            {/* ✅ Vessel Registration -> goes to vessels/create */}
+            <ActionRow
+              icon="document-text-outline"
+              title={t.vesselReg}
+              subtitle={t.vesselRegSub}
+              voiceHint={t.vesselRegVoice}
+              lang={lang}
+              onPress={() => router.push(VESSEL_REGISTER_ROUTE)}
             />
 
             <ActionRow
@@ -1168,6 +1212,17 @@ export default function WildDashboard() {
         >
           <Text className="text-center text-white font-semibold text-base">
             {lang === "ta" ? "புதிய பயணம் தொடங்கு" : "Start New Trip"}
+          </Text>
+        </Pressable>
+
+        {/* Optional secondary CTA (kept subtle) */}
+        <Pressable
+          onPress={() => router.push(VESSEL_REGISTER_ROUTE)}
+          className="mt-3 rounded-2xl px-4 py-4 active:opacity-90 border"
+          style={{ backgroundColor: UI.card, borderColor: UI.border }}
+        >
+          <Text className="text-center font-semibold text-base" style={{ color: UI.text }}>
+            {lang === "ta" ? "கப்பல் பதிவு" : "Vessel Registration"}
           </Text>
         </Pressable>
       </ScrollView>

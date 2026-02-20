@@ -14,7 +14,7 @@ export default function WildLayout() {
       }}
     >
       {/* ✅ Correct name for app/(wild)/index.tsx */}
-      <Stack.Screen name="index" options={{ title: "Wild Capture" }} />
+      <Stack.Screen name="dashboard" options={{ title: "Wild Capture" }} />
 
       <Stack.Screen name="scan" options={{ title: "Scan QR" }} />
 
