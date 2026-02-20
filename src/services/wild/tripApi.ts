@@ -3,16 +3,18 @@
 export type Trip = {
   id: number;
   trip_id: string;
-  fishing_method: string;
 
-  // ✅ should be NAME (string) in DB
-  // backend might return legacy values, so keep flexible
+  // backend may return code/name, keep string
+  fishing_method?: string;
+
+  // ✅ id-based
+  fishing_method_id?: number | null;
+
+  // ✅ fish species id (based on your backend insert)
+  fish_species?: number | null;
+
   near_station: string | number | null;
-
-  // ✅ FK id in DB
   location_id?: number | null;
-
-  // ✅ NEW: vessel FK id in DB
   vessel_id?: number | null;
 
   planned_at: string;
@@ -30,25 +32,24 @@ export type Trip = {
   count?: number;
   owner_code?: string;
 
-  // optional join fields (if backend returns)
-  near_station_name?: string;
-  state_id?: number;
-  district_id?: number;
-  state_name?: string;
-  district_name?: string;
+  // joins (if backend returns)
+  location_name?: string;
+  method_name?: string;
+  fish_name?: string;
+  image_url?: string;
+  fish_type_url?: string;
 };
 
 export type TripCreatePayload = {
-  fishing_method: string;
+  // ✅ IMPORTANT: do NOT send fishing_method string to backend
+  fishing_method_id: number;
 
-  // ✅ store NAME here
+  // based on your backend insert
+  fish_species: number;
+
   near_station: string;
-
-  // ✅ store LOCATION ID here
   location_id: number;
-
-  // ✅ NEW: send vessel id (optional-safe; UI should send it)
-  vessel_id?: number | null;
+  vessel_id: number;
 
   planned_at: string;
   arrival_at: string | null;
@@ -61,7 +62,8 @@ export type TripCreatePayload = {
   owner_code: string;
   count: number;
 
-  // OPTIONAL: only if backend expects
+  approval_status?: string;
+
   state_id?: number;
   district_id?: number;
 };
@@ -73,7 +75,6 @@ type ApiWrapped<T> = {
   data?: T;
 };
 
-// ✅ HARDCODED BASE URL
 const BASE_URL = "https://rootverse-backend-5qoo.onrender.com";
 
 function baseUrl() {
@@ -88,6 +89,7 @@ function isWrapped<T>(x: any): x is ApiWrapped<T> {
 }
 
 function unwrapOrThrow<T>(payload: any): T {
+  if (payload == null) return payload as T;
   if (!isWrapped<T>(payload)) return payload as T;
 
   if (payload.success === false) {
@@ -104,13 +106,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(url, {
     ...init,
     headers: {
+      Accept: "application/json",
       "Content-Type": "application/json",
       ...(init.headers || {}),
     },
   });
 
-  const text = await res.text();
-
+  const text = await res.text().catch(() => "");
   let json: any = null;
   try {
     json = text ? JSON.parse(text) : null;
@@ -120,7 +122,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const msg =
       json?.message ||
       json?.error ||
-      (typeof text === "string" && text.trim() ? text : `Request failed (${res.status})`);
+      (text?.trim() ? text : `Request failed (${res.status})`);
     throw new Error(msg);
   }
 
@@ -150,17 +152,17 @@ export const tripApi = {
   fetchTripsByOwnerCode: async (
     owner_code: string,
     token?: string,
-    approval_status?: string | "ALL"
+    approval_status?: string | "ALL",
   ) => {
     const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
     const oc = encodeURIComponent(owner_code);
 
     const st = toStatusPath(approval_status);
     if (st) {
-      return request<Trip[]>(`/api/trip/owner/${oc}/status/${encodeURIComponent(st)}`, {
-        method: "GET",
-        headers,
-      });
+      return request<Trip[]>(
+        `/api/trip/owner/${oc}/status/${encodeURIComponent(st)}`,
+        { method: "GET", headers },
+      );
     }
 
     try {
@@ -173,7 +175,7 @@ export const tripApi = {
         try {
           const part = await request<Trip[]>(
             `/api/trip/owner/${oc}/status/${encodeURIComponent(s)}`,
-            { method: "GET", headers }
+            { method: "GET", headers },
           );
           all.push(...(part || []));
         } catch {}
