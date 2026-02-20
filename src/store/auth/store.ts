@@ -27,6 +27,7 @@ import qcFillReducer from "../quality/qcFill.slice";
 import qcOverviewReducer from "../quality/qcOverview.slice";
 import qrDetailsReducer from "../quality/qrDetails.slice";
 import qualityCheckerReducer from "../qualityChecker/qualityChecker.slice";
+import vesselsReducer from "../../services/wild/vessels/vessel.slice";
 
 // ---- ui ----
 import themeReducer from "../theme.slice";
@@ -64,6 +65,7 @@ export const store = configureStore({
 
     // ui
     theme: themeReducer,
+    vessels: vesselsReducer,
   },
   middleware: (getDefault) =>
     getDefault({

@@ -7,13 +7,12 @@ export type QrStatusResponse = {
 };
 
 /**
- * IMPORTANT:
+ * ✅ NOW:
+ * vesselId = NUMERIC DB ID (example: 39)  ✅ REQUIRED
+ * rvVesselId = STRING CODE (optional, backward compat)
+ *
  * ownerId must be NUMERIC owner DB id (example: 14)
  * Offline: ownerId can be 0 (we won't send owner_id)
- *
- * IMPORTANT CHANGE:
- * rvVesselId is a STRING vessel CODE (ex: "RV-VES-TN-000039")
- * because your backend + Postman expects the CODE in rv_vessel_id.
  */
 export type CatchLogPayload = {
   linkedCrateId: string;
@@ -21,7 +20,10 @@ export type CatchLogPayload = {
   tripId: string;
 
   fishId: number; // REQUIRED
-  rvVesselId: string; // REQUIRED (CODE)
+
+  vesselId: number; // ✅ REQUIRED (NUMERIC)
+  rvVesselId?: string; // ✅ OPTIONAL (CODE)
+
   ownerId: number; // REQUIRED ONLINE (use 0 for offline)
 
   weightKg?: number; // OPTIONAL (default 0)
@@ -141,7 +143,7 @@ export async function apiCheckQrStatus(crateId: string): Promise<QrStatusRespons
       status: data?.status || "NEW",
     };
   } catch (e) {
-    // ✅ Dummy fallback only (no other changes)
+    // ✅ Dummy fallback only
     if (USE_DUMMY_CATCHLOG) {
       return {
         crateId,
@@ -155,13 +157,11 @@ export async function apiCheckQrStatus(crateId: string): Promise<QrStatusRespons
 // ✅ NEW: Get all catchlogs for a particular trip (for Trip View screen)
 export async function apiFetchCatchLogsByTrip(tripId: string): Promise<CatchLog[]> {
   try {
-    // ✅ API (change ONLY this path if your backend route differs)
     const data = await httpJson<any>(
       `/api/trips/${encodeURIComponent(tripId)}/catchlogs`,
       { method: "GET" }
     );
 
-    // supports: array OR {data:[]} OR {data:{catchlogs:[]}}
     if (Array.isArray(data)) return data;
     if (Array.isArray(data?.data)) return data.data;
     if (Array.isArray(data?.data?.catchlogs)) return data.data.catchlogs;
@@ -177,17 +177,27 @@ export async function apiFetchCatchLogsByTrip(tripId: string): Promise<CatchLog[
 }
 
 export async function apiSubmitCatchLog(payload: CatchLogPayload) {
-  const code = String(payload.linkedCrateId || "").trim();
-  if (!code) throw new Error("linkedCrateId missing");
+  const crateCode = String(payload.linkedCrateId || "").trim();
+  if (!crateCode) throw new Error("linkedCrateId missing");
+
+  // ✅ REQUIRED: numeric vessel_id
+  const vesselIdNum = Number(payload.vesselId ?? 0);
+  if (!vesselIdNum || Number.isNaN(vesselIdNum) || vesselIdNum <= 0) {
+    throw new Error("vesselId (numeric) missing");
+  }
 
   const form = new FormData();
 
-  // ✅ Vessel CODE (send both keys)
-  const vesselCode = String(payload.rvVesselId || "").trim();
-  if (!vesselCode) throw new Error("rvVesselId (vessel CODE) missing");
+  // ✅ Send numeric vessel_id
+  form.append("vessel_id", String(vesselIdNum));
+  form.append("vesselId", String(vesselIdNum));
 
-  form.append("rv_vessel_id", vesselCode);
-  form.append("rvVesselId", vesselCode);
+  // ✅ OPTIONAL: vessel CODE (backward compatibility only)
+  const vesselCode = String(payload.rvVesselId || "").trim();
+  if (vesselCode) {
+    form.append("rv_vessel_id", vesselCode);
+    form.append("rvVesselId", vesselCode);
+  }
 
   // ✅ Owner (send only if >0)
   if (payload.ownerId && Number(payload.ownerId) > 0) {
@@ -213,10 +223,9 @@ export async function apiSubmitCatchLog(payload: CatchLogPayload) {
   form.append("catch_date", payload.catchDate);
 
   // ✅ Time (force HH:mm:ss)
-  const t =
-    payload.catchTime?.length === 5 ? `${payload.catchTime}:00` : payload.catchTime;
-  form.append("time", t);
-  form.append("catch_time", t);
+  const tt = payload.catchTime?.length === 5 ? `${payload.catchTime}:00` : payload.catchTime;
+  form.append("time", tt);
+  form.append("catch_time", tt);
 
   // ✅ Location
   if (payload.latitude != null) form.append("latitude", String(payload.latitude));
@@ -224,28 +233,29 @@ export async function apiSubmitCatchLog(payload: CatchLogPayload) {
 
   // ✅ Images
   for (let i = 0; i < (payload.images?.length || 0); i++) {
-    await appendImageToForm(form, "images", payload.images[i], `catch_${code}_${i + 1}.jpg`);
+    await appendImageToForm(form, "images", payload.images[i], `catch_${crateCode}_${i + 1}.jpg`);
   }
 
   // ✅ PUT /api/qrs/:crateId
   try {
-    return await httpPutForm<any>(`/api/qrs/${encodeURIComponent(code)}`, form);
+    return await httpPutForm<any>(`/api/qrs/${encodeURIComponent(crateCode)}`, form);
   } catch (e) {
-    // ✅ Dummy fallback only (so UI can proceed)
+    // ✅ Dummy fallback only
     if (USE_DUMMY_CATCHLOG) {
       return {
         success: true,
         dummy: true,
         message: "Dummy catchlog submitted (API failed)",
         data: {
-          crateId: code,
+          crateId: crateCode,
           tripId: payload.tripId,
-          rvVesselId: payload.rvVesselId,
+          vesselId: vesselIdNum,
+          rvVesselId: vesselCode || null,
           ownerId: payload.ownerId,
           fishId: payload.fishId,
           weightKg: w,
           catchDate: payload.catchDate,
-          catchTime: t,
+          catchTime: tt,
         },
       };
     }

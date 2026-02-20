@@ -4,6 +4,7 @@ import { router } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -26,14 +27,6 @@ type Lang = "ta" | "en";
 // If backend does NOT need them, keep false.
 const INCLUDE_STATE_DISTRICT_IN_PAYLOAD = false;
 
-const FISHING_METHODS = [
-  "Pole & Line",
-  "Hook & Line",
-  "Longline",
-  "Gillnet",
-  "Trawling",
-];
-
 const i18n = {
   en: {
     title: "New Trip Request",
@@ -47,7 +40,13 @@ const i18n = {
 
     tripDetails: "Trip Details",
     tripName: "Trip Name",
+
     fishingMethod: "Fishing Method",
+    errMethod: "Select fishing method",
+
+    fishSpecies: "Fish Species",
+    errFishSpecies: "Select fish species",
+
     state: "State",
     district: "District",
     nearStation: "Nearest Station (Location)",
@@ -78,7 +77,6 @@ const i18n = {
     cancel: "Cancel",
     submit: "Submit",
 
-    errMethod: "Select fishing method",
     errState: "Select state",
     errDistrict: "Select district",
     errLocation: "Select nearest station (location)",
@@ -110,7 +108,13 @@ const i18n = {
 
     tripDetails: "பயண விவரங்கள்",
     tripName: "பயண பெயர்",
+
     fishingMethod: "மீன்பிடி முறை",
+    errMethod: "மீன்பிடி முறையை தேர்வு செய்யவும்",
+
+    fishSpecies: "மீன் வகை (Fish)",
+    errFishSpecies: "மீன் வகையை தேர்வு செய்யவும்",
+
     state: "மாநிலம்",
     district: "மாவட்டம்",
     nearStation: "அருகிலுள்ள நிலையம் (இடம்)",
@@ -141,7 +145,6 @@ const i18n = {
     cancel: "ரத்து",
     submit: "சமர்ப்பி",
 
-    errMethod: "மீன்பிடி முறையை தேர்வு செய்யவும்",
     errState: "மாநிலம் தேர்வு செய்யவும்",
     errDistrict: "மாவட்டம் தேர்வு செய்யவும்",
     errLocation: "இடம் (Location) தேர்வு செய்யவும்",
@@ -171,9 +174,7 @@ function Card({
   className?: string;
 }) {
   return (
-    <View
-      className={`rounded-2xl border border-[#ead7c8] bg-white ${className}`}
-    >
+    <View className={`rounded-2xl border border-[#ead7c8] bg-white ${className}`}>
       {children}
     </View>
   );
@@ -225,8 +226,10 @@ function toNum(v: string) {
 function money(n: number) {
   return `₹${n.toFixed(2)}`;
 }
+
+// ✅ keep your mapping helper (fallback)
 function mapMethodToApi(label: string) {
-  const l = label.toLowerCase();
+  const l = (label || "").toLowerCase();
   if (l.includes("pole")) return "pole&line";
   if (l.includes("hook")) return "hook&line";
   if (l.includes("long")) return "longline";
@@ -244,9 +247,24 @@ function isNetworkishError(msg: string) {
   );
 }
 
+// ✅ robust number parsing
+function isNumericString(v: any) {
+  return typeof v === "string" && /^[0-9]+$/.test(v.trim());
+}
+function toIntSafe(v: any) {
+  if (typeof v === "number" && Number.isFinite(v)) return Math.trunc(v);
+  if (isNumericString(v)) return Number(v.trim());
+  return 0;
+}
+
 /* ---------------- API ---------------- */
 const API_BASE = "https://rootverse-backend-5qoo.onrender.com";
 const ME_CACHE_KEY = "RV_ME_CACHE_V1";
+const LAST_USER_ID_KEY = "RV_LAST_USER_ID_V1";
+
+// ✅ caches for backend lists
+const FISHING_METHODS_CACHE_KEY = "RV_FISHING_METHODS_CACHE_V1";
+const FISH_TYPES_CACHE_KEY = "RV_FISH_TYPES_CACHE_V1";
 
 type MeCache = {
   ownerName: string;
@@ -259,24 +277,15 @@ async function readMeCache(): Promise<MeCache | null> {
   try {
     const raw = await AsyncStorage.getItem(ME_CACHE_KEY);
     if (!raw) {
-      // fallback: try to read from global keys saved by me.slice
-      const ownerCode = String(
-        (await AsyncStorage.getItem("owner_code")) || "",
-      ).trim();
-      const ownerIdStr = String(
-        (await AsyncStorage.getItem("owner_id")) || "",
-      ).trim();
-      const ownerDbId = ownerIdStr ? Number(ownerIdStr) : 0;
+      // fallback keys
+      const ownerCode = String((await AsyncStorage.getItem("owner_code")) || "").trim();
+
+      const ownerIdRaw = (await AsyncStorage.getItem("owner_id")) || "";
+      const ownerDbId = toIntSafe(ownerIdRaw);
 
       if (ownerCode && ownerDbId) {
-        return {
-          ownerName: "",
-          registrationNo: "",
-          ownerCode,
-          ownerDbId,
-        };
+        return { ownerName: "", registrationNo: "", ownerCode, ownerDbId };
       }
-
       return null;
     }
 
@@ -286,7 +295,7 @@ async function readMeCache(): Promise<MeCache | null> {
       ownerName: String(p.ownerName || "").trim(),
       registrationNo: String(p.registrationNo || "").trim(),
       ownerCode: String(p.ownerCode || "").trim(),
-      ownerDbId: Number(p.ownerDbId || 0),
+      ownerDbId: toIntSafe(p.ownerDbId),
     };
   } catch {
     return null;
@@ -297,6 +306,7 @@ async function writeMeCache(data: MeCache) {
     await AsyncStorage.setItem(ME_CACHE_KEY, JSON.stringify(data));
   } catch {}
 }
+
 async function fetchMeFromApi(): Promise<MeCache> {
   const token = await AsyncStorage.getItem("auth_token");
   const res = await fetch(`${API_BASE}/api/me`, {
@@ -315,10 +325,15 @@ async function fetchMeFromApi(): Promise<MeCache> {
   const json: any = await res.json();
   const u = json?.user ?? json?.data ?? json ?? {};
 
-  const ownerName = String(
-    u?.username ?? u?.owner_name ?? u?.name ?? "",
-  ).trim();
-  const ownerCode = String(u?.owner_id ?? u?.owner_code ?? "").trim();
+  const userId = toIntSafe(u?.id);
+  if (userId) {
+    try {
+      await AsyncStorage.setItem(LAST_USER_ID_KEY, String(userId));
+    } catch {}
+  }
+
+  const ownerName = String(u?.username ?? u?.owner_name ?? u?.name ?? "").trim();
+
   const registrationNo = String(
     u?.govt_id ??
       u?.registration_no ??
@@ -328,9 +343,18 @@ async function fetchMeFromApi(): Promise<MeCache> {
       "",
   ).trim();
 
-  const ownerDbIdRaw =
-    u?.id ?? u?.owner_db_id ?? u?.ownerId ?? u?.owner_dbid ?? u?.owner_db ?? 0;
-  const ownerDbId = Number(ownerDbIdRaw || 0);
+  const ownerDbId =
+    toIntSafe(u?.owner_db_id) ||
+    toIntSafe(u?.ownerDbId) ||
+    toIntSafe(u?.owner_dbid) ||
+    toIntSafe(u?.owner_db) ||
+    toIntSafe(u?.ownerId) ||
+    (toIntSafe(u?.owner_id) ? toIntSafe(u?.owner_id) : 0) ||
+    toIntSafe(u?.id);
+
+  const ownerCode = String(
+    u?.owner_code ?? u?.ownerCode ?? (isNumericString(u?.owner_id) ? "" : u?.owner_id) ?? "",
+  ).trim();
 
   return { ownerName, ownerCode, registrationNo, ownerDbId };
 }
@@ -365,17 +389,34 @@ type LocationItem = {
   state_name?: string;
 };
 
-type VesselItem = { id: number; name: string; code?: string | null };
+// ✅ Keep vessel id for payload, show govt_registration_number main and vessel_name small
+type VesselItem = {
+  id: number;
+  name: string; // govt_registration_number
+  subName?: string; // vessel_name
+  code?: string | null;
+};
+
+// ✅ backend items w/ image
+type FishingMethodItem = {
+  id: number;
+  name: string;
+  code?: string | null;
+  image_url?: string | null;
+};
+
+type FishTypeItem = {
+  id: number;
+  name: string;
+  code?: string | null;
+  image_url?: string | null;
+};
 
 const VESSEL_CACHE_PREFIX = "RV_VESSELS_CACHE_OWNER_V1_";
 
-async function readVesselsCache(
-  ownerDbId: number,
-): Promise<VesselItem[] | null> {
+async function readVesselsCache(ownerDbId: number): Promise<VesselItem[] | null> {
   try {
-    const raw = await AsyncStorage.getItem(
-      `${VESSEL_CACHE_PREFIX}${ownerDbId}`,
-    );
+    const raw = await AsyncStorage.getItem(`${VESSEL_CACHE_PREFIX}${ownerDbId}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as VesselItem[]) : null;
@@ -386,10 +427,7 @@ async function readVesselsCache(
 
 async function writeVesselsCache(ownerDbId: number, items: VesselItem[]) {
   try {
-    await AsyncStorage.setItem(
-      `${VESSEL_CACHE_PREFIX}${ownerDbId}`,
-      JSON.stringify(items),
-    );
+    await AsyncStorage.setItem(`${VESSEL_CACHE_PREFIX}${ownerDbId}`, JSON.stringify(items));
   } catch {}
 }
 
@@ -416,18 +454,68 @@ async function geoGet<T>(path: string): Promise<T> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${API_BASE}${path}`, {
     method: "GET",
-    headers: { Accept: "application/json", ...headers },
+    headers: { Accept: "application/json", ...(headers as Record<string, string>) },
   });
   const json = await safeJson(res);
   if (!res.ok)
-    throw new Error(
-      json?.message || json?.error || `GET ${path} failed (${res.status})`,
-    );
+    throw new Error(json?.message || json?.error || `GET ${path} failed (${res.status})`);
   return unwrapData<T>(json);
 }
 
+// ✅ NEW: owner db id fetch like catchlog (/api/owner/fetch/:userId)
+async function getLastUserId(): Promise<number> {
+  const raw = await AsyncStorage.getItem(LAST_USER_ID_KEY);
+  const n = toIntSafe(raw);
+  return n > 0 ? n : 0;
+}
+
+async function fetchOwnerDbIdFromUserId(userId: number): Promise<number> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/api/owner/fetch/${encodeURIComponent(String(userId))}`, {
+    method: "GET",
+    headers: { Accept: "application/json", ...headers },
+  });
+
+  const json = await safeJson(res);
+  if (!res.ok) {
+    throw new Error(
+      json?.message || json?.error || `GET /api/owner/fetch/${userId} failed (${res.status})`,
+    );
+  }
+
+  const data: any = unwrapData<any>(json);
+  const o = Array.isArray(data) ? data[0] : data;
+
+  const id = toIntSafe(o?.id) || toIntSafe(o?.owner_id) || toIntSafe(o?.ownerId) || 0;
+
+  return id;
+}
+
+/* ---------------- simple list cache helpers ---------------- */
+async function readListCache<T>(key: string): Promise<T[] | null> {
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : null;
+  } catch {
+    return null;
+  }
+}
+async function writeListCache<T>(key: string, items: T[]) {
+  try {
+    await AsyncStorage.setItem(key, JSON.stringify(items));
+  } catch {}
+}
+
 /* ---------------- BottomSheet generic picker ---------------- */
-type PickerBase = { id: number; name: string; code?: string | null };
+type PickerBase = {
+  id: number;
+  name: string;
+  code?: string | null;
+  subName?: string; // vessel_name
+  image_url?: string | null; // ✅ NEW (methods/fish types)
+};
 
 function EntityPickerSheet<T extends PickerBase>({
   title,
@@ -455,9 +543,8 @@ function EntityPickerSheet<T extends PickerBase>({
     return options.filter(
       (x) =>
         x.name.toLowerCase().includes(t) ||
-        String(x.code || "")
-          .toLowerCase()
-          .includes(t),
+        String(x.subName || "").toLowerCase().includes(t) ||
+        String(x.code || "").toLowerCase().includes(t),
     );
   }, [q, options]);
 
@@ -496,9 +583,7 @@ function EntityPickerSheet<T extends PickerBase>({
             </View>
           ) : filtered.length === 0 ? (
             <View className="py-6 items-center">
-              <Text className="text-sm text-[#7a6f66]">
-                {emptyText || "No data"}
-              </Text>
+              <Text className="text-sm text-[#7a6f66]">{emptyText || "No data"}</Text>
             </View>
           ) : (
             filtered.map((item) => {
@@ -511,23 +596,42 @@ function EntityPickerSheet<T extends PickerBase>({
                     sheetRef.current?.dismiss();
                   }}
                   className={`mb-2 rounded-xl border px-4 py-3 active:opacity-80 ${
-                    active
-                      ? "border-[#a06b2a] bg-[#fff3e7]"
-                      : "border-[#ead7c8] bg-white"
+                    active ? "border-[#a06b2a] bg-[#fff3e7]" : "border-[#ead7c8] bg-white"
                   }`}
                 >
-                  <Text
-                    className={`text-sm font-semibold ${
-                      active ? "text-[#7a4a12]" : "text-[#2b2b2b]"
-                    }`}
-                  >
-                    {item.name}
-                  </Text>
-                  {item.code ? (
-                    <Text className="mt-1 text-[11px] text-[#7a6f66]">
-                      Code: {item.code}
-                    </Text>
-                  ) : null}
+                  <View className="flex-row items-center">
+                    {item.image_url ? (
+                      <Image
+                        source={{ uri: String(item.image_url) }}
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: 10,
+                          marginRight: 10,
+                          backgroundColor: "#f2e8df",
+                        }}
+                        resizeMode="cover"
+                      />
+                    ) : null}
+
+                    <View className="flex-1">
+                      <Text
+                        className={`text-sm font-semibold ${
+                          active ? "text-[#7a4a12]" : "text-[#2b2b2b]"
+                        }`}
+                      >
+                        {item.name}
+                      </Text>
+
+                      {item.subName ? (
+                        <Text className="mt-1 text-[11px] text-[#7a6f66]">{item.subName}</Text>
+                      ) : null}
+
+                      {item.code ? (
+                        <Text className="mt-1 text-[11px] text-[#7a6f66]">Code: {item.code}</Text>
+                      ) : null}
+                    </View>
+                  </View>
                 </Pressable>
               );
             })
@@ -586,9 +690,7 @@ async function patchOwnerCodeInTripQueue(ownerCode: string) {
   if (patched > 0) await saveTripQueue(next);
   return patched;
 }
-async function flushTripQueue(
-  send: (payload: TripCreatePayload) => Promise<any>,
-) {
+async function flushTripQueue(send: (payload: TripCreatePayload) => Promise<any>) {
   const items = await loadTripQueue();
   if (!items.length) return { sent: 0, left: 0 };
 
@@ -629,29 +731,20 @@ export default function NewTripRequest() {
     setTripName(makeTripName(registrationNo));
   }, [registrationNo]);
 
-  const [method, setMethod] = useState("");
+  // ✅ Fishing Method from backend
+  const [methodOptions, setMethodOptions] = useState<FishingMethodItem[]>([]);
+  const [methodLoading, setMethodLoading] = useState(false);
+  const [methodSel, setMethodSel] = useState<FishingMethodItem | null>(null);
 
-  // ✅ Fishing method sheet options
-  const methodOptions = useMemo(
-    () =>
-      FISHING_METHODS.map((name, idx) => ({
-        id: idx + 1,
-        name,
-        code: mapMethodToApi(name),
-      })),
-    [],
-  );
-  const methodSel = useMemo(
-    () => methodOptions.find((x) => x.name === method) ?? null,
-    [method, methodOptions],
-  );
+  // ✅ Fish species from backend
+  const [fishOptions, setFishOptions] = useState<FishTypeItem[]>([]);
+  const [fishLoading, setFishLoading] = useState(false);
+  const [fishSel, setFishSel] = useState<FishTypeItem | null>(null);
 
-  // ✅ Vessel
   const [vessels, setVessels] = useState<VesselItem[]>([]);
   const [vesselSel, setVesselSel] = useState<VesselItem | null>(null);
   const [vesselsLoading, setVesselsLoading] = useState(false);
 
-  // ✅ GEO state
   const [states, setStates] = useState<StateItem[]>([]);
   const [districts, setDistricts] = useState<DistrictItem[]>([]);
   const [locations, setLocations] = useState<LocationItem[]>([]);
@@ -679,50 +772,29 @@ export default function NewTripRequest() {
   const [iceKg, setIceKg] = useState("");
   const [iceRate, setIceRate] = useState("15");
 
-  const dieselCost = useMemo(
-    () => toNum(dieselLiters) * toNum(dieselRate),
-    [dieselLiters, dieselRate],
-  );
-  const iceCost = useMemo(
-    () => toNum(iceKg) * toNum(iceRate),
-    [iceKg, iceRate],
-  );
+  const dieselCost = useMemo(() => toNum(dieselLiters) * toNum(dieselRate), [dieselLiters, dieselRate]);
+  const iceCost = useMemo(() => toNum(iceKg) * toNum(iceRate), [iceKg, iceRate]);
   const totalCost = useMemo(() => dieselCost + iceCost, [dieselCost, iceCost]);
 
   const plannedStr = plannedDT ? formatDateTime(plannedDT) : "";
-  const returnStr = expectedReturn
-    ? formatDateTime(expectedReturn).split(" ")[0]
-    : "";
+  const returnStr = expectedReturn ? formatDateTime(expectedReturn).split(" ")[0] : "";
 
   const [posting, setPosting] = useState(false);
 
-  // ✅ Global network state from Redux
-  const globalNetworkState = useAppSelector(
-    (s: any) => s.network?.isOnline ?? true,
-  );
+  const globalNetworkState = useAppSelector((s: any) => s.network?.isOnline ?? true);
   const [isOnline, setIsOnline] = useState<boolean>(() => globalNetworkState);
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
 
-  const methodRef = useRef<BottomSheetModal>(
-    null,
-  ) as React.RefObject<BottomSheetModal>;
-  const vesselRef = useRef<BottomSheetModal>(
-    null,
-  ) as React.RefObject<BottomSheetModal>;
-  const stateRef = useRef<BottomSheetModal>(
-    null,
-  ) as React.RefObject<BottomSheetModal>;
-  const districtRef = useRef<BottomSheetModal>(
-    null,
-  ) as React.RefObject<BottomSheetModal>;
-  const locationRef = useRef<BottomSheetModal>(
-    null,
-  ) as React.RefObject<BottomSheetModal>;
+  const methodRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
+  const fishRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
+  const vesselRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
+  const stateRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
+  const districtRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
+  const locationRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
 
   const flushingRef = useRef(false);
 
-  // Load /me cache (runs once on mount)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -738,7 +810,6 @@ export default function NewTripRequest() {
           setMeLoading(false);
           setMeError(null);
         } else {
-          // cache miss - will try online fetch if network available
           setMeLoading(false);
         }
       } catch (e: any) {
@@ -752,18 +823,14 @@ export default function NewTripRequest() {
     };
   }, []);
 
-  // Network + pending count
   useEffect(() => {
     let alive = true;
-
     const refreshCount = async () => {
       const c = await getTripQueueCount();
       if (alive) setPendingCount(c);
     };
 
     refreshCount();
-
-    // ✅ Use global network state
     setIsOnline(globalNetworkState);
 
     const unsub = NetInfo.addEventListener((state) => {
@@ -779,12 +846,10 @@ export default function NewTripRequest() {
     };
   }, [globalNetworkState]);
 
-  // Fetch /me online (only if cache didn't provide data)
   useEffect(() => {
     let alive = true;
     if (!isOnline) return;
 
-    // if cache already loaded ownerCode, skip online fetch
     if (ownerCode && ownerDbId) return;
 
     (async () => {
@@ -817,79 +882,221 @@ export default function NewTripRequest() {
     };
   }, [isOnline, ownerCode, ownerDbId]);
 
-  // Load vessels by ownerDbId (cache first, then refresh online)
+  // ✅ fishing methods from backend (+ cache)
   useEffect(() => {
     let alive = true;
 
     (async () => {
-      if (!ownerDbId) return;
+      // show cache instantly
+      const cached = await readListCache<FishingMethodItem>(FISHING_METHODS_CACHE_KEY);
+      if (!alive) return;
+      if (cached?.length) {
+        setMethodOptions(cached);
+      }
 
-      // cached first (works offline)
-      const cached = await readVesselsCache(ownerDbId);
+      if (!isOnline) return;
+
+      setMethodLoading(true);
+      try {
+        const data = await geoGet<any>("/api/fishing-methods");
+        const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+
+        const list: FishingMethodItem[] = arr
+          .map((x: any) => {
+            const id = toIntSafe(x?.id) || toIntSafe(x?.method_id) || 0;
+            const name = String(x?.method_name ?? x?.name ?? "").trim();
+            const code = String(x?.code ?? x?.method_code ?? "").trim() || null;
+            const image_url = String(x?.image_url ?? x?.imageUrl ?? "").trim() || null;
+            return { id, name, code, image_url };
+          })
+          .filter((x) => x.id && x.name);
+
+        if (!alive) return;
+
+        // fallback if backend returns empty
+        if (!list.length && !cached?.length) {
+          const fallback = [
+            { id: 1, name: "Pole & Line", code: "pole&line", image_url: null },
+            { id: 2, name: "Hook & Line", code: "hook&line", image_url: null },
+            { id: 3, name: "Longline", code: "longline", image_url: null },
+            { id: 4, name: "Gillnet", code: "gillnet", image_url: null },
+            { id: 5, name: "Trawling", code: "trawling", image_url: null },
+          ];
+          setMethodOptions(fallback);
+          await writeListCache(FISHING_METHODS_CACHE_KEY, fallback);
+          return;
+        }
+
+        setMethodOptions(list);
+        await writeListCache(FISHING_METHODS_CACHE_KEY, list);
+
+        // keep selection valid (if already selected)
+        if (methodSel?.id) {
+          const still = list.find((m) => m.id === methodSel.id) || null;
+          if (still) setMethodSel(still);
+        }
+      } catch (e: any) {
+        // hard fallback if no cache and request fails
+        const fallback = [
+          { id: 1, name: "Pole & Line", code: "pole&line", image_url: null },
+          { id: 2, name: "Hook & Line", code: "hook&line", image_url: null },
+          { id: 3, name: "Longline", code: "longline", image_url: null },
+          { id: 4, name: "Gillnet", code: "gillnet", image_url: null },
+          { id: 5, name: "Trawling", code: "trawling", image_url: null },
+        ];
+        if (!alive) return;
+        if (!cached?.length) setMethodOptions(fallback);
+      } finally {
+        if (alive) setMethodLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline]);
+
+  // ✅ fish types from backend (+ cache)
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      const cached = await readListCache<FishTypeItem>(FISH_TYPES_CACHE_KEY);
+      if (!alive) return;
+      if (cached?.length) setFishOptions(cached);
+
+      if (!isOnline) return;
+
+      setFishLoading(true);
+      try {
+        const data = await geoGet<any>("/api/fish-types");
+        const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+
+        const list: FishTypeItem[] = arr
+          .map((x: any) => {
+            const id = toIntSafe(x?.id) || toIntSafe(x?.fish_id) || toIntSafe(x?.fishTypeId) || 0;
+            const name = String(x?.name ?? x?.fish_name ?? "").trim();
+            const code = String(x?.code ?? x?.fish_code ?? "").trim() || null;
+            const image_url = String(x?.image_url ?? x?.imageUrl ?? x?.fish_type_url ?? "").trim() || null;
+            return { id, name, code, image_url };
+          })
+          .filter((x) => x.id && x.name);
+
+        if (!alive) return;
+
+        setFishOptions(list);
+        await writeListCache(FISH_TYPES_CACHE_KEY, list);
+
+        if (fishSel?.id) {
+          const still = list.find((f) => f.id === fishSel.id) || null;
+          if (still) setFishSel(still);
+        }
+      } catch (e: any) {
+        // no fake fallback here; use cache only if exists
+      } finally {
+        if (alive) setFishLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline]);
+
+  // ✅ ONLY OWNER VESSELS (LIKE CATCHLOG): userId -> ownerDbId -> vessels
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      setVessels([]);
+      setVesselSel(null);
+
+      if (!ownerDbId && !isOnline) return;
+
+      let resolvedOwnerDbId = ownerDbId;
+
+      if (isOnline) {
+        try {
+          const userId = await getLastUserId();
+          if (userId) {
+            const realOwnerId = await fetchOwnerDbIdFromUserId(userId);
+            if (realOwnerId && realOwnerId !== resolvedOwnerDbId) {
+              resolvedOwnerDbId = realOwnerId;
+              setOwnerDbId(realOwnerId);
+            }
+          }
+        } catch {}
+      }
+
+      if (!resolvedOwnerDbId) return;
+
+      const cached = await readVesselsCache(resolvedOwnerDbId);
       if (!alive) return;
 
       if (cached?.length) {
         setVessels(cached);
-        if (!vesselSel && cached.length === 1) setVesselSel(cached[0]);
+        if (cached.length === 1) setVesselSel(cached[0]);
       }
 
-      // refresh online
       if (!isOnline) return;
 
       setVesselsLoading(true);
+
       try {
         const data = await geoGet<any>(
-          `/api/vessels/owner/${encodeURIComponent(String(ownerDbId))}`,
+          `/api/vessels/owner/${encodeURIComponent(String(resolvedOwnerDbId))}`,
         );
 
-        const arr = Array.isArray(data)
-          ? data
-          : Array.isArray((data as any)?.data)
-            ? (data as any).data
-            : [];
+        const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
 
-        const list: VesselItem[] = arr
+        const ownerOnly = arr.filter((x: any) => {
+          const vOwner =
+            toIntSafe(x?.owner_id) ||
+            toIntSafe(x?.ownerId) ||
+            toIntSafe(x?.owner_db_id) ||
+            toIntSafe(x?.ownerDbId) ||
+            0;
+
+          return vOwner === resolvedOwnerDbId;
+        });
+
+        const list: VesselItem[] = ownerOnly
           .map((x: any) => {
-            const id = Number(x?.id ?? x?.vessel_db_id ?? 0);
-            const reg = String(
-              x?.registration_no ??
-                x?.reg_no ??
-                x?.vessel_reg_no ??
+            const id =
+              toIntSafe(x?.id) ||
+              toIntSafe(x?.vessel_id) ||
+              toIntSafe(x?.vesselId) ||
+              toIntSafe(x?.rv_vessel_id) ||
+              0;
+
+            const vesselName = String(x?.vessel_name ?? x?.vesselName ?? x?.name ?? "").trim();
+
+            const govtReg = String(
+              x?.govt_registration_number ??
+                x?.govtRegistrationNumber ??
+                x?.registration_number ??
                 x?.registrationNo ??
                 "",
             ).trim();
 
-            const code =
-              String(x?.vessel_code ?? x?.vessel_id ?? x?.code ?? "").trim() ||
-              null;
+            const name = govtReg || vesselName || `Vessel ${id}`;
 
-            const name =
-              reg && code
-                ? `${reg} (${code})`
-                : reg
-                  ? reg
-                  : code
-                    ? String(code)
-                    : `Vessel ${id}`;
+            const subName = vesselName && govtReg ? vesselName : "";
 
-            return { id, name, code };
+            return { id, name, subName, code: null };
           })
           .filter((v) => v.id && v.name);
 
         if (!alive) return;
 
         setVessels(list);
-        await writeVesselsCache(ownerDbId, list);
+        await writeVesselsCache(resolvedOwnerDbId, list);
 
-        if (!vesselSel && list.length === 1) setVesselSel(list[0]);
-        if (vesselSel && !list.some((v) => v.id === vesselSel.id)) {
-          setVesselSel(list[0] ?? null);
-        }
+        if (list.length === 1) setVesselSel(list[0]);
       } catch (e: any) {
-        // log but don't crash on network errors - cache is sufficient
         console.warn("[VESSEL FETCH]", String(e?.message || e));
-        if (!alive) return;
-        // keep cached vessels, don't overwrite on error
       } finally {
         if (alive) setVesselsLoading(false);
       }
@@ -898,11 +1105,8 @@ export default function NewTripRequest() {
     return () => {
       alive = false;
     };
-    // keep same behavior; don't add vesselSel dependency
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ownerDbId, isOnline]);
 
-  // Load states
   useEffect(() => {
     let alive = true;
     if (!isOnline) return;
@@ -911,11 +1115,7 @@ export default function NewTripRequest() {
       setStatesLoading(true);
       try {
         const data = await geoGet<any>("/api/states");
-        const arr = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.data)
-            ? data.data
-            : [];
+        const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
         const list: StateItem[] = arr
           .map((x: any) => ({
             id: Number(x.id),
@@ -927,7 +1127,6 @@ export default function NewTripRequest() {
         if (!alive) return;
         setStates(list);
       } catch (e: any) {
-        // log but don't crash on network errors
         console.warn("[STATES FETCH]", String(e?.message || e));
       } finally {
         if (alive) setStatesLoading(false);
@@ -939,7 +1138,6 @@ export default function NewTripRequest() {
     };
   }, [isOnline]);
 
-  // When state changes -> load districts
   useEffect(() => {
     let alive = true;
 
@@ -957,11 +1155,7 @@ export default function NewTripRequest() {
         const data = await geoGet<any>(
           `/api/states/${encodeURIComponent(String(stateSel.id))}/districts`,
         );
-        const arr = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.data)
-            ? data.data
-            : [];
+        const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
         const list: DistrictItem[] = arr
           .map((x: any) => ({
             id: Number(x.id),
@@ -974,7 +1168,6 @@ export default function NewTripRequest() {
         if (!alive) return;
         setDistricts(list);
       } catch (e: any) {
-        // log but don't crash on network errors
         console.warn("[DISTRICTS FETCH]", String(e?.message || e));
       } finally {
         if (alive) setDistrictsLoading(false);
@@ -986,7 +1179,6 @@ export default function NewTripRequest() {
     };
   }, [stateSel?.id, isOnline]);
 
-  // When district changes -> load locations
   useEffect(() => {
     let alive = true;
 
@@ -1002,11 +1194,7 @@ export default function NewTripRequest() {
         const data = await geoGet<any>(
           `/api/locations/district/${encodeURIComponent(String(districtSel.id))}`,
         );
-        const arr = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.data)
-            ? data.data
-            : [];
+        const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
         const list: LocationItem[] = arr
           .map((x: any) => ({
             id: Number(x.id),
@@ -1022,7 +1210,6 @@ export default function NewTripRequest() {
         if (!alive) return;
         setLocations(list);
       } catch (e: any) {
-        // log but don't crash on network errors
         console.warn("[LOCATIONS FETCH]", String(e?.message || e));
       } finally {
         if (alive) setLocationsLoading(false);
@@ -1034,7 +1221,6 @@ export default function NewTripRequest() {
     };
   }, [districtSel?.id, isOnline]);
 
-  // Auto flush queue when online
   useEffect(() => {
     let alive = true;
 
@@ -1054,8 +1240,7 @@ export default function NewTripRequest() {
         await patchOwnerCodeInTripQueue(ownerCode);
 
         await flushTripQueue(async (payload) => {
-          if (!payload.owner_code)
-            throw new Error("owner_code missing (waiting for /me)");
+          if (!payload.owner_code) throw new Error("owner_code missing (waiting for /me)");
           await dispatch(createTripThunk(payload as any)).unwrap();
         });
 
@@ -1074,7 +1259,8 @@ export default function NewTripRequest() {
   }, [dispatch, isOnline, ownerCode]);
 
   const submit = async () => {
-    if (!method) return Alert.alert(t.title, t.errMethod);
+    if (!methodSel?.id) return Alert.alert(t.title, t.errMethod);
+    if (!fishSel?.id) return Alert.alert(t.title, t.errFishSpecies);
     if (!vesselSel?.id) return Alert.alert(t.title, t.errVessel);
 
     if (!stateSel?.id) return Alert.alert(t.title, t.errState);
@@ -1095,23 +1281,34 @@ export default function NewTripRequest() {
       } catch {}
     }
 
-    // ✅ PAYLOAD + vessel_id
+    const methodCode = (methodSel?.code || mapMethodToApi(methodSel?.name || "") || "").trim();
+
     const payload: TripCreatePayload = {
-      fishing_method: mapMethodToApi(method),
+      // ✅ keep old field for compatibility
+      fishing_method: methodCode || mapMethodToApi(methodSel?.name || ""),
+
+      // ✅ new backend-required ids
+      ...(methodSel?.id ? ({ fishing_method_id: Number(methodSel.id) } as any) : {}),
+      ...(fishSel?.id ? ({ fish_species: Number(fishSel.id) } as any) : {}),
 
       vessel_id: Number(vesselSel.id),
 
-      near_station: String(locationSel.name || "").trim(), // ✅ NAME
-      location_id: Number(locationSel.id), // ✅ NUMBER
+      near_station: String(locationSel.name || "").trim(),
+      location_id: Number(locationSel.id),
 
       planned_at: toISO(plannedDT),
       arrival_at: expectedReturn ? toISOArrival(expectedReturn) : null,
+
       diesel: Number(dieselCost.toFixed(2)),
       ice: Number(iceCost.toFixed(2)),
       total: Number(totalCost.toFixed(2)),
+
       qr_count: Number(qrCount || 0),
       owner_code: ownerFinal || "",
       count: crewCount,
+
+      // ✅ keep approval_status (backend example)
+      ...( { approval_status: "pending" } as any ),
 
       ...(INCLUDE_STATE_DISTRICT_IN_PAYLOAD
         ? {
@@ -1121,7 +1318,6 @@ export default function NewTripRequest() {
         : {}),
     };
 
-    // OFFLINE or owner missing → queue + dummy
     if (!isOnline || !ownerFinal) {
       await enqueueTrip({ ...payload, owner_code: ownerFinal || "" } as any);
       setPendingCount(await getTripQueueCount());
@@ -1132,7 +1328,7 @@ export default function NewTripRequest() {
         ownerName: ownerName || "—",
         ownerCode: ownerFinal || "—",
         registrationNo: registrationNo || "—",
-        method,
+        method: methodSel?.name || "",
         landingCenter: locationSel.name,
         locationCode: locationSel.name,
         plannedTripDateTime: plannedStr,
@@ -1148,6 +1344,7 @@ export default function NewTripRequest() {
         totalCost,
         status: "pending",
         count: crewCount,
+        fishSpecies: fishSel?.name || "",
       } as any);
 
       router.replace("/(wild)/trips" as const);
@@ -1186,13 +1383,23 @@ export default function NewTripRequest() {
 
   return (
     <View className="flex-1 bg-[#fbf6f1]">
-      {/* pickers */}
       <EntityPickerSheet
         title={t.fishingMethod}
         value={methodSel as any}
         options={methodOptions as any}
-        onSelect={(v: any) => setMethod(v.name)}
+        loading={methodLoading}
+        onSelect={(v: any) => setMethodSel(v)}
         sheetRef={methodRef}
+        emptyText={t.noData}
+      />
+
+      <EntityPickerSheet
+        title={t.fishSpecies}
+        value={fishSel as any}
+        options={fishOptions as any}
+        loading={fishLoading}
+        onSelect={(v: any) => setFishSel(v)}
+        sheetRef={fishRef}
         emptyText={t.noData}
       />
 
@@ -1209,9 +1416,7 @@ export default function NewTripRequest() {
       <EntityPickerSheet
         title={t.state}
         value={stateSel as any}
-        options={
-          states.map((s) => ({ ...s, code: s.state_code ?? null })) as any
-        }
+        options={states.map((s) => ({ ...s, code: s.state_code ?? null })) as any}
         loading={statesLoading}
         onSelect={(v: any) => setStateSel(v)}
         sheetRef={stateRef}
@@ -1220,9 +1425,7 @@ export default function NewTripRequest() {
       <EntityPickerSheet
         title={t.district}
         value={districtSel as any}
-        options={
-          districts.map((d) => ({ ...d, code: d.district_code ?? null })) as any
-        }
+        options={districts.map((d) => ({ ...d, code: d.district_code ?? null })) as any}
         loading={districtsLoading}
         onSelect={(v: any) => setDistrictSel(v)}
         sheetRef={districtRef}
@@ -1231,9 +1434,7 @@ export default function NewTripRequest() {
       <EntityPickerSheet
         title={t.nearStation}
         value={locationSel as any}
-        options={
-          locations.map((l) => ({ ...l, code: l.location_code ?? null })) as any
-        }
+        options={locations.map((l) => ({ ...l, code: l.location_code ?? null })) as any}
         loading={locationsLoading}
         onSelect={(v: any) => setLocationSel(v)}
         sheetRef={locationRef}
@@ -1241,7 +1442,6 @@ export default function NewTripRequest() {
       />
 
       <ScrollView contentContainerClassName="p-4 pb-10">
-        {/* Header */}
         <View className="mb-3 flex-row items-center justify-between">
           <View>
             <Text className="text-lg font-bold text-[#2b2b2b]">{t.title}</Text>
@@ -1258,18 +1458,13 @@ export default function NewTripRequest() {
                 {isOnline ? t.online : t.offline}
               </Text>
               {syncing ? (
-                <Text className="text-[11px] text-[#7a6f66]">
-                  {" "}
-                  • {t.syncing}
-                </Text>
+                <Text className="text-[11px] text-[#7a6f66]"> • {t.syncing}</Text>
               ) : null}
             </View>
 
             {meLoading ? (
               <View className="mt-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2">
-                <Text className="text-xs font-semibold text-blue-800">
-                  {t.meLoading}
-                </Text>
+                <Text className="text-xs font-semibold text-blue-800">{t.meLoading}</Text>
               </View>
             ) : null}
 
@@ -1300,16 +1495,13 @@ export default function NewTripRequest() {
           </Pressable>
         </View>
 
-        {/* Owner Card */}
         <Card className="p-4">
           <View className="flex-row justify-between">
             <View>
               <Label>{t.ownerName}:</Label>
-              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">
-                {ownerName || "—"}
-              </Text>
+              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">{ownerName || "—"}</Text>
               <Text className="mt-1 text-[11px] text-[#7a6f66]">
-                Owner Code: {ownerCode || "—"}
+                Owner Code: {ownerCode || "—"} | Owner DB ID: {ownerDbId ? String(ownerDbId) : "—"}
               </Text>
             </View>
             <View>
@@ -1321,11 +1513,8 @@ export default function NewTripRequest() {
           </View>
         </Card>
 
-        {/* Trip Details */}
         <View className="mt-4">
-          <Text className="text-base font-bold text-[#2b2b2b]">
-            {t.tripDetails}
-          </Text>
+          <Text className="text-base font-bold text-[#2b2b2b]">{t.tripDetails}</Text>
 
           <Card className="mt-3 p-4">
             <Label>{t.tripName}</Label>
@@ -1333,14 +1522,11 @@ export default function NewTripRequest() {
               <Text className="text-base text-[#2b2b2b]">{tripName}</Text>
             </FieldBox>
 
-            {/* Vessel */}
             <View className="mt-3">
               <FieldBox>
-                <Pressable
-                  onPress={() => vesselRef.current?.present()}
-                  className="active:opacity-80"
-                >
+                <Pressable onPress={() => vesselRef.current?.present()} className="active:opacity-80">
                   <Label>{t.vessel}</Label>
+
                   <Text
                     className={`mt-1 text-base ${
                       vesselSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"
@@ -1348,45 +1534,95 @@ export default function NewTripRequest() {
                   >
                     {vesselSel?.name || t.select}
                   </Text>
-                  <Text className="mt-1 text-[11px] text-[#b1a59a]">
-                    {t.tapToSelect}
-                  </Text>
+
+                  {vesselSel?.subName ? (
+                    <Text className="mt-1 text-[11px] text-[#7a6f66]">{vesselSel.subName}</Text>
+                  ) : null}
+
+                  <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
                 </Pressable>
               </FieldBox>
             </View>
 
-            {/* Method */}
             <View className="mt-3">
               <FieldBox>
-                <Pressable
-                  onPress={() => methodRef.current?.present()}
-                  className="active:opacity-80"
-                >
+                <Pressable onPress={() => methodRef.current?.present()} className="active:opacity-80">
                   <Label>{t.fishingMethod}</Label>
-                  <Text
-                    className={`mt-1 text-base ${
-                      method ? "text-[#2b2b2b]" : "text-[#b1a59a]"
-                    }`}
-                  >
-                    {method || t.select}
-                  </Text>
-                  <Text className="mt-1 text-[11px] text-[#b1a59a]">
-                    {t.tapToSelect}
-                  </Text>
+
+                  <View className="flex-row items-center mt-1">
+                    {methodSel?.image_url ? (
+                      <Image
+                        source={{ uri: String(methodSel.image_url) }}
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 10,
+                          marginRight: 10,
+                          backgroundColor: "#f2e8df",
+                        }}
+                        resizeMode="cover"
+                      />
+                    ) : null}
+                    <Text
+                      className={`text-base ${
+                        methodSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"
+                      }`}
+                    >
+                      {methodSel?.name || t.select}
+                    </Text>
+                  </View>
+
+                  <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
                 </Pressable>
               </FieldBox>
             </View>
 
-            {/* State */}
+            {/* ✅ NEW: Fish species picker */}
             <View className="mt-3">
               <FieldBox>
-                <Pressable
-                  onPress={() => stateRef.current?.present()}
-                  className="active:opacity-80"
-                >
+                <Pressable onPress={() => fishRef.current?.present()} className="active:opacity-80">
+                  <Label>{t.fishSpecies}</Label>
+
+                  <View className="flex-row items-center mt-1">
+                    {fishSel?.image_url ? (
+                      <Image
+                        source={{ uri: String(fishSel.image_url) }}
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 10,
+                          marginRight: 10,
+                          backgroundColor: "#f2e8df",
+                        }}
+                        resizeMode="cover"
+                      />
+                    ) : null}
+                    <Text
+                      className={`text-base ${
+                        fishSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"
+                      }`}
+                    >
+                      {fishSel?.name || t.select}
+                    </Text>
+                  </View>
+
+                  {fishSel?.code ? (
+                    <Text className="mt-1 text-[11px] text-[#7a6f66]">Code: {fishSel.code}</Text>
+                  ) : null}
+
+                  <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
+                </Pressable>
+              </FieldBox>
+            </View>
+
+            <View className="mt-3">
+              <FieldBox>
+                <Pressable onPress={() => stateRef.current?.present()} className="active:opacity-80">
                   <Label>{t.state}</Label>
                   <Text
-                    className={`mt-1 text-base ${stateSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}
+                    className={`mt-1 text-base ${
+                      stateSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"
+                    }`}
                   >
                     {stateSel?.name || t.select}
                   </Text>
@@ -1394,7 +1630,6 @@ export default function NewTripRequest() {
               </FieldBox>
             </View>
 
-            {/* District */}
             <View className="mt-3">
               <FieldBox>
                 <Pressable
@@ -1406,7 +1641,9 @@ export default function NewTripRequest() {
                 >
                   <Label>{t.district}</Label>
                   <Text
-                    className={`mt-1 text-base ${districtSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}
+                    className={`mt-1 text-base ${
+                      districtSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"
+                    }`}
                   >
                     {districtSel?.name || t.select}
                   </Text>
@@ -1414,41 +1651,37 @@ export default function NewTripRequest() {
               </FieldBox>
             </View>
 
-            {/* Location */}
             <View className="mt-3">
               <FieldBox>
                 <Pressable
                   onPress={() => {
-                    if (!districtSel?.id)
-                      return Alert.alert(t.title, t.errDistrict);
+                    if (!districtSel?.id) return Alert.alert(t.title, t.errDistrict);
                     locationRef.current?.present();
                   }}
                   className="active:opacity-80"
                 >
                   <Label>{t.nearStation}</Label>
                   <Text
-                    className={`mt-1 text-base ${locationSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}
+                    className={`mt-1 text-base ${
+                      locationSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"
+                    }`}
                   >
                     {locationSel?.name || t.select}
                   </Text>
 
                   {locationSel ? (
                     <Text className="mt-1 text-[11px] text-[#7a6f66]">
-                      Payload near_station(name): {locationSel.name} | payload
-                      location_id: {locationSel.id} | derived state_id:{" "}
-                      {locationSel.state_id} | derived district_id:{" "}
-                      {locationSel.district_id}
+                      Payload near_station(name): {locationSel.name} | payload location_id:{" "}
+                      {locationSel.id} | derived state_id: {locationSel.state_id} | derived
+                      district_id: {locationSel.district_id}
                     </Text>
                   ) : (
-                    <Text className="mt-1 text-[11px] text-[#b1a59a]">
-                      {t.tapToSelect}
-                    </Text>
+                    <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
                   )}
                 </Pressable>
               </FieldBox>
             </View>
 
-            {/* Planned datetime */}
             <View className="mt-3">
               <FieldBox>
                 <Pressable
@@ -1457,7 +1690,9 @@ export default function NewTripRequest() {
                 >
                   <Label>{t.plannedTripDT}</Label>
                   <Text
-                    className={`mt-1 text-base ${plannedStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}
+                    className={`mt-1 text-base ${
+                      plannedStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"
+                    }`}
                   >
                     {plannedStr || t.select}
                   </Text>
@@ -1470,8 +1705,7 @@ export default function NewTripRequest() {
                   mode="date"
                   display={Platform.OS === "ios" ? "spinner" : "default"}
                   onChange={(e, date) => {
-                    if ((e as any).type === "dismissed")
-                      return setShowPlannedDate(false);
+                    if ((e as any).type === "dismissed") return setShowPlannedDate(false);
                     setShowPlannedDate(false);
                     if (date) {
                       const base = plannedDT ?? new Date();
@@ -1490,8 +1724,7 @@ export default function NewTripRequest() {
                   mode="time"
                   display={Platform.OS === "ios" ? "spinner" : "default"}
                   onChange={(e, date) => {
-                    if ((e as any).type === "dismissed")
-                      return setShowPlannedTime(false);
+                    if ((e as any).type === "dismissed") return setShowPlannedTime(false);
                     setShowPlannedTime(false);
                     if (date) {
                       const base = plannedDT ?? new Date();
@@ -1506,25 +1739,16 @@ export default function NewTripRequest() {
           </Card>
         </View>
 
-        {/* Crew */}
         <View className="mt-4">
-          <Text className="text-base font-bold text-[#2b2b2b]">
-            {t.crewDetails}
-          </Text>
+          <Text className="text-base font-bold text-[#2b2b2b]">{t.crewDetails}</Text>
 
           <Card className="mt-3 p-4">
             <View className="flex-row items-start">
               <View className="flex-1 pr-3">
-                <Text
-                  className="text-sm font-semibold text-[#2b2b2b]"
-                  numberOfLines={1}
-                >
+                <Text className="text-sm font-semibold text-[#2b2b2b]" numberOfLines={1}>
                   {t.crewMembers}: {crewCount}
                 </Text>
-                <Text
-                  className="mt-1 text-[11px] text-[#7a6f66]"
-                  numberOfLines={2}
-                >
+                <Text className="mt-1 text-[11px] text-[#7a6f66]" numberOfLines={2}>
                   {t.crewHelp}
                 </Text>
               </View>
@@ -1536,9 +1760,7 @@ export default function NewTripRequest() {
                   className="h-10 w-10 items-center justify-center rounded-full border border-[#ead7c8] bg-white active:opacity-80"
                   style={{ opacity: crewCount === 0 ? 0.45 : 1 }}
                 >
-                  <Text className="text-base font-extrabold text-[#2b2b2b]">
-                    −
-                  </Text>
+                  <Text className="text-base font-extrabold text-[#2b2b2b]">−</Text>
                 </Pressable>
 
                 <View style={{ width: 10 }} />
@@ -1547,30 +1769,24 @@ export default function NewTripRequest() {
                   onPress={() => setCrewCount((c) => c + 1)}
                   className="h-10 w-10 items-center justify-center rounded-full border border-[#a06b2a] bg-[#fff3e7] active:opacity-80"
                 >
-                  <Text className="text-base font-extrabold text-[#7a4a12]">
-                    +
-                  </Text>
+                  <Text className="text-base font-extrabold text-[#7a4a12]">+</Text>
                 </Pressable>
               </View>
             </View>
           </Card>
         </View>
 
-        {/* Planning + Costs */}
         <View className="mt-4">
-          <Text className="text-base font-bold text-[#2b2b2b]">
-            {t.planning}
-          </Text>
+          <Text className="text-base font-bold text-[#2b2b2b]">{t.planning}</Text>
 
           <Card className="mt-3 p-4">
             <FieldBox>
-              <Pressable
-                onPress={() => setShowReturnPicker(true)}
-                className="active:opacity-80"
-              >
+              <Pressable onPress={() => setShowReturnPicker(true)} className="active:opacity-80">
                 <Label>{t.expectedReturn}</Label>
                 <Text
-                  className={`mt-1 text-base ${returnStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}
+                  className={`mt-1 text-base ${
+                    returnStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"
+                  }`}
                 >
                   {returnStr || t.select}
                 </Text>
@@ -1583,8 +1799,7 @@ export default function NewTripRequest() {
                 mode="date"
                 display={Platform.OS === "ios" ? "spinner" : "default"}
                 onChange={(e, date) => {
-                  if ((e as any).type === "dismissed")
-                    return setShowReturnPicker(false);
+                  if ((e as any).type === "dismissed") return setShowReturnPicker(false);
                   setShowReturnPicker(false);
                   if (date) setExpectedReturn(date);
                 }}
@@ -1599,9 +1814,7 @@ export default function NewTripRequest() {
                   value={qrCount}
                   onChangeText={(v) => setQrCount(onlyInt(v))}
                   placeholder={t.qrCountPH}
-                  keyboardType={
-                    Platform.OS === "ios" ? "number-pad" : "numeric"
-                  }
+                  keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
                   inputMode="numeric"
                   className="mt-1 text-base text-[#2b2b2b]"
                 />
@@ -1609,39 +1822,29 @@ export default function NewTripRequest() {
             </View>
 
             <View className="mt-4">
-              <Text className="text-sm font-bold text-[#2b2b2b]">
-                {t.suppliesCost}
-              </Text>
+              <Text className="text-sm font-bold text-[#2b2b2b]">{t.suppliesCost}</Text>
 
               <View className="mt-3">
                 <Label>{t.diesel}</Label>
                 <View className="mt-2 flex-row gap-3">
                   <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
-                    <Text className="text-[11px] text-[#7a6f66]">
-                      {t.liters}
-                    </Text>
+                    <Text className="text-[11px] text-[#7a6f66]">{t.liters}</Text>
                     <TextInput
                       value={dieselLiters}
                       onChangeText={(v) => setDieselLiters(onlyDecimal(v))}
                       placeholder="e.g. 120"
-                      keyboardType={
-                        Platform.OS === "ios" ? "decimal-pad" : "numeric"
-                      }
+                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
                       inputMode="decimal"
                       className="mt-1 text-base text-[#2b2b2b]"
                     />
                   </View>
                   <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
-                    <Text className="text-[11px] text-[#7a6f66]">
-                      {t.ratePerLiter}
-                    </Text>
+                    <Text className="text-[11px] text-[#7a6f66]">{t.ratePerLiter}</Text>
                     <TextInput
                       value={dieselRate}
                       onChangeText={(v) => setDieselRate(onlyDecimal(v))}
                       placeholder="e.g. 95"
-                      keyboardType={
-                        Platform.OS === "ios" ? "decimal-pad" : "numeric"
-                      }
+                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
                       inputMode="decimal"
                       className="mt-1 text-base text-[#2b2b2b]"
                     />
@@ -1664,24 +1867,18 @@ export default function NewTripRequest() {
                       value={iceKg}
                       onChangeText={(v) => setIceKg(onlyDecimal(v))}
                       placeholder="e.g. 60"
-                      keyboardType={
-                        Platform.OS === "ios" ? "decimal-pad" : "numeric"
-                      }
+                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
                       inputMode="decimal"
                       className="mt-1 text-base text-[#2b2b2b]"
                     />
                   </View>
                   <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
-                    <Text className="text-[11px] text-[#7a6f66]">
-                      {t.ratePerKg}
-                    </Text>
+                    <Text className="text-[11px] text-[#7a6f66]">{t.ratePerKg}</Text>
                     <TextInput
                       value={iceRate}
                       onChangeText={(v) => setIceRate(onlyDecimal(v))}
                       placeholder="e.g. 15"
-                      keyboardType={
-                        Platform.OS === "ios" ? "decimal-pad" : "numeric"
-                      }
+                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
                       inputMode="decimal"
                       className="mt-1 text-base text-[#2b2b2b]"
                     />
@@ -1697,18 +1894,13 @@ export default function NewTripRequest() {
 
               <View className="mt-4 rounded-2xl border border-[#a06b2a] bg-[#fff3e7] px-4 py-3">
                 <Text className="text-xs text-[#7a4a12]">{t.totalCost}</Text>
-                <Text className="mt-1 text-lg font-extrabold text-[#2b2b2b]">
-                  {money(totalCost)}
-                </Text>
-                <Text className="mt-1 text-[11px] text-[#7a6f66]">
-                  {t.totalHelp}
-                </Text>
+                <Text className="mt-1 text-lg font-extrabold text-[#2b2b2b]">{money(totalCost)}</Text>
+                <Text className="mt-1 text-[11px] text-[#7a6f66]">{t.totalHelp}</Text>
               </View>
             </View>
           </Card>
         </View>
 
-        {/* Actions */}
         <View className="mt-6 flex-row gap-3">
           <Pressable
             onPress={() => router.back()}
@@ -1716,9 +1908,7 @@ export default function NewTripRequest() {
             className="flex-1 rounded-2xl border border-[#ead7c8] bg-white p-4 active:opacity-80"
             style={{ opacity: posting ? 0.7 : 1 }}
           >
-            <Text className="text-center text-[#2b2b2b] font-semibold">
-              {t.cancel}
-            </Text>
+            <Text className="text-center text-[#2b2b2b] font-semibold">{t.cancel}</Text>
           </Pressable>
 
           <Pressable
@@ -1727,9 +1917,7 @@ export default function NewTripRequest() {
             className="flex-1 rounded-2xl bg-[#a06b2a] p-4 active:opacity-90"
             style={{ opacity: posting ? 0.7 : 1 }}
           >
-            <Text className="text-center text-white font-semibold">
-              {posting ? "..." : t.submit}
-            </Text>
+            <Text className="text-center text-white font-semibold">{posting ? "..." : t.submit}</Text>
           </Pressable>
         </View>
       </ScrollView>

@@ -38,8 +38,13 @@ export const submitCatchLog = createAsyncThunk<any, CatchLogPayload>(
   "catchLog/submitCatchLog",
   async (payload, { rejectWithValue }) => {
     try {
-      // hard proof
-      console.log("THUNK payload fishId:", payload.fishId);
+      console.log("THUNK payload:", {
+        fishId: payload.fishId,
+        vesselId: (payload as any).vesselId,
+        rvVesselId: (payload as any).rvVesselId,
+        tripId: payload.tripId,
+        linkedCrateId: payload.linkedCrateId,
+      });
       return await apiSubmitCatchLog(payload);
     } catch (e: any) {
       return rejectWithValue(e?.message || "Submit failed");
