@@ -1205,65 +1205,64 @@ export default function MyTrips() {
                       </Pressable>
 
                       {/* ✅ if COMPLETED => no Catch Log */}
-                      {detailsView.status !== "COMPLETED" ? (
-                        <Pressable
-                          onPress={() => {
-                            const tripIdForCatch =
-                              detailsView.trip_id && detailsView.trip_id !== "-"
-                                ? detailsView.trip_id
-                                : "";
-                            if (!tripIdForCatch) {
-                              Alert.alert("Trip ID missing", "trip_id not found to open Catch Log.");
-                              return;
-                            }
+                      {/* ✅ Catch Log ONLY when APPROVED */}
+{detailsView.status === "APPROVED" ? (
+  <Pressable
+    onPress={() => {
+      const tripIdForCatch =
+        detailsView.trip_id && detailsView.trip_id !== "-"
+          ? detailsView.trip_id
+          : "";
+      if (!tripIdForCatch) {
+        Alert.alert("Trip ID missing", "trip_id not found to open Catch Log.");
+        return;
+      }
 
-                            // ✅ pass vesselId + tripRowId + ownerCode (so CatchLog Create won't ask again)
-                            const vesselIdForCatch =
-                              detailsView.vessel_id && detailsView.vessel_id !== "-"
-                                ? detailsView.vessel_id
-                                : "";
-                            const ownerForCatch =
-                              detailsView.owner_code && detailsView.owner_code !== "-"
-                                ? detailsView.owner_code
-                                : String(ownerCode ?? "").trim();
+      const vesselIdForCatch =
+        detailsView.vessel_id && detailsView.vessel_id !== "-"
+          ? detailsView.vessel_id
+          : "";
+      const ownerForCatch =
+        detailsView.owner_code && detailsView.owner_code !== "-"
+          ? detailsView.owner_code
+          : String(ownerCode ?? "").trim();
 
-                            // ✅ NEW: rv vessel id/code (from details first, else from cache map)
-                            const rvVesselIdForCatch =
-                              normalizeText(
-                                (detailsData as any)?.rv_vessel_id ??
-                                  (detailsData as any)?.rvVesselId ??
-                                  (detailsData as any)?.vessel?.rv_vessel_id ??
-                                  (detailsData as any)?.vessel?.rvVesselId
-                              ) ||
-                              (vesselIdForCatch
-                                ? normalizeText(vesselRvIdMap[String(vesselIdForCatch)])
-                                : "");
+      const rvVesselIdForCatch =
+        normalizeText(
+          (detailsData as any)?.rv_vessel_id ??
+            (detailsData as any)?.rvVesselId ??
+            (detailsData as any)?.vessel?.rv_vessel_id ??
+            (detailsData as any)?.vessel?.rvVesselId
+        ) ||
+        (vesselIdForCatch
+          ? normalizeText(vesselRvIdMap[String(vesselIdForCatch)])
+          : "");
 
-                            const qs =
-                              `tripId=${encodeURIComponent(String(tripIdForCatch))}` +
-                              (vesselIdForCatch
-                                ? `&vesselId=${encodeURIComponent(String(vesselIdForCatch))}`
-                                : "") +
-                              (rvVesselIdForCatch
-                                ? `&rvVesselId=${encodeURIComponent(String(rvVesselIdForCatch))}`
-                                : "") +
-                              (ownerForCatch
-                                ? `&ownerCode=${encodeURIComponent(String(ownerForCatch))}`
-                                : "") +
-                              (detailsView.id
-                                ? `&tripRowId=${encodeURIComponent(String(detailsView.id))}`
-                                : "");
+      const qs =
+        `tripId=${encodeURIComponent(String(tripIdForCatch))}` +
+        (vesselIdForCatch
+          ? `&vesselId=${encodeURIComponent(String(vesselIdForCatch))}`
+          : "") +
+        (rvVesselIdForCatch
+          ? `&rvVesselId=${encodeURIComponent(String(rvVesselIdForCatch))}`
+          : "") +
+        (ownerForCatch
+          ? `&ownerCode=${encodeURIComponent(String(ownerForCatch))}`
+          : "") +
+        (detailsView.id
+          ? `&tripRowId=${encodeURIComponent(String(detailsView.id))}`
+          : "");
 
-                            closeTripDetails();
-                            router.push(`/(wild)/catch-logs/create?${qs}` as const);
-                          }}
-                          className="flex-1 rounded-2xl bg-[#136f2d] px-4 py-4 active:opacity-90"
-                        >
-                          <Text className="text-center text-base font-extrabold text-white">
-                            Catch Log
-                          </Text>
-                        </Pressable>
-                      ) : null}
+      closeTripDetails();
+      router.push(`/(wild)/catch-logs/create?${qs}` as const);
+    }}
+    className="flex-1 rounded-2xl bg-[#136f2d] px-4 py-4 active:opacity-90"
+  >
+    <Text className="text-center text-base font-extrabold text-white">
+      Catch Log
+    </Text>
+  </Pressable>
+) : null}
                     </View>
                   </>
                 )}

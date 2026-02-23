@@ -1,10 +1,12 @@
-import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
+// app/(wild)/trips/create.tsx  (or your current path)
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { router } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  FlatList,
   Image,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -12,6 +14,8 @@ import {
   TextInput,
   View,
 } from "react-native";
+
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
@@ -46,6 +50,9 @@ const i18n = {
 
     fishSpecies: "Fish Species",
     errFishSpecies: "Select fish species",
+
+    country: "Country",
+    errCountry: "Select country",
 
     state: "State",
     district: "District",
@@ -114,6 +121,9 @@ const i18n = {
 
     fishSpecies: "மீன் வகை (Fish)",
     errFishSpecies: "மீன் வகையை தேர்வு செய்யவும்",
+
+    country: "நாடு",
+    errCountry: "நாடு தேர்வு செய்யவும்",
 
     state: "மாநிலம்",
     district: "மாவட்டம்",
@@ -225,6 +235,20 @@ function toNum(v: string) {
 }
 function money(n: number) {
   return `₹${n.toFixed(2)}`;
+}
+
+function sanitizeImageUrl(u: any): string {
+  let s = String(u ?? "").trim();
+  if (!s) return "";
+  s = s.replace(/^"+|"+$/g, "");
+  s = s.replace(/%22/gi, "");
+  s = s.replace(/"/g, "");
+  s = s.replace(/,+$/g, "");
+  s = s.trim();
+  try {
+    s = encodeURI(s);
+  } catch {}
+  return s;
 }
 
 // ✅ keep your mapping helper (fallback)
@@ -370,7 +394,18 @@ function makeTripName(regNo: string) {
 }
 
 /* ---------------- GEO TYPES ---------------- */
-type StateItem = { id: number; name: string; state_code?: string | null };
+type CountryItem = { id: number; name: string; code?: string | null };
+
+type StateItem = {
+  id: number;
+  name: string;
+  state_code?: string | null;
+
+  country_id?: number | null;
+  country_name?: string | null;
+  country_code?: string | null;
+};
+
 type DistrictItem = {
   id: number;
   name: string;
@@ -508,137 +543,292 @@ async function writeListCache<T>(key: string, items: T[]) {
   } catch {}
 }
 
-/* ---------------- BottomSheet generic picker ---------------- */
-type PickerBase = {
-  id: number;
-  name: string;
-  code?: string | null;
-  subName?: string; // vessel_name
-  image_url?: string | null; // ✅ NEW (methods/fish types)
+/* ---------------- FULL SCREEN PICKER (LIKE CATCHLOG) ---------------- */
+type FullPickMode = "grid" | "list";
+
+type FullPickItem = {
+  key: string;
+  label: string;
+  subtitle?: string;
+  imageUri?: string | null;
 };
 
-function EntityPickerSheet<T extends PickerBase>({
+function FullScreenPickerModal({
+  visible,
   title,
-  value,
-  options,
-  loading,
-  onSelect,
-  sheetRef,
-  emptyText,
+  items,
+  selectedKey,
+  onClose,
+  onConfirm,
+  confirmLabel,
+  searchPlaceholder,
+  mode,
+  numColumns,
+  showImages,
+  insetsBottom,
 }: {
+  visible: boolean;
   title: string;
-  value: T | null;
-  options: T[];
-  loading?: boolean;
-  onSelect: (v: T) => void;
-  sheetRef: React.RefObject<BottomSheetModal>;
-  emptyText?: string;
+  items: FullPickItem[];
+  selectedKey: string;
+  onClose: () => void;
+  onConfirm: (item: FullPickItem) => void;
+
+  confirmLabel: string;
+  searchPlaceholder: string;
+
+  mode: FullPickMode;
+  numColumns: number;
+  showImages: boolean;
+  insetsBottom: number;
 }) {
-  const snapPoints = useMemo(() => ["45%", "75%"], []);
   const [q, setQ] = useState("");
+  const [tempKey, setTempKey] = useState<string>("");
+
+  useEffect(() => {
+    if (!visible) return;
+    setQ("");
+    setTempKey(selectedKey || "");
+  }, [visible, selectedKey]);
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
-    if (!t) return options;
-    return options.filter(
-      (x) =>
-        x.name.toLowerCase().includes(t) ||
-        String(x.subName || "").toLowerCase().includes(t) ||
-        String(x.code || "").toLowerCase().includes(t),
-    );
-  }, [q, options]);
+    if (!t) return items;
+    return items.filter((x) => {
+      const a = String(x.label || "").toLowerCase();
+      const b = String(x.subtitle || "").toLowerCase();
+      return a.includes(t) || b.includes(t);
+    });
+  }, [q, items]);
 
-  return (
-    <BottomSheetModal
-      ref={sheetRef}
-      snapPoints={snapPoints}
-      enablePanDownToClose
-      backgroundStyle={{ borderRadius: 24 }}
-      handleIndicatorStyle={{ opacity: 0.35 }}
-    >
-      <BottomSheetView style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
-        <View className="flex-row items-center justify-between">
-          <Text className="text-base font-bold text-[#2b2b2b]">{title}</Text>
-          <Pressable
-            onPress={() => sheetRef.current?.dismiss()}
-            className="rounded-full px-3 py-2 active:opacity-80"
-          >
-            <Text className="text-sm font-semibold text-[#a06b2a]">Done</Text>
-          </Pressable>
+  const selectedItem = useMemo(() => {
+    return items.find((x) => x.key === tempKey) || null;
+  }, [items, tempKey]);
+
+  const ACCENT = "#93c5fd";
+  const BG = "#0b0f17";
+  const CARD_BG = "rgba(255,255,255,0.06)";
+  const BORDER = "rgba(255,255,255,0.10)";
+
+  const renderGrid = ({ item }: { item: FullPickItem }) => {
+    const active = item.key === tempKey;
+    const uri = showImages ? sanitizeImageUrl(item.imageUri) : "";
+
+    return (
+      <Pressable
+        onPress={() => setTempKey(item.key)}
+        style={{
+          flex: 1,
+          marginBottom: 14,
+          marginHorizontal: 8,
+          borderRadius: 18,
+          borderWidth: 2,
+          borderColor: active ? ACCENT : "transparent",
+          backgroundColor: CARD_BG,
+          overflow: "hidden",
+        }}
+      >
+        <View
+          style={{
+            height: 128,
+            backgroundColor: "#e8f1ff",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {uri ? (
+            <Image
+              source={{ uri }}
+              style={{ width: "100%", height: "100%" }}
+              resizeMode="contain"
+            />
+          ) : (
+            <View
+              style={{
+                width: "100%",
+                height: "100%",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text style={{ color: "#64748b", fontWeight: "800" }}>No Image</Text>
+            </View>
+          )}
         </View>
 
-        <View className="mt-3 rounded-xl border border-[#ead7c8] bg-[#fbf6f1] px-3 py-2">
+        <View
+          style={{
+            paddingVertical: 12,
+            paddingHorizontal: 12,
+            backgroundColor: "rgba(0,0,0,0.55)",
+          }}
+        >
+          <Text style={{ color: "white", fontWeight: "800", fontSize: 14 }} numberOfLines={2}>
+            {item.label}
+          </Text>
+          {!!item.subtitle ? (
+            <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: 11, marginTop: 4 }} numberOfLines={1}>
+              {item.subtitle}
+            </Text>
+          ) : null}
+        </View>
+      </Pressable>
+    );
+  };
+
+  const renderList = ({ item }: { item: FullPickItem }) => {
+    const active = item.key === tempKey;
+    return (
+      <Pressable
+        onPress={() => setTempKey(item.key)}
+        style={{
+          marginBottom: 10,
+          borderRadius: 18,
+          borderWidth: 1,
+          borderColor: active ? ACCENT : BORDER,
+          backgroundColor: active ? "rgba(147,197,253,0.10)" : CARD_BG,
+          paddingVertical: 14,
+          paddingHorizontal: 14,
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ color: "white", fontWeight: "800", fontSize: 15 }} numberOfLines={2}>
+              {item.label}
+            </Text>
+            {!!item.subtitle ? (
+              <Text style={{ color: "rgba(255,255,255,0.70)", fontSize: 12, marginTop: 4 }} numberOfLines={1}>
+                {item.subtitle}
+              </Text>
+            ) : null}
+          </View>
+
+          <View style={{ marginLeft: 12 }}>
+            <Text style={{ color: active ? ACCENT : "rgba(255,255,255,0.60)", fontWeight: "900" }}>
+              {active ? "✓" : "›"}
+            </Text>
+          </View>
+        </View>
+      </Pressable>
+    );
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: BG }}>
+        {/* Header */}
+        <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingTop: 6 }}>
+          <Pressable
+            onPress={onClose}
+            style={{ padding: 10, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.08)" }}
+          >
+            <Text style={{ color: "white", fontWeight: "900", fontSize: 16 }}>←</Text>
+          </Pressable>
+
+          <Text style={{ color: "white", fontWeight: "900", fontSize: 18, marginLeft: 12, flex: 1 }} numberOfLines={1}>
+            {title}
+          </Text>
+        </View>
+
+        {/* Search */}
+        <View
+          style={{
+            marginTop: 14,
+            marginHorizontal: 14,
+            borderRadius: 16,
+            borderWidth: 1,
+            borderColor: "rgba(255,255,255,0.12)",
+            backgroundColor: "rgba(255,255,255,0.06)",
+            flexDirection: "row",
+            alignItems: "center",
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+          }}
+        >
+          <Text style={{ color: "rgba(255,255,255,0.70)", fontWeight: "900" }}>🔎</Text>
           <TextInput
             value={q}
             onChangeText={setQ}
-            placeholder="Search..."
-            className="text-base text-[#2b2b2b]"
+            placeholder={searchPlaceholder}
+            placeholderTextColor="rgba(255,255,255,0.55)"
+            style={{
+              color: "white",
+              marginLeft: 10,
+              fontSize: 16,
+              flex: 1,
+              paddingVertical: 2,
+            }}
           />
+          {q ? (
+            <Pressable onPress={() => setQ("")} style={{ padding: 6 }}>
+              <Text style={{ color: "rgba(255,255,255,0.60)", fontWeight: "900" }}>✕</Text>
+            </Pressable>
+          ) : null}
         </View>
 
-        <ScrollView className="mt-3" keyboardShouldPersistTaps="handled">
-          {loading ? (
-            <View className="py-6 items-center">
-              <Text className="text-sm text-[#7a6f66]">Loading...</Text>
-            </View>
-          ) : filtered.length === 0 ? (
-            <View className="py-6 items-center">
-              <Text className="text-sm text-[#7a6f66]">{emptyText || "No data"}</Text>
-            </View>
+        {/* List/Grid */}
+        <View style={{ flex: 1, paddingTop: 14 }}>
+          {mode === "grid" ? (
+            <FlatList
+              data={filtered}
+              key={`grid_${numColumns}`}
+              keyExtractor={(it) => it.key}
+              numColumns={numColumns}
+              contentContainerStyle={{ paddingHorizontal: 6, paddingBottom: 120 + insetsBottom }}
+              renderItem={renderGrid}
+              showsVerticalScrollIndicator={false}
+            />
           ) : (
-            filtered.map((item) => {
-              const active = item.id === value?.id;
-              return (
-                <Pressable
-                  key={String(item.id)}
-                  onPress={() => {
-                    onSelect(item);
-                    sheetRef.current?.dismiss();
-                  }}
-                  className={`mb-2 rounded-xl border px-4 py-3 active:opacity-80 ${
-                    active ? "border-[#a06b2a] bg-[#fff3e7]" : "border-[#ead7c8] bg-white"
-                  }`}
-                >
-                  <View className="flex-row items-center">
-                    {item.image_url ? (
-                      <Image
-                        source={{ uri: String(item.image_url) }}
-                        style={{
-                          width: 34,
-                          height: 34,
-                          borderRadius: 10,
-                          marginRight: 10,
-                          backgroundColor: "#f2e8df",
-                        }}
-                        resizeMode="cover"
-                      />
-                    ) : null}
-
-                    <View className="flex-1">
-                      <Text
-                        className={`text-sm font-semibold ${
-                          active ? "text-[#7a4a12]" : "text-[#2b2b2b]"
-                        }`}
-                      >
-                        {item.name}
-                      </Text>
-
-                      {item.subName ? (
-                        <Text className="mt-1 text-[11px] text-[#7a6f66]">{item.subName}</Text>
-                      ) : null}
-
-                      {item.code ? (
-                        <Text className="mt-1 text-[11px] text-[#7a6f66]">Code: {item.code}</Text>
-                      ) : null}
-                    </View>
-                  </View>
-                </Pressable>
-              );
-            })
+            <FlatList
+              data={filtered}
+              key="list"
+              keyExtractor={(it) => it.key}
+              contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 120 + insetsBottom }}
+              renderItem={renderList}
+              showsVerticalScrollIndicator={false}
+            />
           )}
-        </ScrollView>
-      </BottomSheetView>
-    </BottomSheetModal>
+        </View>
+
+        {/* Bottom fixed button */}
+        <View
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            paddingHorizontal: 14,
+            paddingTop: 12,
+            paddingBottom: 14 + insetsBottom,
+            backgroundColor: "rgba(11,15,23,0.92)",
+            borderTopWidth: 1,
+            borderTopColor: "rgba(255,255,255,0.08)",
+          }}
+        >
+          <Pressable
+            disabled={!selectedItem}
+            onPress={() => selectedItem && onConfirm(selectedItem)}
+            style={{
+              height: 52,
+              borderRadius: 999,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: selectedItem ? "#93c5fd" : "rgba(255,255,255,0.20)",
+            }}
+          >
+            <Text
+              style={{
+                fontWeight: "900",
+                fontSize: 16,
+                color: selectedItem ? "#0b0f17" : "rgba(255,255,255,0.70)",
+              }}
+            >
+              {confirmLabel}
+            </Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    </Modal>
   );
 }
 
@@ -713,9 +903,12 @@ async function flushTripQueue(send: (payload: TripCreatePayload) => Promise<any>
 /* ---------------- SCREEN ---------------- */
 export default function NewTripRequest() {
   const dispatch = useAppDispatch();
+  const insets = useSafeAreaInsets();
 
   const [lang, setLang] = useState<Lang>("ta");
   const t = i18n[lang];
+
+  const NEXT_LABEL = lang === "ta" ? "அடுத்து" : "Next";
 
   const [ownerName, setOwnerName] = useState("");
   const [registrationNo, setRegistrationNo] = useState("");
@@ -745,6 +938,11 @@ export default function NewTripRequest() {
   const [vesselSel, setVesselSel] = useState<VesselItem | null>(null);
   const [vesselsLoading, setVesselsLoading] = useState(false);
 
+  // ✅ NEW: Country + country-based states
+  const [countries, setCountries] = useState<CountryItem[]>([]);
+  const [countriesLoading, setCountriesLoading] = useState(false);
+  const [countrySel, setCountrySel] = useState<CountryItem | null>(null);
+
   const [states, setStates] = useState<StateItem[]>([]);
   const [districts, setDistricts] = useState<DistrictItem[]>([]);
   const [locations, setLocations] = useState<LocationItem[]>([]);
@@ -772,7 +970,10 @@ export default function NewTripRequest() {
   const [iceKg, setIceKg] = useState("");
   const [iceRate, setIceRate] = useState("15");
 
-  const dieselCost = useMemo(() => toNum(dieselLiters) * toNum(dieselRate), [dieselLiters, dieselRate]);
+  const dieselCost = useMemo(
+    () => toNum(dieselLiters) * toNum(dieselRate),
+    [dieselLiters, dieselRate],
+  );
   const iceCost = useMemo(() => toNum(iceKg) * toNum(iceRate), [iceKg, iceRate]);
   const totalCost = useMemo(() => dieselCost + iceCost, [dieselCost, iceCost]);
 
@@ -786,12 +987,16 @@ export default function NewTripRequest() {
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
 
-  const methodRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
-  const fishRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
-  const vesselRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
-  const stateRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
-  const districtRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
-  const locationRef = useRef<BottomSheetModal>(null) as React.RefObject<BottomSheetModal>;
+  // ✅ FULL SCREEN PICKERS (methods + fish + others)
+  const [methodPickerOpen, setMethodPickerOpen] = useState(false);
+  const [fishPickerOpen, setFishPickerOpen] = useState(false);
+  const [vesselPickerOpen, setVesselPickerOpen] = useState(false);
+
+  const [countryPickerOpen, setCountryPickerOpen] = useState(false);
+  const [statePickerOpen, setStatePickerOpen] = useState(false);
+
+  const [districtPickerOpen, setDistrictPickerOpen] = useState(false);
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
 
   const flushingRef = useRef(false);
 
@@ -887,12 +1092,9 @@ export default function NewTripRequest() {
     let alive = true;
 
     (async () => {
-      // show cache instantly
       const cached = await readListCache<FishingMethodItem>(FISHING_METHODS_CACHE_KEY);
       if (!alive) return;
-      if (cached?.length) {
-        setMethodOptions(cached);
-      }
+      if (cached?.length) setMethodOptions(cached);
 
       if (!isOnline) return;
 
@@ -913,7 +1115,6 @@ export default function NewTripRequest() {
 
         if (!alive) return;
 
-        // fallback if backend returns empty
         if (!list.length && !cached?.length) {
           const fallback = [
             { id: 1, name: "Pole & Line", code: "pole&line", image_url: null },
@@ -930,13 +1131,11 @@ export default function NewTripRequest() {
         setMethodOptions(list);
         await writeListCache(FISHING_METHODS_CACHE_KEY, list);
 
-        // keep selection valid (if already selected)
         if (methodSel?.id) {
           const still = list.find((m) => m.id === methodSel.id) || null;
           if (still) setMethodSel(still);
         }
-      } catch (e: any) {
-        // hard fallback if no cache and request fails
+      } catch {
         const fallback = [
           { id: 1, name: "Pole & Line", code: "pole&line", image_url: null },
           { id: 2, name: "Hook & Line", code: "hook&line", image_url: null },
@@ -992,8 +1191,8 @@ export default function NewTripRequest() {
           const still = list.find((f) => f.id === fishSel.id) || null;
           if (still) setFishSel(still);
         }
-      } catch (e: any) {
-        // no fake fallback here; use cache only if exists
+      } catch {
+        // keep cache
       } finally {
         if (alive) setFishLoading(false);
       }
@@ -1107,27 +1306,86 @@ export default function NewTripRequest() {
     };
   }, [ownerDbId, isOnline]);
 
+  // ✅ NEW: Load countries (same as vessel create)
   useEffect(() => {
     let alive = true;
     if (!isOnline) return;
 
     (async () => {
+      setCountriesLoading(true);
+      try {
+        const data = await geoGet<any>("/api/country");
+        const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        const list: CountryItem[] = arr
+          .map((x: any) => ({
+            id: toIntSafe(x?.id),
+            name: String(x?.name || "").trim(),
+            code: (String(x?.code || "").trim() || null) as any,
+          }))
+          .filter((x) => x.id && x.name);
+
+        if (!alive) return;
+
+        setCountries(list);
+
+        // keep old flow smooth: auto select first country (like vessel create)
+        if (!countrySel && list.length > 0) {
+          setCountrySel(list[0]);
+        }
+      } catch (e: any) {
+        console.warn("[COUNTRY FETCH]", String(e?.message || e));
+      } finally {
+        if (alive) setCountriesLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline]);
+
+  // ✅ NEW: country -> states (state API same as vessel create)
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      // reset below (but keep same UI/flow)
+      setStateSel(null);
+      setDistrictSel(null);
+      setLocationSel(null);
+
+      setStates([]);
+      setDistricts([]);
+      setLocations([]);
+
+      if (!countrySel?.id) return;
+      if (!isOnline) return;
+
       setStatesLoading(true);
       try {
-        const data = await geoGet<any>("/api/states");
+        const data = await geoGet<any>(
+          `/api/states/country/${encodeURIComponent(String(countrySel.id))}`,
+        );
+
         const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+
         const list: StateItem[] = arr
           .map((x: any) => ({
-            id: Number(x.id),
-            name: String(x.name || ""),
-            state_code: x.state_code ?? null,
+            id: toIntSafe(x?.id),
+            name: String(x?.name || "").trim(),
+            state_code: (String(x?.state_code || "").trim() || null) as any,
+
+            country_id: toIntSafe(x?.country_id) || countrySel.id,
+            country_name: (String(x?.country_name || "").trim() || null) as any,
+            country_code: (String(x?.country_code || "").trim() || null) as any,
           }))
-          .filter((x: any) => x.id && x.name);
+          .filter((x) => x.id && x.name);
 
         if (!alive) return;
         setStates(list);
       } catch (e: any) {
-        console.warn("[STATES FETCH]", String(e?.message || e));
+        console.warn("[STATES BY COUNTRY FETCH]", String(e?.message || e));
       } finally {
         if (alive) setStatesLoading(false);
       }
@@ -1136,7 +1394,7 @@ export default function NewTripRequest() {
     return () => {
       alive = false;
     };
-  }, [isOnline]);
+  }, [countrySel?.id, isOnline]);
 
   useEffect(() => {
     let alive = true;
@@ -1258,11 +1516,76 @@ export default function NewTripRequest() {
     };
   }, [dispatch, isOnline, ownerCode]);
 
+  // ✅ picker items
+  const methodPickItems: FullPickItem[] = useMemo(() => {
+    return (methodOptions || []).map((m) => ({
+      key: String(m.id),
+      label: m.name,
+      subtitle: m.code ? `Code: ${m.code}` : "",
+      imageUri: m.image_url || null,
+    }));
+  }, [methodOptions]);
+
+  const fishPickItems: FullPickItem[] = useMemo(() => {
+    return (fishOptions || []).map((f) => ({
+      key: String(f.id),
+      label: f.name,
+      subtitle: f.code ? `Code: ${f.code}` : "",
+      imageUri: f.image_url || null,
+    }));
+  }, [fishOptions]);
+
+  const vesselPickItems: FullPickItem[] = useMemo(() => {
+    return (vessels || []).map((v) => ({
+      key: String(v.id),
+      label: v.name,
+      subtitle: v.subName ? v.subName : "",
+      imageUri: null,
+    }));
+  }, [vessels]);
+
+  const countryPickItems: FullPickItem[] = useMemo(() => {
+    return (countries || []).map((c) => ({
+      key: String(c.id),
+      label: c.name,
+      subtitle: c.code ? `Code: ${c.code}` : "",
+      imageUri: null,
+    }));
+  }, [countries]);
+
+  const statePickItems: FullPickItem[] = useMemo(() => {
+    return (states || []).map((s) => ({
+      key: String(s.id),
+      label: s.name,
+      subtitle: s.state_code ? `Code: ${s.state_code}` : "",
+      imageUri: null,
+    }));
+  }, [states]);
+
+  const districtPickItems: FullPickItem[] = useMemo(() => {
+    return (districts || []).map((d) => ({
+      key: String(d.id),
+      label: d.name,
+      subtitle: d.district_code ? `Code: ${d.district_code}` : "",
+      imageUri: null,
+    }));
+  }, [districts]);
+
+  const locationPickItems: FullPickItem[] = useMemo(() => {
+    return (locations || []).map((l) => ({
+      key: String(l.id),
+      label: l.name,
+      subtitle: l.location_code ? `Code: ${l.location_code}` : "",
+      imageUri: null,
+    }));
+  }, [locations]);
+
   const submit = async () => {
     if (!methodSel?.id) return Alert.alert(t.title, t.errMethod);
     if (!fishSel?.id) return Alert.alert(t.title, t.errFishSpecies);
     if (!vesselSel?.id) return Alert.alert(t.title, t.errVessel);
 
+    if (!countrySel?.id) return Alert.alert(t.title, t.errCountry);
     if (!stateSel?.id) return Alert.alert(t.title, t.errState);
     if (!districtSel?.id) return Alert.alert(t.title, t.errDistrict);
     if (!locationSel?.id) return Alert.alert(t.title, t.errLocation);
@@ -1284,10 +1607,8 @@ export default function NewTripRequest() {
     const methodCode = (methodSel?.code || mapMethodToApi(methodSel?.name || "") || "").trim();
 
     const payload: TripCreatePayload = {
-      // ✅ keep old field for compatibility
       fishing_method: methodCode || mapMethodToApi(methodSel?.name || ""),
 
-      // ✅ new backend-required ids
       ...(methodSel?.id ? ({ fishing_method_id: Number(methodSel.id) } as any) : {}),
       ...(fishSel?.id ? ({ fish_species: Number(fishSel.id) } as any) : {}),
 
@@ -1307,8 +1628,7 @@ export default function NewTripRequest() {
       owner_code: ownerFinal || "",
       count: crewCount,
 
-      // ✅ keep approval_status (backend example)
-      ...( { approval_status: "pending" } as any ),
+      ...({ approval_status: "pending" } as any),
 
       ...(INCLUDE_STATE_DISTRICT_IN_PAYLOAD
         ? {
@@ -1382,63 +1702,147 @@ export default function NewTripRequest() {
   };
 
   return (
-    <View className="flex-1 bg-[#fbf6f1]">
-      <EntityPickerSheet
+    <SafeAreaView className="flex-1 bg-[#fbf6f1]">
+      {/* ✅ FULL SCREEN PICKERS */}
+      <FullScreenPickerModal
+        visible={methodPickerOpen}
         title={t.fishingMethod}
-        value={methodSel as any}
-        options={methodOptions as any}
-        loading={methodLoading}
-        onSelect={(v: any) => setMethodSel(v)}
-        sheetRef={methodRef}
-        emptyText={t.noData}
+        items={methodPickItems}
+        selectedKey={methodSel?.id ? String(methodSel.id) : ""}
+        mode="grid"
+        numColumns={2}
+        showImages={true}
+        confirmLabel={NEXT_LABEL}
+        searchPlaceholder="Search method..."
+        insetsBottom={insets.bottom}
+        onClose={() => setMethodPickerOpen(false)}
+        onConfirm={(item) => {
+          const id = toIntSafe(item.key);
+          const picked = methodOptions.find((m) => m.id === id) || null;
+          setMethodSel(picked);
+          setMethodPickerOpen(false);
+        }}
       />
 
-      <EntityPickerSheet
+      <FullScreenPickerModal
+        visible={fishPickerOpen}
         title={t.fishSpecies}
-        value={fishSel as any}
-        options={fishOptions as any}
-        loading={fishLoading}
-        onSelect={(v: any) => setFishSel(v)}
-        sheetRef={fishRef}
-        emptyText={t.noData}
+        items={fishPickItems}
+        selectedKey={fishSel?.id ? String(fishSel.id) : ""}
+        mode="grid"
+        numColumns={2}
+        showImages={true}
+        confirmLabel={NEXT_LABEL}
+        searchPlaceholder="Search fish (e.g. tuna)..."
+        insetsBottom={insets.bottom}
+        onClose={() => setFishPickerOpen(false)}
+        onConfirm={(item) => {
+          const id = toIntSafe(item.key);
+          const picked = fishOptions.find((f) => f.id === id) || null;
+          setFishSel(picked);
+          setFishPickerOpen(false);
+        }}
       />
 
-      <EntityPickerSheet
+      <FullScreenPickerModal
+        visible={vesselPickerOpen}
         title={t.vessel}
-        value={vesselSel as any}
-        options={vessels as any}
-        loading={vesselsLoading}
-        onSelect={(v: any) => setVesselSel(v)}
-        sheetRef={vesselRef}
-        emptyText={t.noData}
+        items={vesselPickItems}
+        selectedKey={vesselSel?.id ? String(vesselSel.id) : ""}
+        mode="list"
+        numColumns={2}
+        showImages={false}
+        confirmLabel={NEXT_LABEL}
+        searchPlaceholder="Search vessel..."
+        insetsBottom={insets.bottom}
+        onClose={() => setVesselPickerOpen(false)}
+        onConfirm={(item) => {
+          const id = toIntSafe(item.key);
+          const picked = vessels.find((v) => v.id === id) || null;
+          setVesselSel(picked);
+          setVesselPickerOpen(false);
+        }}
       />
 
-      <EntityPickerSheet
+      {/* ✅ NEW: Country picker */}
+      <FullScreenPickerModal
+        visible={countryPickerOpen}
+        title={t.country}
+        items={countryPickItems}
+        selectedKey={countrySel?.id ? String(countrySel.id) : ""}
+        mode="list"
+        numColumns={2}
+        showImages={false}
+        confirmLabel={NEXT_LABEL}
+        searchPlaceholder="Search country..."
+        insetsBottom={insets.bottom}
+        onClose={() => setCountryPickerOpen(false)}
+        onConfirm={(item) => {
+          const id = toIntSafe(item.key);
+          const picked = countries.find((c) => c.id === id) || null;
+          setCountrySel(picked);
+          setCountryPickerOpen(false);
+        }}
+      />
+
+      <FullScreenPickerModal
+        visible={statePickerOpen}
         title={t.state}
-        value={stateSel as any}
-        options={states.map((s) => ({ ...s, code: s.state_code ?? null })) as any}
-        loading={statesLoading}
-        onSelect={(v: any) => setStateSel(v)}
-        sheetRef={stateRef}
-        emptyText={t.noData}
+        items={statePickItems}
+        selectedKey={stateSel?.id ? String(stateSel.id) : ""}
+        mode="list"
+        numColumns={2}
+        showImages={false}
+        confirmLabel={NEXT_LABEL}
+        searchPlaceholder="Search state..."
+        insetsBottom={insets.bottom}
+        onClose={() => setStatePickerOpen(false)}
+        onConfirm={(item) => {
+          const id = toIntSafe(item.key);
+          const picked = states.find((s) => s.id === id) || null;
+          setStateSel(picked);
+          setStatePickerOpen(false);
+        }}
       />
-      <EntityPickerSheet
+
+      <FullScreenPickerModal
+        visible={districtPickerOpen}
         title={t.district}
-        value={districtSel as any}
-        options={districts.map((d) => ({ ...d, code: d.district_code ?? null })) as any}
-        loading={districtsLoading}
-        onSelect={(v: any) => setDistrictSel(v)}
-        sheetRef={districtRef}
-        emptyText={t.noData}
+        items={districtPickItems}
+        selectedKey={districtSel?.id ? String(districtSel.id) : ""}
+        mode="list"
+        numColumns={2}
+        showImages={false}
+        confirmLabel={NEXT_LABEL}
+        searchPlaceholder="Search district..."
+        insetsBottom={insets.bottom}
+        onClose={() => setDistrictPickerOpen(false)}
+        onConfirm={(item) => {
+          const id = toIntSafe(item.key);
+          const picked = districts.find((d) => d.id === id) || null;
+          setDistrictSel(picked);
+          setDistrictPickerOpen(false);
+        }}
       />
-      <EntityPickerSheet
+
+      <FullScreenPickerModal
+        visible={locationPickerOpen}
         title={t.nearStation}
-        value={locationSel as any}
-        options={locations.map((l) => ({ ...l, code: l.location_code ?? null })) as any}
-        loading={locationsLoading}
-        onSelect={(v: any) => setLocationSel(v)}
-        sheetRef={locationRef}
-        emptyText={t.noData}
+        items={locationPickItems}
+        selectedKey={locationSel?.id ? String(locationSel.id) : ""}
+        mode="list"
+        numColumns={2}
+        showImages={false}
+        confirmLabel={NEXT_LABEL}
+        searchPlaceholder="Search station..."
+        insetsBottom={insets.bottom}
+        onClose={() => setLocationPickerOpen(false)}
+        onConfirm={(item) => {
+          const id = toIntSafe(item.key);
+          const picked = locations.find((l) => l.id === id) || null;
+          setLocationSel(picked);
+          setLocationPickerOpen(false);
+        }}
       />
 
       <ScrollView contentContainerClassName="p-4 pb-10">
@@ -1524,14 +1928,10 @@ export default function NewTripRequest() {
 
             <View className="mt-3">
               <FieldBox>
-                <Pressable onPress={() => vesselRef.current?.present()} className="active:opacity-80">
+                <Pressable onPress={() => setVesselPickerOpen(true)} className="active:opacity-80">
                   <Label>{t.vessel}</Label>
 
-                  <Text
-                    className={`mt-1 text-base ${
-                      vesselSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"
-                    }`}
-                  >
+                  <Text className={`mt-1 text-base ${vesselSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
                     {vesselSel?.name || t.select}
                   </Text>
 
@@ -1546,7 +1946,7 @@ export default function NewTripRequest() {
 
             <View className="mt-3">
               <FieldBox>
-                <Pressable onPress={() => methodRef.current?.present()} className="active:opacity-80">
+                <Pressable onPress={() => setMethodPickerOpen(true)} className="active:opacity-80">
                   <Label>{t.fishingMethod}</Label>
 
                   <View className="flex-row items-center mt-1">
@@ -1563,11 +1963,7 @@ export default function NewTripRequest() {
                         resizeMode="cover"
                       />
                     ) : null}
-                    <Text
-                      className={`text-base ${
-                        methodSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"
-                      }`}
-                    >
+                    <Text className={`text-base ${methodSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
                       {methodSel?.name || t.select}
                     </Text>
                   </View>
@@ -1577,10 +1973,9 @@ export default function NewTripRequest() {
               </FieldBox>
             </View>
 
-            {/* ✅ NEW: Fish species picker */}
             <View className="mt-3">
               <FieldBox>
-                <Pressable onPress={() => fishRef.current?.present()} className="active:opacity-80">
+                <Pressable onPress={() => setFishPickerOpen(true)} className="active:opacity-80">
                   <Label>{t.fishSpecies}</Label>
 
                   <View className="flex-row items-center mt-1">
@@ -1597,11 +1992,7 @@ export default function NewTripRequest() {
                         resizeMode="cover"
                       />
                     ) : null}
-                    <Text
-                      className={`text-base ${
-                        fishSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"
-                      }`}
-                    >
+                    <Text className={`text-base ${fishSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
                       {fishSel?.name || t.select}
                     </Text>
                   </View>
@@ -1615,15 +2006,35 @@ export default function NewTripRequest() {
               </FieldBox>
             </View>
 
+            {/* ✅ NEW: Country field (same style) */}
             <View className="mt-3">
               <FieldBox>
-                <Pressable onPress={() => stateRef.current?.present()} className="active:opacity-80">
+                <Pressable
+                  onPress={() => {
+                    if (!isOnline) return Alert.alert(t.title, t.savedOffline);
+                    setCountryPickerOpen(true);
+                  }}
+                  className="active:opacity-80"
+                >
+                  <Label>{t.country}</Label>
+                  <Text className={`mt-1 text-base ${countrySel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
+                    {countrySel?.name || t.select}
+                  </Text>
+                </Pressable>
+              </FieldBox>
+            </View>
+
+            <View className="mt-3">
+              <FieldBox>
+                <Pressable
+                  onPress={() => {
+                    if (!countrySel?.id) return Alert.alert(t.title, t.errCountry);
+                    setStatePickerOpen(true);
+                  }}
+                  className="active:opacity-80"
+                >
                   <Label>{t.state}</Label>
-                  <Text
-                    className={`mt-1 text-base ${
-                      stateSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"
-                    }`}
-                  >
+                  <Text className={`mt-1 text-base ${stateSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
                     {stateSel?.name || t.select}
                   </Text>
                 </Pressable>
@@ -1635,16 +2046,12 @@ export default function NewTripRequest() {
                 <Pressable
                   onPress={() => {
                     if (!stateSel?.id) return Alert.alert(t.title, t.errState);
-                    districtRef.current?.present();
+                    setDistrictPickerOpen(true);
                   }}
                   className="active:opacity-80"
                 >
                   <Label>{t.district}</Label>
-                  <Text
-                    className={`mt-1 text-base ${
-                      districtSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"
-                    }`}
-                  >
+                  <Text className={`mt-1 text-base ${districtSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
                     {districtSel?.name || t.select}
                   </Text>
                 </Pressable>
@@ -1656,24 +2063,19 @@ export default function NewTripRequest() {
                 <Pressable
                   onPress={() => {
                     if (!districtSel?.id) return Alert.alert(t.title, t.errDistrict);
-                    locationRef.current?.present();
+                    setLocationPickerOpen(true);
                   }}
                   className="active:opacity-80"
                 >
                   <Label>{t.nearStation}</Label>
-                  <Text
-                    className={`mt-1 text-base ${
-                      locationSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"
-                    }`}
-                  >
+                  <Text className={`mt-1 text-base ${locationSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
                     {locationSel?.name || t.select}
                   </Text>
 
                   {locationSel ? (
                     <Text className="mt-1 text-[11px] text-[#7a6f66]">
-                      Payload near_station(name): {locationSel.name} | payload location_id:{" "}
-                      {locationSel.id} | derived state_id: {locationSel.state_id} | derived
-                      district_id: {locationSel.district_id}
+                      Payload near_station(name): {locationSel.name} | payload location_id: {locationSel.id} | derived
+                      state_id: {locationSel.state_id} | derived district_id: {locationSel.district_id}
                     </Text>
                   ) : (
                     <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
@@ -1684,16 +2086,9 @@ export default function NewTripRequest() {
 
             <View className="mt-3">
               <FieldBox>
-                <Pressable
-                  onPress={() => setShowPlannedDate(true)}
-                  className="active:opacity-80"
-                >
+                <Pressable onPress={() => setShowPlannedDate(true)} className="active:opacity-80">
                   <Label>{t.plannedTripDT}</Label>
-                  <Text
-                    className={`mt-1 text-base ${
-                      plannedStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"
-                    }`}
-                  >
+                  <Text className={`mt-1 text-base ${plannedStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
                     {plannedStr || t.select}
                   </Text>
                 </Pressable>
@@ -1783,11 +2178,7 @@ export default function NewTripRequest() {
             <FieldBox>
               <Pressable onPress={() => setShowReturnPicker(true)} className="active:opacity-80">
                 <Label>{t.expectedReturn}</Label>
-                <Text
-                  className={`mt-1 text-base ${
-                    returnStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"
-                  }`}
-                >
+                <Text className={`mt-1 text-base ${returnStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
                   {returnStr || t.select}
                 </Text>
               </Pressable>
@@ -1920,7 +2311,10 @@ export default function NewTripRequest() {
             <Text className="text-center text-white font-semibold">{posting ? "..." : t.submit}</Text>
           </Pressable>
         </View>
+
+        {/* small bottom padding so last button not hide on iPhone */}
+        <View style={{ height: 12 + insets.bottom }} />
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
