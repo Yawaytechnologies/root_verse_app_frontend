@@ -2,12 +2,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
-import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
 import { router } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -19,15 +19,18 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 
 import { useAppDispatch } from "../../../src/store/hooks";
 import { createVessel } from "../../../src/services/wild/vessels/vessel.slice";
-import type { FuelType, VesselCreatePayload } from "../../../src/services/wild/vessels/vesselApi";
+import type {
+  FuelType,
+  VesselCreatePayload,
+} from "../../../src/services/wild/vessels/vesselApi";
 
 /**
- * ✅ What this file does (as you asked)
+ * ✅ What this file does
  * 1) Gets owner_id after login (from cache, else /api/me + /api/owner/fetch/:userId)
  * 2) Sends owner_id in POST payload
  * 3) Offline queue + auto-sync when internet returns
  * 4) Vessel type dropdown + "Other" => manual input
- * 5) Home Port selection: State -> District -> Port(Location) like trip create
+ * 5) Home Port selection: Country -> State -> District -> Port(Location)
  */
 
 /** ---------------- CONFIG ---------------- */
@@ -48,8 +51,24 @@ const ME_CACHE_KEY = "RV_ME_CACHE_V1"; // used in your trip create snippet
 const VESSEL_QUEUE_KEY = "rv_vessel_registry_queue_v1";
 
 /** ---------------- TYPES ---------------- */
-type StateItem = { id: number; name: string; state_code?: string | null };
-type DistrictItem = { id: number; name: string; district_code?: string | null; state_id: number };
+type CountryItem = { id: number; name: string; code?: string | null };
+
+type StateItem = {
+  id: number;
+  name: string;
+  state_code?: string | null;
+  country_id?: number | null;
+  country_name?: string | null;
+  country_code?: string | null;
+};
+
+type DistrictItem = {
+  id: number;
+  name: string;
+  district_code?: string | null;
+  state_id: number;
+};
+
 type LocationItem = {
   id: number;
   name: string;
@@ -70,6 +89,7 @@ type VesselForm = {
   vesselTypeOtherText: string; // manual input when Other
 
   // home port selection
+  countrySel: CountryItem | null;
   stateSel: StateItem | null;
   districtSel: DistrictItem | null;
   portSel: LocationItem | null; // port location
@@ -105,7 +125,13 @@ const CARD_SHADOW = {
   elevation: 4,
 };
 
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+function Card({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <View
       className={`rounded-2xl border ${className}`}
@@ -158,6 +184,286 @@ function Input({
   );
 }
 
+/** ---------------- FULL SCREEN PICKER (LIKE CATCHLOG) ---------------- */
+type FullPickItem = {
+  key: string;
+  label: string;
+  subtitle?: string;
+};
+
+function FullScreenPickerModal({
+  visible,
+  title,
+  items,
+  selectedKey,
+  loading,
+  emptyText,
+  onClose,
+  onConfirm,
+  confirmLabel = "Next",
+  searchPlaceholder = "Search...",
+  insetsBottom,
+}: {
+  visible: boolean;
+  title: string;
+  items: FullPickItem[];
+  selectedKey: string;
+  loading?: boolean;
+  emptyText?: string;
+  onClose: () => void;
+  onConfirm: (item: FullPickItem) => void;
+  confirmLabel?: string;
+  searchPlaceholder?: string;
+  insetsBottom: number;
+}) {
+  const [q, setQ] = useState("");
+  const [tempKey, setTempKey] = useState("");
+
+  useEffect(() => {
+    if (!visible) return;
+    setQ("");
+    setTempKey(selectedKey || "");
+  }, [visible, selectedKey]);
+
+  const filtered = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return items;
+    return items.filter((x) => {
+      const a = String(x.label || "").toLowerCase();
+      const b = String(x.subtitle || "").toLowerCase();
+      return a.includes(t) || b.includes(t);
+    });
+  }, [q, items]);
+
+  const selectedItem = useMemo(() => {
+    return items.find((x) => x.key === tempKey) || null;
+  }, [items, tempKey]);
+
+  const BG = "#0b0f17";
+  const CARD_BG = "rgba(255,255,255,0.06)";
+  const BORDER = "rgba(255,255,255,0.10)";
+  const ACCENT = "#93c5fd";
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: BG }}>
+        {/* Header */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            paddingHorizontal: 14,
+            paddingTop: 6,
+          }}
+        >
+          <Pressable
+            onPress={onClose}
+            style={{
+              padding: 10,
+              borderRadius: 999,
+              backgroundColor: "rgba(255,255,255,0.08)",
+            }}
+          >
+            <Text style={{ color: "white", fontWeight: "900", fontSize: 16 }}>
+              ←
+            </Text>
+          </Pressable>
+
+          <Text
+            style={{
+              color: "white",
+              fontWeight: "900",
+              fontSize: 18,
+              marginLeft: 12,
+              flex: 1,
+            }}
+            numberOfLines={1}
+          >
+            {title}
+          </Text>
+        </View>
+
+        {/* Search */}
+        <View
+          style={{
+            marginTop: 14,
+            marginHorizontal: 14,
+            borderRadius: 16,
+            borderWidth: 1,
+            borderColor: "rgba(255,255,255,0.12)",
+            backgroundColor: "rgba(255,255,255,0.06)",
+            flexDirection: "row",
+            alignItems: "center",
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+          }}
+        >
+          <Text style={{ color: "rgba(255,255,255,0.70)", fontWeight: "900" }}>
+            🔎
+          </Text>
+          <TextInput
+            value={q}
+            onChangeText={setQ}
+            placeholder={searchPlaceholder}
+            placeholderTextColor="rgba(255,255,255,0.55)"
+            style={{
+              color: "white",
+              marginLeft: 10,
+              fontSize: 16,
+              flex: 1,
+              paddingVertical: 2,
+            }}
+          />
+          {q ? (
+            <Pressable onPress={() => setQ("")} style={{ padding: 6 }}>
+              <Text
+                style={{ color: "rgba(255,255,255,0.60)", fontWeight: "900" }}
+              >
+                ✕
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        {/* List */}
+        <View style={{ flex: 1, paddingTop: 14 }}>
+          {loading ? (
+            <View
+              style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
+            >
+              <ActivityIndicator />
+              <Text
+                style={{
+                  color: "rgba(255,255,255,0.70)",
+                  marginTop: 10,
+                  fontWeight: "700",
+                }}
+              >
+                Loading...
+              </Text>
+            </View>
+          ) : filtered.length === 0 ? (
+            <View
+              style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
+            >
+              <Text style={{ color: "rgba(255,255,255,0.70)", fontWeight: "800" }}>
+                {emptyText || "No data"}
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={filtered}
+              keyExtractor={(it) => it.key}
+              contentContainerStyle={{
+                paddingHorizontal: 14,
+                paddingBottom: 120 + insetsBottom,
+              }}
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item }) => {
+                const active = item.key === tempKey;
+                return (
+                  <Pressable
+                    onPress={() => setTempKey(item.key)}
+                    style={{
+                      marginBottom: 10,
+                      borderRadius: 18,
+                      borderWidth: 1,
+                      borderColor: active ? ACCENT : BORDER,
+                      backgroundColor: active
+                        ? "rgba(147,197,253,0.10)"
+                        : CARD_BG,
+                      paddingVertical: 14,
+                      paddingHorizontal: 14,
+                    }}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text
+                          style={{
+                            color: "white",
+                            fontWeight: "900",
+                            fontSize: 15,
+                          }}
+                          numberOfLines={2}
+                        >
+                          {item.label}
+                        </Text>
+                        {!!item.subtitle ? (
+                          <Text
+                            style={{
+                              color: "rgba(255,255,255,0.70)",
+                              fontSize: 12,
+                              marginTop: 4,
+                            }}
+                            numberOfLines={1}
+                          >
+                            {item.subtitle}
+                          </Text>
+                        ) : null}
+                      </View>
+
+                      <View style={{ marginLeft: 12 }}>
+                        <Text
+                          style={{
+                            color: active
+                              ? ACCENT
+                              : "rgba(255,255,255,0.60)",
+                            fontWeight: "900",
+                          }}
+                        >
+                          {active ? "✓" : "›"}
+                        </Text>
+                      </View>
+                    </View>
+                  </Pressable>
+                );
+              }}
+            />
+          )}
+        </View>
+
+        {/* Bottom fixed button */}
+        <View
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            paddingHorizontal: 14,
+            paddingTop: 12,
+            paddingBottom: 14 + insetsBottom,
+            backgroundColor: "rgba(11,15,23,0.92)",
+            borderTopWidth: 1,
+            borderTopColor: "rgba(255,255,255,0.08)",
+          }}
+        >
+          <Pressable
+            disabled={!selectedItem}
+            onPress={() => selectedItem && onConfirm(selectedItem)}
+            style={{
+              height: 52,
+              borderRadius: 999,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: selectedItem ? "#93c5fd" : "rgba(255,255,255,0.20)",
+            }}
+          >
+            <Text
+              style={{
+                fontWeight: "900",
+                fontSize: 16,
+                color: selectedItem ? "#0b0f17" : "rgba(255,255,255,0.70)",
+              }}
+            >
+              {confirmLabel}
+            </Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
 /** ---------------- HELPERS ---------------- */
 async function readTokenFromStorage(): Promise<string | null> {
   for (const k of TOKEN_KEYS) {
@@ -194,7 +500,8 @@ async function safeJson(res: Response) {
 
 function unwrapData<T>(payload: any): T {
   if (!payload) return payload as T;
-  if (payload?.success === false) throw new Error(payload?.message || payload?.error || "Request failed");
+  if (payload?.success === false)
+    throw new Error(payload?.message || payload?.error || "Request failed");
   if (payload?.data != null) return payload.data as T;
   return payload as T;
 }
@@ -214,7 +521,8 @@ async function geoGet<T>(path: string): Promise<T> {
   if (res.status === 401) throw new Error("UNAUTHORIZED");
 
   const json = await safeJson(res);
-  if (!res.ok) throw new Error(json?.message || json?.error || `GET ${path} failed (${res.status})`);
+  if (!res.ok)
+    throw new Error(json?.message || json?.error || `GET ${path} failed (${res.status})`);
   return unwrapData<T>(json);
 }
 
@@ -246,7 +554,6 @@ async function readCachedOwnerDbId(): Promise<number | null> {
 async function writeCachedOwnerDbId(ownerId: number) {
   if (!ownerId || ownerId <= 0) return;
   await AsyncStorage.setItem(LAST_OWNER_ID_KEY, String(ownerId));
-  // optional mirror
   await AsyncStorage.setItem("owner_id", String(ownerId)).catch(() => {});
 }
 
@@ -282,9 +589,7 @@ async function fetchOwnerDbIdOnline(): Promise<number> {
   const data: any = unwrapData<any>(ownerJson);
   const o = Array.isArray(data) ? data[0] : data;
 
-  const ownerId =
-    Number(o?.id || o?.owner_id || o?.ownerId || 0);
-
+  const ownerId = Number(o?.id || o?.owner_id || o?.ownerId || 0);
   if (!Number.isFinite(ownerId) || ownerId <= 0) throw new Error("Owner fetch returned invalid owner id");
 
   await writeCachedOwnerDbId(ownerId);
@@ -352,131 +657,6 @@ async function flushOfflineVesselQueue(sendFn: (p: VesselCreatePayload) => Promi
   return { sent, left: keep.length };
 }
 
-/** ---------------- BottomSheet picker ---------------- */
-type PickerBase = { id: any; name: string; code?: string | null; subName?: string };
-
-function EntityPickerSheet<T extends PickerBase>({
-  title,
-  value,
-  options,
-  loading,
-  onSelect,
-  sheetRef,
-  emptyText,
-}: {
-  title: string;
-  value: T | null;
-  options: T[];
-  loading?: boolean;
-  onSelect: (v: T) => void;
-  sheetRef: React.RefObject<BottomSheetModal>;
-  emptyText?: string;
-}) {
-  const snapPoints = useMemo(() => ["45%", "75%"], []);
-  const [q, setQ] = useState("");
-
-  const filtered = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    if (!t) return options;
-    return options.filter((x) => {
-      const a = String(x.name || "").toLowerCase();
-      const b = String((x as any).subName || "").toLowerCase();
-      const c = String(x.code || "").toLowerCase();
-      return a.includes(t) || b.includes(t) || c.includes(t);
-    });
-  }, [q, options]);
-
-  return (
-    <BottomSheetModal
-      ref={sheetRef}
-      snapPoints={snapPoints}
-      enablePanDownToClose
-      backgroundStyle={{ borderRadius: 24 }}
-      handleIndicatorStyle={{ opacity: 0.35 }}
-    >
-      <BottomSheetView style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
-        <View className="flex-row items-center justify-between">
-          <Text className="text-base font-bold" style={{ color: UI.text }}>
-            {title}
-          </Text>
-          <Pressable
-            onPress={() => sheetRef.current?.dismiss()}
-            className="rounded-full px-3 py-2 active:opacity-80"
-          >
-            <Text className="text-sm font-semibold" style={{ color: UI.blue }}>
-              Done
-            </Text>
-          </Pressable>
-        </View>
-
-        <View
-          className="mt-3 rounded-xl border px-3 py-2"
-          style={{ borderColor: UI.border, backgroundColor: "#f8fafc" }}
-        >
-          <TextInput
-            value={q}
-            onChangeText={setQ}
-            placeholder="Search..."
-            placeholderTextColor="#94a3b8"
-            className="text-base"
-            style={{ color: UI.text }}
-          />
-        </View>
-
-        <ScrollView className="mt-3" keyboardShouldPersistTaps="handled">
-          {loading ? (
-            <View className="py-6 items-center">
-              <Text className="text-sm" style={{ color: UI.muted }}>
-                Loading...
-              </Text>
-            </View>
-          ) : filtered.length === 0 ? (
-            <View className="py-6 items-center">
-              <Text className="text-sm" style={{ color: UI.muted }}>
-                {emptyText || "No data"}
-              </Text>
-            </View>
-          ) : (
-            filtered.map((item) => {
-              const active = String(item.id) === String(value?.id);
-              return (
-                <Pressable
-                  key={String(item.id)}
-                  onPress={() => {
-                    onSelect(item);
-                    sheetRef.current?.dismiss();
-                  }}
-                  className="mb-2 rounded-xl border px-4 py-3 active:opacity-80"
-                  style={{
-                    borderColor: active ? UI.blue : UI.border,
-                    backgroundColor: active ? UI.blueSoft : UI.card,
-                  }}
-                >
-                  <Text className="text-sm font-semibold" style={{ color: UI.text }}>
-                    {item.name}
-                  </Text>
-
-                  {(item as any).subName ? (
-                    <Text className="mt-1 text-[11px]" style={{ color: UI.muted }}>
-                      {(item as any).subName}
-                    </Text>
-                  ) : null}
-
-                  {item.code ? (
-                    <Text className="mt-1 text-[11px]" style={{ color: UI.muted }}>
-                      Code: {item.code}
-                    </Text>
-                  ) : null}
-                </Pressable>
-              );
-            })
-          )}
-        </ScrollView>
-      </BottomSheetView>
-    </BottomSheetModal>
-  );
-}
-
 /** ---------------- SCREEN ---------------- */
 export default function VesselCreateScreen() {
   const insets = useSafeAreaInsets();
@@ -504,19 +684,22 @@ export default function VesselCreateScreen() {
   const syncingRef = useRef(false);
 
   // geo data for home port
+  const [countries, setCountries] = useState<CountryItem[]>([]);
   const [states, setStates] = useState<StateItem[]>([]);
   const [districts, setDistricts] = useState<DistrictItem[]>([]);
   const [ports, setPorts] = useState<LocationItem[]>([]);
 
+  const [countriesLoading, setCountriesLoading] = useState(false);
   const [statesLoading, setStatesLoading] = useState(false);
   const [districtsLoading, setDistrictsLoading] = useState(false);
   const [portsLoading, setPortsLoading] = useState(false);
 
-  // bottom sheets
-  const typeRef = useRef<BottomSheetModal>(null);
-  const stateRef = useRef<BottomSheetModal>(null);
-  const districtRef = useRef<BottomSheetModal>(null);
-  const portRef = useRef<BottomSheetModal>(null);
+  // ✅ Full screen pickers
+  const [typeOpen, setTypeOpen] = useState(false);
+  const [countryOpen, setCountryOpen] = useState(false);
+  const [stateOpen, setStateOpen] = useState(false);
+  const [districtOpen, setDistrictOpen] = useState(false);
+  const [portOpen, setPortOpen] = useState(false);
 
   // modals
   const [fuelOpen, setFuelOpen] = useState(false);
@@ -529,6 +712,7 @@ export default function VesselCreateScreen() {
     vesselTypePreset: "FRP Boat",
     vesselTypeOtherText: "",
 
+    countrySel: null,
     stateSel: null,
     districtSel: null,
     portSel: null,
@@ -543,9 +727,7 @@ export default function VesselCreateScreen() {
   const setField = (k: keyof VesselForm, v: any) => setForm((p) => ({ ...p, [k]: v }));
 
   const resolvedVesselType = useMemo(() => {
-    if (form.vesselTypePreset === "Other") {
-      return (form.vesselTypeOtherText || "").trim();
-    }
+    if (form.vesselTypePreset === "Other") return (form.vesselTypeOtherText || "").trim();
     return (form.vesselTypePreset || "").trim();
   }, [form.vesselTypePreset, form.vesselTypeOtherText]);
 
@@ -560,7 +742,7 @@ export default function VesselCreateScreen() {
       form.vesselName.trim() &&
       form.govtRegNo.trim() &&
       resolvedVesselType.trim() &&
-      !!form.portSel?.id // must select port
+      !!form.portSel?.id
     );
   }, [form, ownerDbId, resolvedVesselType]);
 
@@ -574,6 +756,7 @@ export default function VesselCreateScreen() {
     if (form.vesselTypePreset === "Other" && !form.vesselTypeOtherText.trim())
       return "Enter Vessel Type (Other)";
 
+    if (!form.countrySel?.id) return "Select Country";
     if (!form.stateSel?.id) return "Select State";
     if (!form.districtSel?.id) return "Select District";
     if (!form.portSel?.id) return "Select Home Port (Port/Location)";
@@ -612,6 +795,8 @@ export default function VesselCreateScreen() {
       payload.state_id = Number(form.portSel?.state_id || form.stateSel?.id || 0);
       payload.district_id = Number(form.portSel?.district_id || form.districtSel?.id || 0);
       payload.location_id = Number(form.portSel?.id || 0);
+      // country is only UI-driven currently; keeping payload unchanged unless you switch this ON
+      // payload.country_id = Number(form.countrySel?.id || 0);
     }
 
     return payload;
@@ -619,11 +804,9 @@ export default function VesselCreateScreen() {
 
   /** -------- owner id load -------- */
   const loadOwnerId = async () => {
-    // cached first (instant)
     const cached = await readCachedOwnerDbId();
     if (cached) setOwnerDbId(cached);
 
-    // if online, refresh from API (authoritative)
     const onNow = await isOnlineNow();
     setOnline(onNow);
     if (!onNow) return;
@@ -634,22 +817,49 @@ export default function VesselCreateScreen() {
     } catch (e: any) {
       const msg = String(e?.message || "");
       if (msg === "UNAUTHORIZED") router.replace(AUTH_LOGIN_ROUTE);
-      // if cached exists, continue; else show error later on save
     }
   };
 
-  /** -------- states/districts/ports load (like trip create) -------- */
-  const loadStates = async () => {
+  /** -------- countries/states/districts/ports load -------- */
+  const loadCountries = async () => {
+    if (!online) return;
+    setCountriesLoading(true);
+    try {
+      const data = await geoGet<any>("/api/country");
+      const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+      const list: CountryItem[] = arr
+        .map((x: any) => ({
+          id: Number(x?.id),
+          name: String(x?.name || "").trim(),
+          code: x?.code ?? null,
+        }))
+        .filter((x) => x.id && x.name);
+
+      setCountries(list);
+
+      // ✅ Keep previous flow smooth: auto-pick first country if not selected yet
+      if (list.length > 0) {
+        setForm((p) => (p.countrySel ? p : { ...p, countrySel: list[0] }));
+      }
+    } finally {
+      setCountriesLoading(false);
+    }
+  };
+
+  const loadStatesByCountry = async (countryId: number) => {
     if (!online) return;
     setStatesLoading(true);
     try {
-      const data = await geoGet<any>("/api/states");
+      const data = await geoGet<any>(`/api/states/country/${encodeURIComponent(String(countryId))}`);
       const arr = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
       const list: StateItem[] = arr
         .map((x: any) => ({
           id: Number(x?.id),
           name: String(x?.name || "").trim(),
           state_code: x?.state_code ?? null,
+          country_id: Number(x?.country_id || countryId),
+          country_name: x?.country_name ?? null,
+          country_code: x?.country_code ?? null,
         }))
         .filter((x) => x.id && x.name);
       setStates(list);
@@ -699,7 +909,7 @@ export default function VesselCreateScreen() {
     }
   };
 
-  /** -------- offline auto sync (like dashboard) -------- */
+  /** -------- offline auto sync -------- */
   const refreshPending = async () => {
     const c = await getVesselQueueCount();
     setPendingCount(c);
@@ -715,7 +925,6 @@ export default function VesselCreateScreen() {
 
     syncingRef.current = true;
     try {
-      // make sure owner is available; if not, try to load it
       let oid = ownerDbId;
       if (!oid) {
         oid = await readCachedOwnerDbId();
@@ -730,12 +939,7 @@ export default function VesselCreateScreen() {
       await flushOfflineVesselQueue(async (p) => {
         const patched: any = { ...(p || {}) };
         if (!patched.owner_id && oid) patched.owner_id = Number(oid);
-
-        // dispatch redux thunk (POST /api/vessels)
-        const res: any = await dispatch(createVessel(patched as any)).unwrap();
-
-        // if your backend returns {success,data} inside thunk, unwrap still ok
-        return res;
+        await dispatch(createVessel(patched as any)).unwrap();
       });
 
       await refreshPending();
@@ -757,7 +961,8 @@ export default function VesselCreateScreen() {
       await loadOwnerId();
 
       if (onNow) {
-        await loadStates();
+        await loadCountries();
+        // states load is driven by country selection effect (and also on reconnect handler below)
         await doFlushQueue();
       }
     };
@@ -774,7 +979,13 @@ export default function VesselCreateScreen() {
 
       if (on) {
         await loadOwnerId();
-        await loadStates();
+        await loadCountries();
+
+        // ✅ important: when coming back online, if country already selected, load states for it
+        if (form.countrySel?.id) {
+          await loadStatesByCountry(form.countrySel.id);
+        }
+
         await doFlushQueue();
       }
 
@@ -788,7 +999,26 @@ export default function VesselCreateScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // when state changes -> reset district/port and load districts
+  // country -> states (and reset below)
+  useEffect(() => {
+    (async () => {
+      const cid = form.countrySel?.id;
+
+      // reset below
+      setField("stateSel", null);
+      setField("districtSel", null);
+      setField("portSel", null);
+      setStates([]);
+      setDistricts([]);
+      setPorts([]);
+
+      if (!cid) return;
+      await loadStatesByCountry(cid);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.countrySel?.id]);
+
+  // state -> districts
   useEffect(() => {
     (async () => {
       const sid = form.stateSel?.id;
@@ -802,7 +1032,7 @@ export default function VesselCreateScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.stateSel?.id]);
 
-  // when district changes -> reset port and load ports
+  // district -> ports
   useEffect(() => {
     (async () => {
       const did = form.districtSel?.id;
@@ -841,9 +1071,8 @@ export default function VesselCreateScreen() {
         return;
       }
 
-      // online -> send
       await dispatch(createVessel(payload as any)).unwrap();
-      Alert.alert("Success", "Vessel registered successfully.");
+      Alert.alert("Success", "Vessel registered successfully. OneBlue team will contact you soon.");
       router.back();
     } catch (e: any) {
       const msg = String(e?.message || e);
@@ -852,10 +1081,12 @@ export default function VesselCreateScreen() {
         return;
       }
 
-      // if it's a network-ish failure, store offline and move on
       const m = msg.toLowerCase();
       const networkish =
-        m.includes("network") || m.includes("failed to fetch") || m.includes("timeout") || m.includes("socket");
+        m.includes("network") ||
+        m.includes("failed to fetch") ||
+        m.includes("timeout") ||
+        m.includes("socket");
 
       if (networkish) {
         await enqueueOfflineVessel(payload);
@@ -887,104 +1118,149 @@ export default function VesselCreateScreen() {
     </Pressable>
   );
 
-  /** -------- picker options -------- */
-  const typeOptions = useMemo(
+  /** -------- picker items (full screen) -------- */
+  const NEXT_LABEL = "Next";
+
+  const typeItems: FullPickItem[] = useMemo(
     () =>
       typePresets.map((x) => ({
-        id: x.id,
-        name: x.name,
+        key: x.name,
+        label: x.name,
       })),
     [typePresets],
   );
 
-  const stateOptions = useMemo(
-    () => states.map((s) => ({ id: s.id, name: s.name, code: s.state_code ?? null })),
+  const countryItems: FullPickItem[] = useMemo(
+    () =>
+      countries.map((c) => ({
+        key: String(c.id),
+        label: c.name,
+        subtitle: c.code ? `Code: ${c.code}` : "",
+      })),
+    [countries],
+  );
+
+  const stateItems: FullPickItem[] = useMemo(
+    () =>
+      states.map((s) => ({
+        key: String(s.id),
+        label: s.name,
+        subtitle: s.state_code ? `Code: ${s.state_code}` : "",
+      })),
     [states],
   );
 
-  const districtOptions = useMemo(
-    () => districts.map((d) => ({ id: d.id, name: d.name, code: d.district_code ?? null })),
+  const districtItems: FullPickItem[] = useMemo(
+    () =>
+      districts.map((d) => ({
+        key: String(d.id),
+        label: d.name,
+        subtitle: d.district_code ? `Code: ${d.district_code}` : "",
+      })),
     [districts],
   );
 
-  const portOptions = useMemo(
-    () => ports.map((p) => ({ id: p.id, name: p.name, code: p.location_code ?? null })),
+  const portItems: FullPickItem[] = useMemo(
+    () =>
+      ports.map((p) => ({
+        key: String(p.id),
+        label: p.name,
+        subtitle: p.location_code ? `Code: ${p.location_code}` : "",
+      })),
     [ports],
-  );
-
-  const selectedTypeObj = useMemo(
-    () => ({ id: form.vesselTypePreset, name: form.vesselTypePreset }),
-    [form.vesselTypePreset],
-  );
-
-  const selectedStateObj = useMemo(
-    () => (form.stateSel ? { id: form.stateSel.id, name: form.stateSel.name } : null),
-    [form.stateSel],
-  );
-
-  const selectedDistrictObj = useMemo(
-    () => (form.districtSel ? { id: form.districtSel.id, name: form.districtSel.name } : null),
-    [form.districtSel],
-  );
-
-  const selectedPortObj = useMemo(
-    () => (form.portSel ? { id: form.portSel.id, name: form.portSel.name } : null),
-    [form.portSel],
   );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: UI.bg }} edges={["top", "left", "right"]}>
-      {/* BottomSheets */}
-      <EntityPickerSheet
+      {/* ✅ FULL SCREEN PICKERS */}
+      <FullScreenPickerModal
+        visible={typeOpen}
         title="Vessel Type"
-        value={selectedTypeObj as any}
-        options={typeOptions as any}
+        items={typeItems}
+        selectedKey={form.vesselTypePreset || ""}
         loading={false}
-        onSelect={(v: any) => {
-          setField("vesselTypePreset", String(v.name));
-          if (String(v.name) !== "Other") setField("vesselTypeOtherText", "");
-        }}
-        sheetRef={typeRef}
         emptyText="No types"
+        confirmLabel={NEXT_LABEL}
+        searchPlaceholder="Search vessel type..."
+        insetsBottom={insets.bottom}
+        onClose={() => setTypeOpen(false)}
+        onConfirm={(item) => {
+          setField("vesselTypePreset", String(item.key));
+          if (String(item.key) !== "Other") setField("vesselTypeOtherText", "");
+          setTypeOpen(false);
+        }}
       />
 
-      <EntityPickerSheet
+      <FullScreenPickerModal
+        visible={countryOpen}
+        title="Country"
+        items={countryItems}
+        selectedKey={form.countrySel?.id ? String(form.countrySel.id) : ""}
+        loading={countriesLoading}
+        emptyText="No countries"
+        confirmLabel={NEXT_LABEL}
+        searchPlaceholder="Search country..."
+        insetsBottom={insets.bottom}
+        onClose={() => setCountryOpen(false)}
+        onConfirm={(item) => {
+          const c = countries.find((x) => String(x.id) === String(item.key)) || null;
+          setField("countrySel", c);
+          setCountryOpen(false);
+        }}
+      />
+
+      <FullScreenPickerModal
+        visible={stateOpen}
         title="State"
-        value={selectedStateObj as any}
-        options={stateOptions as any}
+        items={stateItems}
+        selectedKey={form.stateSel?.id ? String(form.stateSel.id) : ""}
         loading={statesLoading}
-        onSelect={(v: any) => {
-          const st = states.find((s) => String(s.id) === String(v.id)) || null;
-          setField("stateSel", st);
-        }}
-        sheetRef={stateRef}
         emptyText="No states"
+        confirmLabel={NEXT_LABEL}
+        searchPlaceholder="Search state..."
+        insetsBottom={insets.bottom}
+        onClose={() => setStateOpen(false)}
+        onConfirm={(item) => {
+          const st = states.find((s) => String(s.id) === String(item.key)) || null;
+          setField("stateSel", st);
+          setStateOpen(false);
+        }}
       />
 
-      <EntityPickerSheet
+      <FullScreenPickerModal
+        visible={districtOpen}
         title="District"
-        value={selectedDistrictObj as any}
-        options={districtOptions as any}
+        items={districtItems}
+        selectedKey={form.districtSel?.id ? String(form.districtSel.id) : ""}
         loading={districtsLoading}
-        onSelect={(v: any) => {
-          const d = districts.find((x) => String(x.id) === String(v.id)) || null;
-          setField("districtSel", d);
-        }}
-        sheetRef={districtRef}
         emptyText="No districts"
+        confirmLabel={NEXT_LABEL}
+        searchPlaceholder="Search district..."
+        insetsBottom={insets.bottom}
+        onClose={() => setDistrictOpen(false)}
+        onConfirm={(item) => {
+          const d = districts.find((x) => String(x.id) === String(item.key)) || null;
+          setField("districtSel", d);
+          setDistrictOpen(false);
+        }}
       />
 
-      <EntityPickerSheet
+      <FullScreenPickerModal
+        visible={portOpen}
         title="Home Port (Port/Location)"
-        value={selectedPortObj as any}
-        options={portOptions as any}
+        items={portItems}
+        selectedKey={form.portSel?.id ? String(form.portSel.id) : ""}
         loading={portsLoading}
-        onSelect={(v: any) => {
-          const p = ports.find((x) => String(x.id) === String(v.id)) || null;
-          setField("portSel", p);
-        }}
-        sheetRef={portRef}
         emptyText="No ports"
+        confirmLabel={NEXT_LABEL}
+        searchPlaceholder="Search port/location..."
+        insetsBottom={insets.bottom}
+        onClose={() => setPortOpen(false)}
+        onConfirm={(item) => {
+          const p = ports.find((x) => String(x.id) === String(item.key)) || null;
+          setField("portSel", p);
+          setPortOpen(false);
+        }}
       />
 
       {/* Header */}
@@ -1028,22 +1304,24 @@ export default function VesselCreateScreen() {
             {saving ? (
               <ActivityIndicator />
             ) : (
-              <Ionicons
-                name={online ? "wifi" : "wifi-outline"}
-                size={18}
-                color={online ? UI.green : UI.red}
-              />
+              <Ionicons name={online ? "wifi" : "wifi-outline"} size={18} color={online ? UI.green : UI.red} />
             )}
           </View>
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 18 }} contentContainerClassName="px-4 pb-6">
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: insets.bottom + 18 }}
+        contentContainerClassName="px-4 pb-6"
+      >
         {/* Form Card */}
         <Card>
           <View className="p-4">
             <View className="flex-row items-center">
-              <View className="h-10 w-10 rounded-2xl items-center justify-center" style={{ backgroundColor: UI.blueSoft }}>
+              <View
+                className="h-10 w-10 rounded-2xl items-center justify-center"
+                style={{ backgroundColor: UI.blueSoft }}
+              >
                 <Ionicons name="boat-outline" size={22} color={UI.blue} />
               </View>
               <View className="ml-3">
@@ -1051,7 +1329,7 @@ export default function VesselCreateScreen() {
                   Vessel Details
                 </Text>
                 <Text className="mt-0.5 text-xs" style={{ color: UI.muted }}>
-                  Required: Govt Reg No, Local ID, Name, Type, State, District, Port
+                  Required: Govt Reg No, Local ID, Name, Type, Country, State, District, Port
                 </Text>
               </View>
             </View>
@@ -1087,18 +1365,18 @@ export default function VesselCreateScreen() {
                 />
               </View>
 
-              {/* Vessel Type dropdown + Other manual */}
+              {/* Vessel Type full screen */}
               <View>
                 <Label>Vessel Type *</Label>
                 <Pressable
-                  onPress={() => typeRef.current?.present()}
+                  onPress={() => setTypeOpen(true)}
                   className="mt-2 rounded-xl border px-3 py-3 flex-row items-center justify-between active:opacity-80"
                   style={{ borderColor: UI.border, backgroundColor: UI.card }}
                 >
                   <Text className="text-base font-semibold" style={{ color: UI.text }}>
                     {form.vesselTypePreset || "Select"}
                   </Text>
-                  <Ionicons name="chevron-down" size={18} color={UI.muted} />
+                  <Ionicons name="chevron-forward" size={18} color={UI.muted} />
                 </Pressable>
 
                 {form.vesselTypePreset === "Other" ? (
@@ -1113,18 +1391,41 @@ export default function VesselCreateScreen() {
                 ) : null}
               </View>
 
-              {/* Home Port selection: State -> District -> Port */}
+              {/* Home Port selection full screen: Country -> State -> District -> Port */}
               <View>
-                <Label>State *</Label>
+                <Label>Country *</Label>
                 <Pressable
-                  onPress={() => stateRef.current?.present()}
+                  onPress={() => setCountryOpen(true)}
                   className="mt-2 rounded-xl border px-3 py-3 flex-row items-center justify-between active:opacity-80"
                   style={{ borderColor: UI.border, backgroundColor: UI.card }}
                 >
-                  <Text className="text-base font-semibold" style={{ color: form.stateSel ? UI.text : "#94a3b8" }}>
+                  <Text
+                    className="text-base font-semibold"
+                    style={{ color: form.countrySel ? UI.text : "#94a3b8" }}
+                  >
+                    {form.countrySel?.name || "Select"}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={18} color={UI.muted} />
+                </Pressable>
+              </View>
+
+              <View>
+                <Label>State *</Label>
+                <Pressable
+                  onPress={() => {
+                    if (!form.countrySel?.id) return Alert.alert("Vessel Registration", "Select Country first");
+                    setStateOpen(true);
+                  }}
+                  className="mt-2 rounded-xl border px-3 py-3 flex-row items-center justify-between active:opacity-80"
+                  style={{ borderColor: UI.border, backgroundColor: UI.card }}
+                >
+                  <Text
+                    className="text-base font-semibold"
+                    style={{ color: form.stateSel ? UI.text : "#94a3b8" }}
+                  >
                     {form.stateSel?.name || "Select"}
                   </Text>
-                  <Ionicons name="chevron-down" size={18} color={UI.muted} />
+                  <Ionicons name="chevron-forward" size={18} color={UI.muted} />
                 </Pressable>
               </View>
 
@@ -1133,15 +1434,18 @@ export default function VesselCreateScreen() {
                 <Pressable
                   onPress={() => {
                     if (!form.stateSel?.id) return Alert.alert("Vessel Registration", "Select State first");
-                    districtRef.current?.present();
+                    setDistrictOpen(true);
                   }}
                   className="mt-2 rounded-xl border px-3 py-3 flex-row items-center justify-between active:opacity-80"
                   style={{ borderColor: UI.border, backgroundColor: UI.card }}
                 >
-                  <Text className="text-base font-semibold" style={{ color: form.districtSel ? UI.text : "#94a3b8" }}>
+                  <Text
+                    className="text-base font-semibold"
+                    style={{ color: form.districtSel ? UI.text : "#94a3b8" }}
+                  >
                     {form.districtSel?.name || "Select"}
                   </Text>
-                  <Ionicons name="chevron-down" size={18} color={UI.muted} />
+                  <Ionicons name="chevron-forward" size={18} color={UI.muted} />
                 </Pressable>
               </View>
 
@@ -1150,15 +1454,18 @@ export default function VesselCreateScreen() {
                 <Pressable
                   onPress={() => {
                     if (!form.districtSel?.id) return Alert.alert("Vessel Registration", "Select District first");
-                    portRef.current?.present();
+                    setPortOpen(true);
                   }}
                   className="mt-2 rounded-xl border px-3 py-3 flex-row items-center justify-between active:opacity-80"
                   style={{ borderColor: UI.border, backgroundColor: UI.card }}
                 >
-                  <Text className="text-base font-semibold" style={{ color: form.portSel ? UI.text : "#94a3b8" }}>
+                  <Text
+                    className="text-base font-semibold"
+                    style={{ color: form.portSel ? UI.text : "#94a3b8" }}
+                  >
                     {form.portSel?.name || "Select"}
                   </Text>
-                  <Ionicons name="chevron-down" size={18} color={UI.muted} />
+                  <Ionicons name="chevron-forward" size={18} color={UI.muted} />
                 </Pressable>
 
                 {form.portSel ? (
@@ -1228,7 +1535,6 @@ export default function VesselCreateScreen() {
                 </Pressable>
               </View>
 
-              {/* owner warning */}
               {!ownerDbId ? (
                 <View className="rounded-xl border px-3 py-3" style={{ borderColor: "#fecaca", backgroundColor: UI.redSoft }}>
                   <Text className="text-sm font-semibold" style={{ color: UI.red }}>
@@ -1272,10 +1578,7 @@ export default function VesselCreateScreen() {
 
         {/* Fuel Modal */}
         <Modal transparent visible={fuelOpen} animationType="fade">
-          <Pressable
-            onPress={() => setFuelOpen(false)}
-            className="flex-1 bg-black/40 items-center justify-center px-6"
-          >
+          <Pressable onPress={() => setFuelOpen(false)} className="flex-1 bg-black/40 items-center justify-center px-6">
             <Pressable
               onPress={() => {}}
               className="w-full rounded-2xl border overflow-hidden"
@@ -1297,15 +1600,6 @@ export default function VesselCreateScreen() {
             </Pressable>
           </Pressable>
         </Modal>
-
-        {/* Footer note */}
-        <View className="mt-4 px-2">
-          <Text className="text-xs" style={{ color: UI.muted }}>
-            Payload includes{" "}
-            <Text style={{ fontWeight: "900", color: UI.text }}>owner_id</Text>{" "}
-            and home_port from selected Port. Offline saves to queue and auto-syncs when online.
-          </Text>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
