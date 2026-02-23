@@ -13,7 +13,10 @@ import { Provider } from "react-redux";
 import { store } from "../src/store/auth/store";
 import { useAppDispatch, useAppSelector } from "../src/store/hooks";
 
-import { restoreSession, selectAuthSession } from "../src/store/auth/authSession.slice";
+import {
+  restoreSession,
+  selectAuthSession,
+} from "../src/store/auth/authSession.slice";
 import { fetchMe, restoreMeFromCache } from "../src/store/auth/me.slice";
 
 import NetInfo from "@react-native-community/netinfo";
@@ -41,7 +44,7 @@ function RootLayoutInner() {
   const { token, hydrated } = useAppSelector(selectAuthSession);
   const meState = useAppSelector((s: any) => s.me);
 
-  // 👇 IMPORTANT: use your real slice path
+  // IMPORTANT: use your real slice path
   const networkOnline = useAppSelector((s: any) => s.network?.online);
 
   const restoredRouteRef = useRef(false);
@@ -56,12 +59,16 @@ function RootLayoutInner() {
     dispatch(restoreSession());
   }, [dispatch]);
 
-  // network monitor
+  // network monitor (keep stable; don't treat null as offline)
   useEffect(() => {
     let mounted = true;
 
     const apply = (state: any) => {
-      const online = !!state.isConnected && (state.isInternetReachable ?? true);
+      // ✅ Treat "null reachability" as "unknown/ok", not offline.
+      // Offline is only when connected is false OR internetReachable is explicitly false.
+      const online =
+        state.isConnected === true && state.isInternetReachable !== false;
+
       dispatch(setNetworkOnline(online));
     };
 
@@ -81,7 +88,7 @@ function RootLayoutInner() {
     };
   }, [dispatch]);
 
-  // ✅ Save last route (only when NOT in auth)
+  // Save last route (only when NOT in auth)
   useEffect(() => {
     const inAuthGroup = segments[0] === "(auth)";
     if (!pathname) return;
@@ -89,18 +96,31 @@ function RootLayoutInner() {
     AsyncStorage.setItem(LAST_ROUTE_KEY, pathname).catch(() => { });
   }, [pathname, segments]);
 
-  // ✅ load ME smartly:
-  // - online: fetch from API
-  // - offline: restore from cache
+  /**
+   * ✅ ME loading strategy (MINIMUM change, keeps old behavior)
+   * - If OFFLINE: restore cached me only
+   * - Otherwise: fetchMe as before (primary source)
+   * - If fetchMe fails due to NETWORK_ERROR: fallback to cache
+   *
+   * This prevents old cached "WILD" me from overriding a new "QUALITY" login while online.
+   */
   useEffect(() => {
     if (!hydrated || !token) return;
 
+    // confirmed offline -> only cache
     if (networkOnline === false) {
       dispatch(restoreMeFromCache());
       return;
     }
 
-    dispatch(fetchMe());
+    // online/unknown -> fetch first (old behavior)
+    (dispatch(fetchMe()) as any)
+      .unwrap()
+      .catch((e: any) => {
+        if (e === "NETWORK_ERROR") {
+          dispatch(restoreMeFromCache());
+        }
+      });
   }, [hydrated, token, networkOnline, dispatch]);
 
   // routing guard
@@ -116,26 +136,25 @@ function RootLayoutInner() {
       return;
     }
 
-    // ✅ token exists:
-    // If we are offline, NEVER force login due to fetchMe failing.
-    // Only force login when server says 401 (UNAUTHORIZED).
-    const errType = meState?.error?.type;
+    // error is STRING in your slice
+    const err = (meState?.error as string | null) ?? null;
 
-    if (errType === "UNAUTHORIZED") {
+    // ✅ Only kick to login when truly invalid session
+    if (err === "UNAUTHORIZED" || err === "NO_TOKEN") {
       router.replace("/(auth)/login");
       return;
     }
 
-    // ✅ If no me yet, but offline (or server error), allow app to continue
-    // and try restoring last route once.
+    // If no me yet:
     if (!meState.me) {
-      if (networkOnline === false || errType === "NETWORK" || errType === "SERVER") {
+      // ✅ offline fetch failure should not force login
+      if (networkOnline === false || err === "NETWORK_ERROR") {
         if (inAuthGroup && !restoredRouteRef.current) {
           restoredRouteRef.current = true;
           AsyncStorage.getItem(LAST_ROUTE_KEY)
             .then((last) => {
               if (last) router.replace(last as any);
-              else router.replace("/(wild)/dashboard"); // fallback
+              else router.replace("/(wild)/dashboard"); // fallback (keep your existing)
             })
             .catch(() => router.replace("/(wild)/dashboard"));
         }
@@ -147,7 +166,7 @@ function RootLayoutInner() {
       return;
     }
 
-    // if you reached here: token + me exists => your existing status routing logic
+    // token + me exists -> your existing status routing logic (UNCHANGED)
     const me = meState.me;
     const status = String(me.status || me.verification_status || "").toUpperCase();
     const rtype = String(me.rootverse_type || "").toUpperCase();
@@ -168,7 +187,16 @@ function RootLayoutInner() {
       if (rtype.includes("MARI")) return router.replace("/mariculture");
       return;
     }
-  }, [hydrated, token, segments, meState.loading, meState.me, meState.error, networkOnline, router]);
+  }, [
+    hydrated,
+    token,
+    segments,
+    meState.loading,
+    meState.me,
+    meState.error,
+    networkOnline,
+    router,
+  ]);
 
   if (!hydrated) {
     return <View style={{ flex: 1, backgroundColor: "black" }} />;
