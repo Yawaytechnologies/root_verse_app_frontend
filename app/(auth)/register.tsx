@@ -5,6 +5,7 @@ import { router } from "expo-router";
 import React, { useMemo, useRef, useState } from "react";
 import {
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -24,9 +25,10 @@ cssInterop(LinearGradient, { className: "style" });
 /** ✅ Redux */
 import { useDispatch, useSelector } from "react-redux";
 import {
+  fetchCountries,
+  fetchStatesByCountry,
   fetchDistrictsByState,
   fetchLocationsByDistrict,
-  fetchStates,
 } from "../../src/store/auth/location.slice";
 import {
   registerUser,
@@ -115,25 +117,31 @@ function Glass({
 
 /**
  * ✅ ModalFrame (NO <Modal>)
+ * ✅ UPDATED: can lift panel when keyboard opens
+ * ✅ UPDATED: REMOVED OUTER BORDER LINE (no border on panel)
  */
 function ModalFrame({
   visible,
   onClose,
   zClass = "z-[10000]",
   roundedClass = "rounded-3xl",
+  containerClassName = "justify-center",
+  panelStyle,
   children,
 }: {
   visible: boolean;
   onClose: () => void;
   zClass?: string;
   roundedClass?: string;
+  containerClassName?: string;
+  panelStyle?: any;
   children: React.ReactNode;
 }) {
   if (!visible) return null;
 
   return (
     <View
-      className={`absolute inset-0 items-center justify-center px-5 ${zClass}`}
+      className={`absolute inset-0 items-center px-5 ${zClass} ${containerClassName}`}
       pointerEvents="box-none"
     >
       <Pressable
@@ -142,8 +150,10 @@ function ModalFrame({
         pointerEvents="auto"
       />
 
+      {/* ✅ Removed: border border-white/10 */}
       <View
-        className={`w-full max-w-[520px] h-[74%] overflow-hidden border border-white/10 bg-black ${roundedClass}`}
+        style={panelStyle}
+        className={`w-full max-w-[520px] h-[74%] overflow-hidden bg-black ${roundedClass}`}
         pointerEvents="auto"
       >
         {children}
@@ -211,7 +221,7 @@ function ModuleCard({
   );
 }
 
-/** ✅ State/District/Location list modal */
+/** ✅ Generic Select list modal */
 function SelectListModal<T extends { id: number; name: string }>({
   open,
   title,
@@ -310,10 +320,17 @@ function RegisterModal({
   const dispatch = useDispatch<AppDispatch>();
   const loading = useSelector((s: RootState) => s.registration.loading);
 
+  const insets = useSafeAreaInsets();
+
   const {
+    countries,
+    countriesLoading,
+    countriesError,
+
     states,
     statesLoading,
     statesError,
+
     districtsByStateId,
     districtsLoadingByStateId,
     districtsErrorByStateId,
@@ -328,10 +345,12 @@ function RegisterModal({
   const [address, setAddress] = useState("");
   const [profile_image_uri, setProfileUri] = useState("");
 
+  const [countryId, setCountryId] = useState<number | null>(null);
   const [stateId, setStateId] = useState<number | null>(null);
   const [districtId, setDistrictId] = useState<number | null>(null);
   const [locationId, setLocationId] = useState<number | null>(null);
 
+  const [countryModal, setCountryModal] = useState(false);
   const [stateModal, setStateModal] = useState(false);
   const [districtModal, setDistrictModal] = useState(false);
   const [locationModal, setLocationModal] = useState(false);
@@ -343,8 +362,34 @@ function RegisterModal({
   const [row1Y, setRow1Y] = useState(0);
   const [row2Y, setRow2Y] = useState(0);
   const [row3Y, setRow3Y] = useState(0);
+  const [profileY, setProfileY] = useState(0);
   const [addressY, setAddressY] = useState(0);
   const [submitY, setSubmitY] = useState(0);
+
+  const [kbOpen, setKbOpen] = useState(false);
+  const [kbH, setKbH] = useState(0);
+
+  React.useEffect(() => {
+    const showEvt =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvt =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const showSub = Keyboard.addListener(showEvt as any, (e: any) => {
+      setKbOpen(true);
+      setKbH(e?.endCoordinates?.height ?? 0);
+    });
+
+    const hideSub = Keyboard.addListener(hideEvt as any, () => {
+      setKbOpen(false);
+      setKbH(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -353,14 +398,18 @@ function RegisterModal({
     setPhoneNo("");
     setAddress("");
     setProfileUri("");
+
+    setCountryId(null);
     setStateId(null);
     setDistrictId(null);
     setLocationId(null);
+
+    setCountryModal(false);
     setStateModal(false);
     setDistrictModal(false);
     setLocationModal(false);
 
-    dispatch(fetchStates());
+    dispatch(fetchCountries());
 
     const t = setTimeout(() => userRef.current?.focus?.(), 180);
     return () => clearTimeout(t);
@@ -378,7 +427,8 @@ function RegisterModal({
   );
 
   const districtsError = useMemo(
-    () => (!!stateId ? (districtsErrorByStateId?.[stateId] ?? null) : null),
+    () =>
+      !!stateId ? (districtsErrorByStateId?.[stateId] ?? null) : null,
     [stateId, districtsErrorByStateId],
   );
 
@@ -394,8 +444,14 @@ function RegisterModal({
   );
 
   const locationsError = useMemo(
-    () => (!!districtId ? (locationsErrorByDistrictId?.[districtId] ?? null) : null),
+    () =>
+      !!districtId ? (locationsErrorByDistrictId?.[districtId] ?? null) : null,
     [districtId, locationsErrorByDistrictId],
+  );
+
+  const selectedCountryName = useMemo(
+    () => countries?.find((c: any) => c.id === countryId)?.name ?? "",
+    [countries, countryId],
   );
 
   const selectedStateName = useMemo(
@@ -418,6 +474,7 @@ function RegisterModal({
     isValidPhone10(phone_no) &&
     isValidAddress(address) &&
     profile_image_uri.trim().length > 0 &&
+    !!countryId &&
     !!stateId &&
     !!districtId &&
     !!locationId;
@@ -438,6 +495,12 @@ function RegisterModal({
       scrollToY(row1Y);
       return false;
     }
+
+    if (!countryId) {
+      showToast({ type: "info", text1: "Select country" });
+      scrollToY(row2Y);
+      return false;
+    }
     if (!stateId) {
       showToast({ type: "info", text1: "Select state" });
       scrollToY(row2Y);
@@ -445,7 +508,7 @@ function RegisterModal({
     }
     if (!districtId) {
       showToast({ type: "info", text1: "Select district" });
-      scrollToY(row2Y);
+      scrollToY(row3Y);
       return false;
     }
     if (!locationId) {
@@ -455,7 +518,7 @@ function RegisterModal({
     }
     if (!profile_image_uri.trim()) {
       showToast({ type: "info", text1: "Select profile photo" });
-      scrollToY(row3Y);
+      scrollToY(profileY);
       return false;
     }
     if (!isValidAddress(address)) {
@@ -504,9 +567,11 @@ function RegisterModal({
         address: address.trim(),
         rootverse_type,
         profile_image_uri,
+
+        country_id: countryId!,
         state_id: stateId!,
         district_id: districtId!,
-        location_id: locationId!, // ✅ NEW
+        location_id: locationId!,
       } as any),
     );
 
@@ -534,11 +599,29 @@ function RegisterModal({
   return (
     <>
       <SelectListModal
+        open={countryModal}
+        title="Select Country"
+        items={countries || []}
+        loading={!!countriesLoading}
+        selectedId={countryId}
+        onClose={() => setCountryModal(false)}
+        onSelect={(c: any) => {
+          setCountryId(c.id);
+          setStateId(null);
+          setDistrictId(null);
+          setLocationId(null);
+          setCountryModal(false);
+          dispatch(fetchStatesByCountry({ countryId: c.id }));
+        }}
+      />
+
+      <SelectListModal
         open={stateModal}
         title="Select State"
         items={states || []}
         loading={!!statesLoading}
         selectedId={stateId}
+        disabledText={!countryId ? "Select country first" : undefined}
         onClose={() => setStateModal(false)}
         onSelect={(st: any) => {
           setStateId(st.id);
@@ -584,9 +667,11 @@ function RegisterModal({
         onClose={onClose}
         zClass="z-[10000]"
         roundedClass="rounded-[26px]"
+        containerClassName={kbOpen ? "justify-start pt-8" : "justify-center"}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 24 : 0}
           className="flex-1"
         >
           <Glass intensity={14} className="p-4 flex-1">
@@ -622,9 +707,11 @@ function RegisterModal({
               keyboardDismissMode="on-drag"
               nestedScrollEnabled
               className="flex-1 mt-3"
-              contentContainerStyle={{ paddingBottom: 16 }}
+              contentContainerStyle={{
+                paddingBottom: 16 + (kbOpen ? kbH : 0),
+              }}
             >
-              {/* Row 1: Username + Phone */}
+              {/* Row 1 */}
               <View onLayout={(e) => setRow1Y(e.nativeEvent.layout.y)}>
                 <View className="flex-row">
                   <View className="flex-1 mr-3">
@@ -653,7 +740,11 @@ function RegisterModal({
                       Phone
                     </Text>
                     <View className="flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
-                      <Ionicons name="call-outline" size={16} color="#94a3b8" />
+                      <Ionicons
+                        name="call-outline"
+                        size={16}
+                        color="#94a3b8"
+                      />
                       <TextInput
                         value={phone_no}
                         onChangeText={(t) =>
@@ -670,7 +761,7 @@ function RegisterModal({
                 </View>
               </View>
 
-              {/* Row 2: State + District */}
+              {/* Row 2: Country + State */}
               <View
                 className="mt-3"
                 onLayout={(e) => setRow2Y(e.nativeEvent.layout.y)}
@@ -678,13 +769,64 @@ function RegisterModal({
                 <View className="flex-row">
                   <View className="flex-1 mr-3">
                     <Text className="text-slate-300 text-[11px] mb-1.5">
+                      Country
+                    </Text>
+                    <Pressable
+                      onPress={() => setCountryModal(true)}
+                      className="flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-5"
+                    >
+                      <Ionicons
+                        name="flag-outline"
+                        size={16}
+                        color="#94a3b8"
+                      />
+                      <Text
+                        className={[
+                          "flex-1 ml-2.5 text-[12px]",
+                          selectedCountryName ? "text-white" : "text-slate-500",
+                        ].join(" ")}
+                        numberOfLines={1}
+                      >
+                        {countriesLoading
+                          ? "Loading..."
+                          : selectedCountryName || "Select"}
+                      </Text>
+                      <Ionicons
+                        name="chevron-down"
+                        size={16}
+                        color="#cbd5e1"
+                      />
+                    </Pressable>
+                  </View>
+
+                  <View className="flex-1">
+                    <Text className="text-slate-300 text-[11px] mb-1.5">
                       State
                     </Text>
                     <Pressable
-                      onPress={() => setStateModal(true)}
-                      className="flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-5"
+                      onPress={() => {
+                        if (!countryId) {
+                          showToast({
+                            type: "info",
+                            text1: "Select country first",
+                          });
+                          return;
+                        }
+                        if (!statesLoading && (!states || states.length === 0)) {
+                          dispatch(fetchStatesByCountry({ countryId }));
+                        }
+                        setStateModal(true);
+                      }}
+                      className={[
+                        "flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-5",
+                        countryId ? "opacity-100" : "opacity-60",
+                      ].join(" ")}
                     >
-                      <Ionicons name="map-outline" size={16} color="#94a3b8" />
+                      <Ionicons
+                        name="map-outline"
+                        size={16}
+                        color="#94a3b8"
+                      />
                       <Text
                         className={[
                           "flex-1 ml-2.5 text-[12px]",
@@ -692,15 +834,40 @@ function RegisterModal({
                         ].join(" ")}
                         numberOfLines={1}
                       >
-                        {statesLoading
-                          ? "Loading..."
-                          : selectedStateName || "Select"}
+                        {!countryId
+                          ? "Select country"
+                          : statesLoading
+                            ? "Loading..."
+                            : selectedStateName || "Select"}
                       </Text>
-                      <Ionicons name="chevron-down" size={16} color="#cbd5e1" />
+                      <Ionicons
+                        name="chevron-down"
+                        size={16}
+                        color="#cbd5e1"
+                      />
                     </Pressable>
                   </View>
+                </View>
 
-                  <View className="flex-1">
+                {!!countriesError && (
+                  <Text className="text-red-300 text-[11px] mt-2">
+                    Country API error: {countriesError}
+                  </Text>
+                )}
+                {!!statesError && (
+                  <Text className="text-red-300 text-[11px] mt-2">
+                    State API error: {statesError}
+                  </Text>
+                )}
+              </View>
+
+              {/* Row 3: District + Location */}
+              <View
+                className="mt-3"
+                onLayout={(e) => setRow3Y(e.nativeEvent.layout.y)}
+              >
+                <View className="flex-row">
+                  <View className="flex-1 mr-3">
                     <Text className="text-slate-300 text-[11px] mb-1.5">
                       District
                     </Text>
@@ -731,9 +898,7 @@ function RegisterModal({
                       <Text
                         className={[
                           "flex-1 ml-2.5 text-[12px]",
-                          selectedDistrictName
-                            ? "text-white"
-                            : "text-slate-500",
+                          selectedDistrictName ? "text-white" : "text-slate-500",
                         ].join(" ")}
                         numberOfLines={1}
                       >
@@ -743,30 +908,15 @@ function RegisterModal({
                             ? "Loading..."
                             : selectedDistrictName || "Select"}
                       </Text>
-                      <Ionicons name="chevron-down" size={16} color="#cbd5e1" />
+                      <Ionicons
+                        name="chevron-down"
+                        size={16}
+                        color="#cbd5e1"
+                      />
                     </Pressable>
                   </View>
-                </View>
 
-                {!!districtsError && (
-                  <Text className="text-red-300 text-[11px] mt-2">
-                    District API error: {districtsError}
-                  </Text>
-                )}
-                {!!statesError && (
-                  <Text className="text-red-300 text-[11px] mt-2">
-                    State API error: {statesError}
-                  </Text>
-                )}
-              </View>
-
-              {/* Row 3: Location + Profile Picture (profile at last) */}
-              <View
-                className="mt-3"
-                onLayout={(e) => setRow3Y(e.nativeEvent.layout.y)}
-              >
-                <View className="flex-row">
-                  <View className="flex-1 mr-3">
+                  <View className="flex-1">
                     <Text className="text-slate-300 text-[11px] mb-1.5">
                       Location
                     </Text>
@@ -797,9 +947,7 @@ function RegisterModal({
                       <Text
                         className={[
                           "flex-1 ml-2.5 text-[12px]",
-                          selectedLocationName
-                            ? "text-white"
-                            : "text-slate-500",
+                          selectedLocationName ? "text-white" : "text-slate-500",
                         ].join(" ")}
                         numberOfLines={1}
                       >
@@ -809,55 +957,20 @@ function RegisterModal({
                             ? "Loading..."
                             : selectedLocationName || "Select"}
                       </Text>
-                      <Ionicons name="chevron-down" size={16} color="#cbd5e1" />
-                    </Pressable>
-                  </View>
-
-                  <View className="flex-1">
-                    <Text className="text-slate-300 text-[11px] mb-1.5">
-                      Profile Picture
-                    </Text>
-                    <Pressable
-                      onPress={pickImage}
-                      className="flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5"
-                    >
-                      <View className="h-10 w-10 rounded-2xl overflow-hidden bg-white/10 border border-white/10 items-center justify-center">
-                        {profile_image_uri ? (
-                          <Image
-                            source={{ uri: profile_image_uri }}
-                            className="h-10 w-10"
-                          />
-                        ) : (
-                          <Ionicons
-                            name="image-outline"
-                            size={18}
-                            color="#94a3b8"
-                          />
-                        )}
-                      </View>
-
-                      <View className="flex-1 ml-3">
-                        <Text
-                          className="text-white text-xs font-bold"
-                          numberOfLines={1}
-                        >
-                          {profile_image_uri
-                            ? "Photo selected"
-                            : "Choose photo"}
-                        </Text>
-                        <Text
-                          className="text-slate-400 text-[10px] mt-0.5"
-                          numberOfLines={1}
-                        >
-                          {profile_image_uri
-                            ? "Ready"
-                            : "Tap to pick a profile image"}
-                        </Text>
-                      </View>
+                      <Ionicons
+                        name="chevron-down"
+                        size={16}
+                        color="#cbd5e1"
+                      />
                     </Pressable>
                   </View>
                 </View>
 
+                {!!districtsError && (
+                  <Text className="text-red-300 text-[11px] mt-2">
+                    District API error: {districtsError}
+                  </Text>
+                )}
                 {!!locationsError && (
                   <Text className="text-red-300 text-[11px] mt-2">
                     Location API error: {locationsError}
@@ -865,7 +978,55 @@ function RegisterModal({
                 )}
               </View>
 
-              {/* Address (below) */}
+              {/* Profile Picture */}
+              <View
+                className="mt-3"
+                onLayout={(e) => setProfileY(e.nativeEvent.layout.y)}
+              >
+                <Text className="text-slate-300 text-[11px] mb-1.5">
+                  Profile Picture
+                </Text>
+                <Pressable
+                  onPress={pickImage}
+                  className="flex-row items-center rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5"
+                >
+                  <View className="h-12 w-12 rounded-2xl overflow-hidden bg-white/10 border border-white/10 items-center justify-center">
+                    {profile_image_uri ? (
+                      <Image
+                        source={{ uri: profile_image_uri }}
+                        className="h-12 w-12"
+                      />
+                    ) : (
+                      <Ionicons
+                        name="image-outline"
+                        size={20}
+                        color="#94a3b8"
+                      />
+                    )}
+                  </View>
+
+                  <View className="flex-1 ml-3">
+                    <Text
+                      className="text-white text-xs font-bold"
+                      numberOfLines={1}
+                    >
+                      {profile_image_uri ? "Photo selected" : "Choose photo"}
+                    </Text>
+                    <Text
+                      className="text-slate-400 text-[10px] mt-0.5"
+                      numberOfLines={1}
+                    >
+                      {profile_image_uri
+                        ? "Ready"
+                        : "Tap to pick a profile image"}
+                    </Text>
+                  </View>
+
+                  <Ionicons name="chevron-forward" size={18} color="#cbd5e1" />
+                </Pressable>
+              </View>
+
+              {/* Address */}
               <View
                 className="mt-3"
                 onLayout={(e) => setAddressY(e.nativeEvent.layout.y)}
@@ -889,9 +1050,6 @@ function RegisterModal({
                     placeholderTextColor="#64748b"
                     multiline
                     textAlignVertical="top"
-                    onFocus={() => {
-                      setTimeout(() => scrollToY(submitY), 120);
-                    }}
                     className="flex-1 ml-2.5 text-white text-[12px] min-h-[64px]"
                   />
                 </View>
