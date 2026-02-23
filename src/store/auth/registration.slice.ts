@@ -19,11 +19,13 @@ export type RegistrationResponse = {
   updated_at: string;
 
   owner_id?: string;
+
+  country?: { id: number; name: string }; // ✅ NEW (optional)
   state?: { id: number; name: string };
   district?: { id: number; name: string };
-  // optional (backend may/may not return)
   location?: { id: number; name: string };
 
+  country_name?: string; // ✅ optional (if backend returns)
   state_name?: string;
   district_name?: string;
 };
@@ -41,8 +43,6 @@ const initialState: RegistrationState = {
 };
 
 const REGISTER_PATH = "/api/owner";
-
-// ✅ must match backend (multer field name)
 const FILE_FIELD = "profileImage";
 
 function getFilename(uri: string) {
@@ -68,10 +68,9 @@ export const registerUser = createAsyncThunk<
     rootverse_type: RootverseType;
     profile_image_uri: string;
 
+    country_id: number; // ✅ NEW
     state_id: number;
     district_id: number;
-
-    // ✅ ADD THIS
     location_id: number;
   },
   { rejectValue: string }
@@ -87,10 +86,9 @@ export const registerUser = createAsyncThunk<
       return thunkAPI.rejectWithValue("Phone must be 10 digits");
     if (!address) return thunkAPI.rejectWithValue("Address required");
 
+    if (!payload.country_id) return thunkAPI.rejectWithValue("Country required"); // ✅ NEW
     if (!payload.state_id) return thunkAPI.rejectWithValue("State required");
     if (!payload.district_id) return thunkAPI.rejectWithValue("District required");
-
-    // ✅ REQUIRED FOR DB location_id
     if (!payload.location_id) return thunkAPI.rejectWithValue("Location required");
 
     if (!payload.profile_image_uri)
@@ -102,13 +100,11 @@ export const registerUser = createAsyncThunk<
     form.append("address", address);
     form.append("rootverse_type", payload.rootverse_type);
 
+    form.append("country_id", String(payload.country_id)); // ✅ NEW
     form.append("state_id", String(payload.state_id));
     form.append("district_id", String(payload.district_id));
-
-    // ✅ THIS was missing -> DB got NULL
     form.append("location_id", String(payload.location_id));
 
-    // ✅ ImagePicker uri is fine (no base64)
     const uri = payload.profile_image_uri;
     const name = getFilename(uri);
     const type = getMime(name);
@@ -148,12 +144,14 @@ const registrationSlice = createSlice({
         (state, action: PayloadAction<RegistrationResponse>) => {
           state.loading = false;
           state.lastCreated = action.payload;
-        }
+        },
       )
       .addCase(registerUser.rejected, (state, action) => {
         state.loading = false;
         state.error =
-          (action.payload as string) || action.error.message || "Registration failed";
+          (action.payload as string) ||
+          action.error.message ||
+          "Registration failed";
       });
   },
 });
