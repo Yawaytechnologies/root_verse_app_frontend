@@ -9,6 +9,7 @@ import {
 } from "./sessionStorage";
 
 const AUTH_TOKEN_KEY = "auth_token";
+const ME_CACHE_KEY = "me_cache_v1"; // ✅ add this
 
 type AuthSessionState = {
   token: string | null;
@@ -47,8 +48,11 @@ export const persistSession = createAsyncThunk(
     };
     await saveSession(session);
 
-    // ✅ sync legacy token storage
+    // sync legacy token storage
     await AsyncStorage.setItem(AUTH_TOKEN_KEY, token).catch(() => { });
+
+    // ✅ IMPORTANT: clear cached ME so old role cannot override new login
+    await AsyncStorage.removeItem(ME_CACHE_KEY).catch(() => { });
 
     return session;
   }
@@ -57,11 +61,12 @@ export const persistSession = createAsyncThunk(
 export const logoutSession = createAsyncThunk("authSession/logout", async () => {
   await clearSession();
 
-  // ✅ wipe persistent keys that cause role leak / wrong routing
+  // wipe persistent keys
   await AsyncStorage.multiRemove([
     AUTH_TOKEN_KEY,
     "owner_code",
     "owner_id",
+    ME_CACHE_KEY, // ✅ add this
   ]).catch(() => { });
 
   return true;
@@ -95,7 +100,6 @@ const slice = createSlice({
     });
 
     b.addCase(logoutSession.fulfilled, (state) => {
-      // keep hydrated true so layout doesn't freeze
       state.token = null;
       state.expiresAt = null;
       state.hydrated = true;
@@ -106,5 +110,4 @@ const slice = createSlice({
 export const { setToken } = slice.actions;
 export default slice.reducer;
 
-export const selectAuthSession = (s: any) =>
-  s.authSession as AuthSessionState;
+export const selectAuthSession = (s: any) => s.authSession as AuthSessionState;
