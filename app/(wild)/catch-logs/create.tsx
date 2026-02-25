@@ -62,7 +62,7 @@ type LiveLocation = {
   capturedAt: string;
 };
 
-type QrKind = "CRATE" | "VESSEL" | "UNKNOWN";
+type QrKind = "FISH" | "CRATE" | "VESSEL" | "UNKNOWN";
 type ScannedQr = { id: string; kind: QrKind };
 type SyncState = "NOT_SYNCED" | "SYNCING" | "SYNCED";
 
@@ -147,66 +147,65 @@ const i18n = {
     remove: "நீக்கு",
     langBtn: "English",
 
-    vessel: "Vessel",
-    chooseVessel: "Vessel தேர்வு செய்",
+    vessel: "படகு (Vessel)",
+    chooseVessel: "படகு தேர்வு செய்",
 
-    trip: "Approved Trip",
+    trip: "பயணம் (Trip)",
     chooseTrip: "Approved Trip தேர்வு செய்",
 
-    fishGroupsTitle: "Fish + QR குழுக்கள்",
-    addFish: "+ Add Fish",
-    selectFish: "Fish தேர்வு",
-    chooseSpecies: "மீன் வகை தேர்வு செய்யவும்",
-    fishSelected: "Selected Fish",
-    group: "Group",
-    selectGroupToScan: "Scan செய்ய ஒரு Fish Group-ஐ தேர்வு செய்யுங்கள்.",
-    groupNeedsFish: "இந்த group-க்கு முதலில் Fish தேர்வு செய்ய வேண்டும்.",
+    fishGroupsTitle: "மீன் + QR குழுக்கள்",
+    addFish: "+ மீன் சேர்க்க",
+    selectFish: "மீன் தேர்வு",
+    chooseSpecies: "மீன் வகை தேர்வு",
+    fishSelected: "தேர்ந்த மீன்",
+    group: "குழு",
+    selectGroupToScan: "QR scan செய்ய ஒரு குழுவை தேர்வு செய்யுங்கள்.",
+    groupNeedsFish: "இந்த குழுவில் முதலில் மீன் தேர்வு செய்ய வேண்டும்.",
     groupQrCount: (n: number) => `QR: ${n}`,
     totalQr: (n: number) => `மொத்த QR: ${n}`,
-    errNeedFishGroup: "குறைந்தது 1 Fish group உருவாக்குங்கள்",
-    errGroupFishMissing: "ஒவ்வொரு group-க்கும் Fish தேர்வு செய்ய வேண்டும்",
-    errGroupQrMissing: "ஒவ்வொரு group-க்கும் குறைந்தது 1 QR ஸ்கேன் செய்ய வேண்டும்",
+    errNeedFishGroup: "குறைந்தது 1 குழு உருவாக்க வேண்டும்",
+    errGroupFishMissing: "ஒவ்வொரு குழுவுக்கும் மீன் தேர்வு செய்ய வேண்டும்",
+    errGroupQrMissing: "ஒவ்வொரு குழுவுக்கும் குறைந்தது 1 QR scan செய்ய வேண்டும்",
 
     scanTitle: "QR ஸ்கேன்",
-    scanHint: "Vessel + Trip தேர்வு செய்த பிறகு Fish group-க்கு QR scan செய்யலாம்",
-    scannedList: "Scanned QRs",
+    scanHint: "மீன் தேர்வு செய்த பிறகு QR scan செய்யலாம்",
+    scannedList: "ஸ்கேன் செய்த QR-கள்",
     scanCount: (n: number) => `மொத்தம்: ${n}`,
 
     phaseScan: "SCAN",
     phasePhoto: "PHOTOS",
     phaseDone: "DONE",
-    doneScanning: "QR scan முடிந்தது → Next",
+    doneScanning: "QR முடிந்தது → அடுத்து",
     scanMore: "மீண்டும் QR scan",
-    photosStageTitle: "Fish Reference Photos (optional 1-2)",
-    capturePhoto: "Photo எடு",
-    finishFish: "இந்த Fish முடிந்தது",
+    photosStageTitle: "மீன் புகைப்படம் (விருப்பம் 1-2)",
+    capturePhoto: "புகைப்படம் எடு",
+    finishFish: "இந்த மீன் முடி",
     photo: "Photo",
 
-    camDenied: "Camera permission அனுமதி இல்லை",
+    camDenied: "Camera அனுமதி இல்லை",
     grantCam: "Camera அனுமதி கொடு",
 
-    torch: "Torch",
+    torch: "டார்ச்",
     torchOn: "ON",
     torchOff: "OFF",
 
-    dateTime: "Date & Time (Auto)",
+    dateTime: "தேதி & நேரம் (Auto)",
     date: "தேதி",
     time: "நேரம்",
     autoHint: "Save அழுத்தும் நேரத்தில் Date/Time auto ஆக capture ஆகும்.",
 
-    saved: "சேமிக்கப்பட்டது ",
-    offlineSaved:
-      "இணையம் இல்லை. Local-ல் save பண்ணிட்டோம். Net வந்தவுடன் auto sync ஆகும்.",
-    syncing: "Syncing pending...",
-    pending: "Pending sync",
+    saved: "சேமிக்கப்பட்டது",
+    offlineSaved: "இணையம் இல்லை. Local-ல் save. Net வந்தவுடன் auto sync ஆகும்.",
+    syncing: "Syncing...",
+    pending: "Pending",
 
     loadingOwner: "Owner loading...",
     loadingVessel: "Vessels loading...",
-    loadingTrips: "Approved trips loading...",
+    loadingTrips: "Trips loading...",
     loadingFish: "Fish types loading...",
 
-    noVessels: "இந்த owner-க்கு vessels இல்லை (backend check பண்ணு)",
-    noTrips: "இந்த owner-க்கு APPROVED trips இல்லை",
+    noVessels: "Vessel இல்லை",
+    noTrips: "Approved trips இல்லை",
 
     syncLabel: "Sync",
     syncNotSynced: "Not Synced",
@@ -214,15 +213,15 @@ const i18n = {
     syncSynced: "Fully Synced",
 
     scanBtn: "Fish Tag Scan",
-    scanDisabledMsg: "முதலில் அனைத்து Offline data-வும் Sync ஆகணும் (Fully Synced).",
-    scanModalTitle: "Fish Tag Scan (Read Only)",
+    scanDisabledMsg: "முதலில் Offline pending எல்லாம் Sync ஆகணும் (Fully Synced).",
+    scanModalTitle: "Fish Tag Scan",
     close: "Close",
 
     photoCamTitle: "Photo Capture",
     takePhoto: "Take Photo",
     cancel: "Cancel",
 
-    max2: "2 photos போதும் (max 2).",
+    max2: "Max 2 photos.",
 
     imgPreviewTitle: "Photo Preview",
 
@@ -231,21 +230,18 @@ const i18n = {
     yes: "ஆம்",
     no: "இல்லை",
 
-    step1Hint:
-      "முதலில் Vessel + Approved Trip தேர்வு செய்யுங்கள். பின்னர் QR scan screen செல்லலாம்.",
-    step2Hint:
-      "ஒவ்வொரு Fish Group-க்கும்: Fish தேர்வு → QR scan → (optional photos) → DONE.",
+    step1Hint: "1) படகு தேர்வு  2) Trip தேர்வு  3) அடுத்து",
+    step2Hint: "மீன் தேர்வு → QR scan → (Photo optional) → DONE",
     step3Hint: "Review செய்து Save செய்யுங்கள்.",
 
-    skipPhotos: "Photos skip செய்து முடிக்கவும்",
+    skipPhotos: "Photo இல்லாமலும் முடிக்கலாம்",
     optional: "Optional",
 
     lockedTitle: "Trip தேர்வு செய்யப்பட்டு வந்தது",
     lockedSub: "Trip List-ல இருந்து வந்ததால் Vessel/Trip மீண்டும் தேர்வு தேவையில்லை.",
     lockedChange: "Change",
-    lockedLoading: "Trip/Vessel loading...",
-    lockedMissing:
-      "Trip details கிடைக்கல. (Offline cache இல்லை). Change அழுத்தி manual select பண்ணலாம்.",
+    lockedLoading: "Loading...",
+    lockedMissing: "Trip details கிடைக்கல (Offline cache இல்லை). Change அழுத்தி manual select பண்ணலாம்.",
   },
   en: {
     title: "Catch Log",
@@ -272,16 +268,16 @@ const i18n = {
     chooseSpecies: "Choose species",
     fishSelected: "Selected Fish",
     group: "Group",
-    selectGroupToScan: "Select a Fish Group to scan QRs.",
-    groupNeedsFish: "Select fish for this group first.",
+    selectGroupToScan: "Select a group to scan QRs.",
+    groupNeedsFish: "Select fish first.",
     groupQrCount: (n: number) => `QR: ${n}`,
     totalQr: (n: number) => `Total QR: ${n}`,
-    errNeedFishGroup: "Create at least 1 fish group",
+    errNeedFishGroup: "Create at least 1 group",
     errGroupFishMissing: "Each group must have a selected fish",
     errGroupQrMissing: "Each group must have at least 1 scanned QR",
 
     scanTitle: "Scan QR",
-    scanHint: "Scan QRs inside a Fish Group after selecting Vessel + Trip",
+    scanHint: "Select fish, then scan QRs",
     scannedList: "Scanned QRs",
     scanCount: (n: number) => `Total: ${n}`,
 
@@ -289,8 +285,8 @@ const i18n = {
     phasePhoto: "PHOTOS",
     phaseDone: "DONE",
     doneScanning: "Done scanning → Next",
-    scanMore: "Scan more QRs",
-    photosStageTitle: "Fish Reference Photos (optional 1-2)",
+    scanMore: "Scan more",
+    photosStageTitle: "Fish Photo (optional 1-2)",
     capturePhoto: "Capture Photo",
     finishFish: "Finish this fish",
     photo: "Photo",
@@ -305,21 +301,20 @@ const i18n = {
     dateTime: "Date & Time (Auto)",
     date: "Date",
     time: "Time",
-    autoHint: "Date/Time will be captured automatically when you press Save.",
+    autoHint: "Date/Time captured automatically when you press Save.",
 
-    saved: "Saved ",
-    offlineSaved:
-      "No internet. Saved locally. Will auto-sync when network returns.",
-    syncing: "Syncing pending...",
-    pending: "Pending sync",
+    saved: "Saved",
+    offlineSaved: "No internet. Saved locally. Auto-sync when network returns.",
+    syncing: "Syncing...",
+    pending: "Pending",
 
     loadingOwner: "Loading owner...",
     loadingVessel: "Loading vessels...",
-    loadingTrips: "Loading approved trips...",
+    loadingTrips: "Loading trips...",
     loadingFish: "Loading fish types...",
 
-    noVessels: "No vessels for this owner (check backend)",
-    noTrips: "No APPROVED trips for this owner",
+    noVessels: "No vessels",
+    noTrips: "No approved trips",
 
     syncLabel: "Sync",
     syncNotSynced: "Not Synced",
@@ -327,8 +322,8 @@ const i18n = {
     syncSynced: "Fully Synced",
 
     scanBtn: "Fish Tag Scan",
-    scanDisabledMsg: "All offline data must be synced first (Fully Synced).",
-    scanModalTitle: "Fish Tag Scan (Read Only)",
+    scanDisabledMsg: "All offline pending must be synced first (Fully Synced).",
+    scanModalTitle: "Fish Tag Scan",
     close: "Close",
 
     photoCamTitle: "Photo Capture",
@@ -344,21 +339,18 @@ const i18n = {
     yes: "Yes",
     no: "No",
 
-    step1Hint: "Select Vessel + Approved Trip first. Then proceed to QR scanning.",
-    step2Hint:
-      "For each group: select Fish → scan QR → (optional photos) → DONE.",
+    step1Hint: "1) Choose Vessel  2) Choose Trip  3) Next",
+    step2Hint: "Select Fish → Scan QR → (Photo optional) → DONE",
     step3Hint: "Review and Save.",
 
-    skipPhotos: "Skip photos and finish",
+    skipPhotos: "Finish without photos",
     optional: "Optional",
 
     lockedTitle: "Trip selected from My Trips",
-    lockedSub:
-      "Because you came from Trip List, you don't need to select Vessel/Trip again.",
+    lockedSub: "You came from Trip List, so Vessel/Trip selection is locked.",
     lockedChange: "Change",
-    lockedLoading: "Loading Trip/Vessel...",
-    lockedMissing:
-      "Trip details not found (no offline cache). Tap Change to select manually.",
+    lockedLoading: "Loading...",
+    lockedMissing: "Trip details missing (no offline cache). Tap Change to select manually.",
   },
 };
 
@@ -388,10 +380,10 @@ function Card({
       className={`rounded-3xl border ${UI.border} ${UI.card} ${className}`}
       style={{
         shadowColor: "#000",
-        shadowOpacity: 0.06,
-        shadowRadius: 16,
-        shadowOffset: { width: 0, height: 8 },
-        elevation: 2,
+        shadowOpacity: 0.04,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 1,
       }}
     >
       {children}
@@ -399,170 +391,46 @@ function Card({
   );
 }
 
-function SectionTitle({
-  title,
-  right,
-}: {
-  title: string;
-  right?: React.ReactNode;
-}) {
-  return (
-    <View className="flex-row items-center justify-between">
-      <Text className={`text-base font-extrabold ${UI.text}`} numberOfLines={1}>
-        {title}
-      </Text>
-      {right ? <View>{right}</View> : null}
-    </View>
-  );
-}
-
-function Pill({
+function BigBadge({
   icon,
-  text,
+  label,
+  value,
   color,
   bg,
 }: {
-  icon?: any;
-  text: string;
+  icon: any;
+  label: string;
+  value: string;
   color: string;
   bg: string;
 }) {
   return (
     <View
-      className="flex-row items-center rounded-full px-3 py-2"
+      className="flex-row items-center rounded-2xl px-4 py-3"
       style={{ backgroundColor: bg }}
     >
-      {icon ? <Ionicons name={icon} size={16} color={color} /> : null}
-      <Text
-        className="ml-2 text-xs font-extrabold"
-        style={{ color }}
-        numberOfLines={1}
+      <View
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 14,
+          backgroundColor: "rgba(255,255,255,0.65)",
+          alignItems: "center",
+          justifyContent: "center",
+          marginRight: 10,
+        }}
       >
-        {text}
-      </Text>
+        <Ionicons name={icon} size={18} color={color} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text className="text-[11px] font-extrabold" style={{ color: "#111827", opacity: 0.8 }}>
+          {label}
+        </Text>
+        <Text className="text-base font-extrabold" style={{ color }} numberOfLines={1}>
+          {value}
+        </Text>
+      </View>
     </View>
-  );
-}
-
-function ActionTile({
-  icon,
-  title,
-  subtitle,
-  onPress,
-  disabled,
-  bg,
-  fg,
-  borderColor,
-}: {
-  icon: any;
-  title: string;
-  subtitle?: string;
-  onPress: () => void;
-  disabled?: boolean;
-  bg: string;
-  fg: string;
-  borderColor: string;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      className="rounded-2xl border px-4 py-4 active:opacity-90"
-      style={{
-        backgroundColor: bg,
-        borderColor,
-        opacity: disabled ? 0.5 : 1,
-      }}
-    >
-      <View className="flex-row items-center">
-        <View
-          style={{
-            width: 42,
-            height: 42,
-            borderRadius: 16,
-            backgroundColor: "rgba(255,255,255,0.25)",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Ionicons name={icon} size={22} color={fg} />
-        </View>
-        <View style={{ flex: 1, minWidth: 0, marginLeft: 12 }}>
-          <Text
-            className="text-base font-extrabold"
-            style={{ color: fg }}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.85}
-          >
-            {title}
-          </Text>
-          {subtitle ? (
-            <Text
-              className="mt-1 text-xs font-bold"
-              style={{ color: fg, opacity: 0.9 }}
-              numberOfLines={1}
-            >
-              {subtitle}
-            </Text>
-          ) : null}
-        </View>
-      </View>
-    </Pressable>
-  );
-}
-
-function BigSelect({
-  label,
-  value,
-  placeholder,
-  hint,
-  onPress,
-  disabled,
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  hint: string;
-  onPress: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      className={`rounded-2xl border ${UI.border} px-4 py-4 active:opacity-90`}
-      style={{ backgroundColor: disabled ? "#f3f4f6" : "white" }}
-    >
-      <View className="flex-row items-center justify-between">
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text className={`text-xs font-bold ${UI.muted}`} numberOfLines={1}>
-            {label}
-          </Text>
-          <Text
-            className={`mt-2 text-lg font-extrabold ${
-              value ? UI.text : "text-[#9ca3af]"
-            }`}
-            numberOfLines={2}
-            adjustsFontSizeToFit
-            minimumFontScale={0.85}
-          >
-            {value || placeholder}
-          </Text>
-          <Text className={`mt-2 text-xs ${UI.muted}`} numberOfLines={2}>
-            {hint}
-          </Text>
-        </View>
-
-        <View style={{ width: 12 }} />
-
-        <Ionicons
-          name="chevron-forward"
-          size={22}
-          color={disabled ? "#9ca3af" : "#111827"}
-        />
-      </View>
-    </Pressable>
   );
 }
 
@@ -588,14 +456,12 @@ function PrimaryBtn({
       style={{ backgroundColor: bg, opacity: disabled ? 0.85 : 1 }}
     >
       <View className="flex-row items-center justify-center">
-        {icon ? <Ionicons name={icon} size={18} color="white" /> : null}
+        {icon ? <Ionicons name={icon} size={20} color="white" /> : null}
         <Text
-          className={`text-center text-base font-extrabold text-white ${
-            icon ? "ml-2" : ""
-          }`}
+          className={`text-center text-lg font-extrabold text-white ${icon ? "ml-2" : ""}`}
           numberOfLines={1}
           adjustsFontSizeToFit
-          minimumFontScale={0.8}
+          minimumFontScale={0.85}
         >
           {label}
         </Text>
@@ -623,14 +489,12 @@ function GhostBtn({
       style={{ opacity: disabled ? 0.5 : 1 }}
     >
       <View className="flex-row items-center justify-center">
-        {icon ? <Ionicons name={icon} size={18} color="#111827" /> : null}
+        {icon ? <Ionicons name={icon} size={20} color="#111827" /> : null}
         <Text
-          className={`text-center text-base font-extrabold ${UI.text} ${
-            icon ? "ml-2" : ""
-          }`}
+          className={`text-center text-lg font-extrabold ${UI.text} ${icon ? "ml-2" : ""}`}
           numberOfLines={1}
           adjustsFontSizeToFit
-          minimumFontScale={0.8}
+          minimumFontScale={0.85}
         >
           {label}
         </Text>
@@ -639,25 +503,34 @@ function GhostBtn({
   );
 }
 
-function StepDots({ step }: { step: number }) {
+function StepHeader({
+  step,
+  title,
+  hint,
+  right,
+}: {
+  step: number;
+  title: string;
+  hint: string;
+  right?: React.ReactNode;
+}) {
   return (
-    <View className="flex-row items-center">
-      {[1, 2, 3, 4].map((n) => {
-        const active = n <= step;
-        return (
-          <View
-            key={n}
-            style={{
-              width: n === step ? 28 : 10,
-              height: 10,
-              borderRadius: 999,
-              marginRight: n === 4 ? 0 : 8,
-              backgroundColor: active ? UI.accent : "#e5e7eb",
-            }}
-          />
-        );
-      })}
-    </View>
+    <Card className="p-4">
+      <View className="flex-row items-center justify-between">
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text className="text-[12px] font-extrabold" style={{ color: UI.accent }}>
+            STEP {step}
+          </Text>
+          <Text className={`mt-1 text-xl font-extrabold ${UI.text}`} numberOfLines={2}>
+            {title}
+          </Text>
+          <Text className={`mt-2 text-sm font-semibold ${UI.muted}`} numberOfLines={3}>
+            {hint}
+          </Text>
+        </View>
+        {right ? <View style={{ marginLeft: 10 }}>{right}</View> : null}
+      </View>
+    </Card>
   );
 }
 
@@ -679,9 +552,27 @@ const fmtDateTime = (d: Date) => `${fmtDate(d)} ${fmtTime(d)}`;
 function classifyQr(id: string): QrKind {
   const v = String(id || "").trim().toUpperCase();
   if (!v) return "UNKNOWN";
+
+  // ✅ Vessel QR
   if (v.startsWith("RV-VESSEL-") || v.startsWith("RV-VES-")) return "VESSEL";
-  if (v.startsWith("RV-CRATE-") || v.startsWith("CRATE-") || v.startsWith("RV-BOX-"))
+
+  // ✅ Crate/Box QR
+  if (
+    v.startsWith("RV-CRATE-") ||
+    v.startsWith("CRATE-") ||
+    v.startsWith("RV-BOX-")
+  ) {
     return "CRATE";
+  }
+
+  // ✅ Fish Tag QR (example: IN-NA-WC-HL-001840)
+  // Pattern: AA-AA-AA-AA-<digits>
+  if (/^[A-Z]{2}-[A-Z]{2}-[A-Z]{2}-[A-Z]{2}-\d{4,}$/.test(v)) return "FISH";
+
+  // ✅ Slightly more flexible (if sometimes alnum segments appear)
+  // Pattern: AA-(AA|A1){3+}-<digits>
+  if (/^[A-Z]{2}(?:-[A-Z0-9]{2}){3,}-\d{4,}$/.test(v)) return "FISH";
+
   return "UNKNOWN";
 }
 
@@ -1202,27 +1093,27 @@ function FullScreenPickerModal({
           borderWidth: 1,
           borderColor: active ? ACCENT : BORDER,
           backgroundColor: active ? "rgba(147,197,253,0.10)" : CARD_BG,
-          paddingVertical: 14,
+          paddingVertical: 16,
           paddingHorizontal: 14,
         }}
       >
         <View style={{ flexDirection: "row", alignItems: "center" }}>
           <View
             style={{
-              width: 42,
-              height: 42,
-              borderRadius: 14,
+              width: 44,
+              height: 44,
+              borderRadius: 16,
               backgroundColor: "rgba(255,255,255,0.08)",
               alignItems: "center",
               justifyContent: "center",
               marginRight: 12,
             }}
           >
-            <Ionicons name={leadingIcon || "list-outline"} size={20} color="white" />
+            <Ionicons name={leadingIcon || "list-outline"} size={22} color="white" />
           </View>
 
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={{ color: "white", fontWeight: "800", fontSize: 15 }} numberOfLines={2}>
+            <Text style={{ color: "white", fontWeight: "900", fontSize: 16 }} numberOfLines={2}>
               {item.label}
             </Text>
             {!!item.subtitle ? (
@@ -1234,7 +1125,7 @@ function FullScreenPickerModal({
 
           <Ionicons
             name={active ? "checkmark-circle" : "chevron-forward"}
-            size={22}
+            size={24}
             color={active ? ACCENT : "rgba(255,255,255,0.70)"}
           />
         </View>
@@ -1245,7 +1136,6 @@ function FullScreenPickerModal({
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: BG }}>
-        {/* Header */}
         <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingTop: 6 }}>
           <Pressable
             onPress={onClose}
@@ -1262,7 +1152,6 @@ function FullScreenPickerModal({
           </Text>
         </View>
 
-        {/* Search */}
         <View
           style={{
             marginTop: 14,
@@ -1298,7 +1187,6 @@ function FullScreenPickerModal({
           ) : null}
         </View>
 
-        {/* List/Grid */}
         <View style={{ flex: 1, paddingTop: 14 }}>
           {mode === "grid" ? (
             <FlatList
@@ -1328,7 +1216,6 @@ function FullScreenPickerModal({
           )}
         </View>
 
-        {/* Bottom fixed button */}
         <View
           style={{
             position: "absolute",
@@ -1347,7 +1234,7 @@ function FullScreenPickerModal({
             disabled={!selectedItem}
             onPress={() => selectedItem && onConfirm(selectedItem)}
             style={{
-              height: 52,
+              height: 54,
               borderRadius: 999,
               alignItems: "center",
               justifyContent: "center",
@@ -2813,11 +2700,7 @@ export default function CreateCatchLog() {
         <View className="flex-1 bg-black/90 justify-center px-3">
           <View className="rounded-3xl overflow-hidden bg-black border border-white/10">
             <View className="flex-row items-center justify-between px-4 py-3 bg-black/60">
-              <Text
-                className="text-white font-extrabold text-base"
-                numberOfLines={1}
-                style={{ flex: 1 }}
-              >
+              <Text className="text-white font-extrabold text-base" numberOfLines={1} style={{ flex: 1 }}>
                 {t.imgPreviewTitle}
               </Text>
               <Pressable
@@ -2852,11 +2735,7 @@ export default function CreateCatchLog() {
         <View className="flex-1 bg-black/60 justify-end">
           <View className="bg-white rounded-t-3xl p-4">
             <View className="flex-row items-center justify-between">
-              <Text
-                className={`text-lg font-extrabold ${UI.text}`}
-                numberOfLines={1}
-                style={{ flex: 1 }}
-              >
+              <Text className={`text-lg font-extrabold ${UI.text}`} numberOfLines={1} style={{ flex: 1 }}>
                 {t.scanModalTitle}
               </Text>
               <Pressable
@@ -2894,20 +2773,11 @@ export default function CreateCatchLog() {
       </Modal>
 
       {/* ✅ Photo Camera Modal */}
-      <Modal
-        visible={photoCamOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={closePhotoCamera}
-      >
+      <Modal visible={photoCamOpen} transparent animationType="fade" onRequestClose={closePhotoCamera}>
         <View className="flex-1 bg-black/70 justify-center px-3">
           <View className="bg-white rounded-3xl p-4">
             <View className="flex-row items-center justify-between">
-              <Text
-                className={`text-lg font-extrabold ${UI.text}`}
-                numberOfLines={1}
-                style={{ flex: 1 }}
-              >
+              <Text className={`text-lg font-extrabold ${UI.text}`} numberOfLines={1} style={{ flex: 1 }}>
                 {t.photoCamTitle}
               </Text>
 
@@ -2940,12 +2810,7 @@ export default function CreateCatchLog() {
                 </View>
               ) : (
                 <View style={{ height: 420 }}>
-                  <CameraView
-                    ref={photoCamRef}
-                    style={{ flex: 1 }}
-                    facing="back"
-                    enableTorch={photoTorchEnabled}
-                  />
+                  <CameraView ref={photoCamRef} style={{ flex: 1 }} facing="back" enableTorch={photoTorchEnabled} />
                 </View>
               )}
             </View>
@@ -2963,65 +2828,25 @@ export default function CreateCatchLog() {
         </View>
       </Modal>
 
-      {/* ✅ SCROLL (Header + Content + Footer inside) */}
+      {/* CONTENT */}
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{
-          paddingBottom: 18 + (insets.bottom || 0),
-        }}
+        contentContainerStyle={{ paddingBottom: 18 + (insets.bottom || 0) + 92 }}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        {/* HEADER */}
-        <View className="px-4 pt-2 pb-3">
-          <Card className="px-4 py-4">
-            <View className="flex-row items-start justify-between">
+        {/* TOP HEADER (simple + big) */}
+        <View className="px-4 pt-3">
+          <Card className="p-4">
+            <View className="flex-row items-center justify-between">
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text className={`text-xl font-extrabold ${UI.text}`} numberOfLines={1}>
+                <Text className={`text-2xl font-extrabold ${UI.text}`} numberOfLines={1}>
                   {t.title}
                 </Text>
-
-                <View className="mt-2 flex-row items-center justify-between">
-                  <StepDots step={step} />
-                  <Text className={`text-xs font-bold ${UI.muted}`}>{t.step(step)}</Text>
-                </View>
-
-                <View className="mt-3 flex-row flex-wrap">
-                  <View style={{ marginRight: 10, marginBottom: 10 }}>
-                    <Pill
-                      icon={syncIcon as any}
-                      text={syncText}
-                      color={syncColor}
-                      bg={
-                        syncState === "SYNCED"
-                          ? "#ecfdf5"
-                          : syncState === "SYNCING"
-                            ? "#e0f2fe"
-                            : "#fffbeb"
-                      }
-                    />
-                  </View>
-
-                  <View style={{ marginRight: 10, marginBottom: 10 }}>
-                    <Pill
-                      icon={isOnline ? "wifi-outline" : "cloud-offline-outline"}
-                      text={isOnline ? "Online" : "Offline"}
-                      color={isOnline ? UI.success : UI.warn}
-                      bg={isOnline ? "#ecfdf5" : "#fffbeb"}
-                    />
-                  </View>
-
-                  <View style={{ marginBottom: 10 }}>
-                    <Pill
-                      icon="layers-outline"
-                      text={`${t.pending}: ${pendingCount}`}
-                      color="#111827"
-                      bg="#f3f4f6"
-                    />
-                  </View>
-                </View>
+                <Text className={`mt-1 text-sm font-semibold ${UI.muted}`} numberOfLines={1}>
+                  {t.step(step)}
+                </Text>
               </View>
-
-              <View style={{ width: 12 }} />
 
               <Pressable
                 onPress={() => setLang((p) => (p === "ta" ? "en" : "ta"))}
@@ -3031,538 +2856,673 @@ export default function CreateCatchLog() {
               </Pressable>
             </View>
 
-            <View className="mt-4">
-              <View className="flex-row">
-                <View style={{ flex: 1 }}>
-                  <ActionTile
-                    icon="flashlight-outline"
-                    title={lang === "ta" ? "டார்ச்" : "Torch"}
-                    subtitle={torchWanted ? t.torchOn : t.torchOff}
-                    onPress={() => setTorchWanted((p) => !p)}
-                    bg="#111827"
-                    fg="#ffffff"
-                    borderColor="#111827"
-                  />
-                </View>
-                <View style={{ width: 10 }} />
-                <View style={{ flex: 1 }}>
-                  <ActionTile
-                    icon="refresh-outline"
-                    title={lang === "ta" ? "ரீசெட்" : "Reset"}
-                    subtitle={lang === "ta" ? "அனைத்தும் நீக்கு" : "Clear all"}
-                    onPress={clearAll}
-                    bg="#f3f4f6"
-                    fg="#111827"
-                    borderColor="#e5e7eb"
-                  />
-                </View>
+            <View style={{ height: 12 }} />
+
+            <View className="flex-row" style={{ gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <BigBadge
+                  icon={isOnline ? "wifi-outline" : "cloud-offline-outline"}
+                  label={lang === "ta" ? "நெட்வொர்க்" : "Network"}
+                  value={isOnline ? "Online" : "Offline"}
+                  color={isOnline ? UI.success : UI.warn}
+                  bg={isOnline ? "#ecfdf5" : "#fffbeb"}
+                />
               </View>
-
-              <View style={{ height: 10 }} />
-
-              <PrimaryBtn
-                label={t.scanBtn}
-                onPress={openFishScan}
-                disabled={!scanFishEnabled}
-                icon="qr-code-outline"
-                color={scanFishEnabled ? UI.accent : "#cbd5e1"}
-              />
+              <View style={{ flex: 1 }}>
+                <BigBadge
+                  icon={syncIcon as any}
+                  label="Sync"
+                  value={syncText}
+                  color={syncColor}
+                  bg={syncState === "SYNCED" ? "#ecfdf5" : syncState === "SYNCING" ? "#e0f2fe" : "#fffbeb"}
+                />
+              </View>
             </View>
+
+            <View style={{ height: 10 }} />
+
+            <BigBadge
+              icon="layers-outline"
+              label={lang === "ta" ? "Pending" : "Pending"}
+              value={`${pendingCount}`}
+              color="#111827"
+              bg="#f3f4f6"
+            />
+
+            <View style={{ height: 12 }} />
+
+            <View className="flex-row" style={{ gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <PrimaryBtn
+                  label={`${t.torch}: ${torchWanted ? t.torchOn : t.torchOff}`}
+                  onPress={() => setTorchWanted((p) => !p)}
+                  icon="flashlight-outline"
+                  color="#111827"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <PrimaryBtn
+                  label={t.scanBtn}
+                  onPress={openFishScan}
+                  disabled={!scanFishEnabled}
+                  icon="qr-code-outline"
+                  color={scanFishEnabled ? UI.accent : "#cbd5e1"}
+                />
+              </View>
+            </View>
+
+            <View style={{ height: 10 }} />
+
+            <GhostBtn label={t.clearAll} onPress={clearAll} icon="refresh-outline" />
           </Card>
         </View>
 
-        {/* CONTENT */}
-        <View className="px-4">
-          {/* STEP 1 */}
-          {step === 1 ? (
-            <View>
-              <Card className="p-4">
-                <Text className={`text-sm ${UI.muted}`}>{t.step1Hint}</Text>
+        {/* STEP 1 */}
+        {step === 1 ? (
+          <View className="px-4 mt-4">
+            <StepHeader
+              step={1}
+              title={lang === "ta" ? "படகு & Trip தேர்வு" : "Select Vessel & Trip"}
+              hint={t.step1Hint}
+            />
 
-                <View className="mt-4">
-                  <BigSelect
-                    label={t.vessel}
-                    value={selectedVesselLabel}
-                    placeholder={t.chooseVessel}
-                    hint={
-                      vesselLoading
-                        ? t.loadingVessel
-                        : vessels.length
-                          ? `${vessels.length} vessels`
-                          : t.noVessels
-                    }
-                    onPress={() => setVesselPickerOpen(true)}
-                  />
+            <View style={{ height: 12 }} />
 
-                  <View style={{ height: 12 }} />
-
-                  <BigSelect
-                    label={t.trip}
-                    value={tripLabelText}
-                    placeholder={t.chooseTrip}
-                    hint={tripLoading ? t.loadingTrips : trips.length ? `${trips.length} trips` : t.noTrips}
-                    onPress={() => setTripPickerOpen(true)}
-                    disabled={!selectedVesselDbId && !lockTripSelection}
-                  />
-
-                  <View className="mt-4 rounded-2xl border border-[#e5e7eb] bg-[#f9fafb] px-4 py-3">
-                    <Text className={`text-xs ${UI.muted}`}>
-                      {ownerLoading ? t.loadingOwner : `Owner: ${ownerCode || "—"} (${ownerId || "—"})`}
+            <Card className="p-4">
+              <Pressable
+                onPress={() => setVesselPickerOpen(true)}
+                className={`rounded-2xl border ${UI.border} px-4 py-4 active:opacity-90`}
+                style={{ backgroundColor: "white" }}
+              >
+                <View className="flex-row items-center">
+                  <View
+                    style={{
+                      width: 46,
+                      height: 46,
+                      borderRadius: 18,
+                      backgroundColor: "#e0f2fe",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginRight: 12,
+                    }}
+                  >
+                    <Ionicons name="boat-outline" size={22} color="#075985" />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text className={`text-sm font-extrabold ${UI.muted}`}>{t.vessel}</Text>
+                    <Text className={`mt-1 text-lg font-extrabold ${UI.text}`} numberOfLines={2}>
+                      {selectedVesselLabel || t.chooseVessel}
                     </Text>
-                    <Text className={`mt-1 text-xs ${UI.muted}`}>
-                      {fishLoading ? t.loadingFish : `Fish types: ${fishTypes.length}`}
+                    <Text className={`mt-1 text-xs ${UI.muted}`} numberOfLines={1}>
+                      {vesselLoading ? t.loadingVessel : vessels.length ? `${vessels.length} vessels` : t.noVessels}
                     </Text>
                   </View>
+                  <Ionicons name="chevron-forward" size={22} color="#111827" />
                 </View>
-              </Card>
-            </View>
-          ) : null}
+              </Pressable>
 
-          {/* STEP 2 */}
-          {step === 2 ? (
-            <View>
-              {lockTripSelection ? (
-                <Card className="p-4 mb-3">
-                  <View className="flex-row items-center justify-between">
-                    <Text className={`text-sm font-extrabold ${UI.text}`} numberOfLines={1} style={{ flex: 1 }}>
-                      {t.lockedTitle}
+              <View style={{ height: 12 }} />
+
+              <Pressable
+                onPress={() => setTripPickerOpen(true)}
+                disabled={!selectedVesselDbId && !lockTripSelection}
+                className={`rounded-2xl border ${UI.border} px-4 py-4 active:opacity-90`}
+                style={{ backgroundColor: !selectedVesselDbId && !lockTripSelection ? "#f3f4f6" : "white" }}
+              >
+                <View className="flex-row items-center">
+                  <View
+                    style={{
+                      width: 46,
+                      height: 46,
+                      borderRadius: 18,
+                      backgroundColor: "#ecfdf5",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginRight: 12,
+                    }}
+                  >
+                    <Ionicons name="document-text-outline" size={22} color="#065f46" />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text className={`text-sm font-extrabold ${UI.muted}`}>{t.trip}</Text>
+                    <Text className={`mt-1 text-lg font-extrabold ${UI.text}`} numberOfLines={2}>
+                      {tripLabelText || t.chooseTrip}
                     </Text>
-
-                    <Pressable
-                      onPress={() => {
-                        setLockTripSelection(false);
-                        setStep(1);
-                      }}
-                      className="rounded-full px-4 py-2 active:opacity-80"
-                      style={{ backgroundColor: "#e0f2fe" }}
-                    >
-                      <Text className="text-xs font-extrabold" style={{ color: "#075985" }}>
-                        {t.lockedChange}
-                      </Text>
-                    </Pressable>
-                  </View>
-
-                  <Text className={`mt-2 text-xs ${UI.muted}`}>{t.lockedSub}</Text>
-
-                  <View className="mt-4 rounded-2xl border border-[#e5e7eb] bg-[#f9fafb] px-4 py-3">
-                    <View className="flex-row items-center">
-                      <Ionicons name="boat-outline" size={16} color="#111827" />
-                      <Text className={`ml-2 text-xs font-bold ${UI.muted}`}>Vessel</Text>
-                    </View>
-                    <Text className={`mt-1 text-base font-extrabold ${UI.text}`} numberOfLines={2}>
-                      {selectedVesselLabel || (prefillLoading ? t.lockedLoading : "—")}
-                    </Text>
-
-                    <View style={{ height: 10 }} />
-
-                    <View className="flex-row items-center">
-                      <Ionicons name="document-text-outline" size={16} color="#111827" />
-                      <Text className={`ml-2 text-xs font-bold ${UI.muted}`}>Trip</Text>
-                    </View>
-                    <Text className={`mt-1 text-base font-extrabold ${UI.text}`} numberOfLines={2}>
-                      {tripLabelText || routeTripParam || (prefillLoading ? t.lockedLoading : "—")}
-                    </Text>
-
-                    {!selectedVesselDbId || !tripId ? (
-                      <Text className="mt-3 text-xs font-extrabold" style={{ color: UI.warn }}>
-                        {prefillLoading ? t.lockedLoading : t.lockedMissing}
-                      </Text>
-                    ) : null}
-                  </View>
-                </Card>
-              ) : null}
-
-              <Card className="p-4">
-                <SectionTitle
-                  title={t.fishGroupsTitle}
-                  right={
-                    <Pressable
-                      onPress={addGroup}
-                      className="rounded-full px-4 py-2 active:opacity-80"
-                      style={{ backgroundColor: UI.accent }}
-                    >
-                      <Text className="text-white font-extrabold">{t.addFish}</Text>
-                    </Pressable>
-                  }
-                />
-
-                <Text className={`mt-2 text-xs ${UI.muted}`}>{t.step2Hint}</Text>
-
-                <View className="mt-3">
-                  {groups.map((g, idx) => {
-                    const active = g.id === activeGroupId;
-                    const fish = g.fishName || `${t.group} ${idx + 1}`;
-                    const qrN = g.scanned?.length || 0;
-                    const imgN = g.images?.length || 0;
-                    const phase = phaseLabel(g.phase);
-
-                    return (
-                      <Pressable
-                        key={g.id}
-                        onPress={() => setActiveGroupId(g.id)}
-                        className={`mb-2 rounded-2xl border px-4 py-4 active:opacity-90 ${
-                          active ? "border-[#bae6fd] bg-[#e0f2fe]" : `${UI.border} bg-white`
-                        }`}
-                      >
-                        <View className="flex-row items-center justify-between">
-                          <View style={{ flex: 1, minWidth: 0 }}>
-                            <Text className={`text-base font-extrabold ${UI.text}`} numberOfLines={1}>
-                              {idx + 1}. {fish}
-                            </Text>
-                            <Text className={`mt-1 text-xs ${UI.muted}`} numberOfLines={1}>
-                              {t.groupQrCount(qrN)} • {phase} • Img: {imgN} ({t.optional})
-                            </Text>
-                          </View>
-
-                          <View className="flex-row items-center">
-                            {active ? (
-                              <View
-                                className="rounded-full px-3 py-2"
-                                style={{
-                                  backgroundColor:
-                                    g.phase === "DONE"
-                                      ? "#ecfdf5"
-                                      : g.phase === "PHOTO"
-                                        ? "#e0f2fe"
-                                        : "#fffbeb",
-                                }}
-                              >
-                                <Text
-                                  className="text-xs font-extrabold"
-                                  style={{
-                                    color:
-                                      g.phase === "DONE" ? UI.success : g.phase === "PHOTO" ? UI.accent : UI.warn,
-                                  }}
-                                >
-                                  {phase}
-                                </Text>
-                              </View>
-                            ) : (
-                              <Ionicons name="chevron-forward" size={22} color="#111827" />
-                            )}
-                          </View>
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-
-                <View className="mt-2 flex-row items-center justify-between">
-                  <Text className={`text-xs ${UI.muted}`}>{t.totalQr(totalQrCount)}</Text>
-                  <Pill
-                    icon="location-outline"
-                    text={locLoading ? "Location: loading..." : locError ? "Location: error" : "Location: ok"}
-                    color={locError ? UI.warn : UI.success}
-                    bg={locError ? "#fffbeb" : "#ecfdf5"}
-                  />
-                </View>
-
-                {!activeGroup ? (
-                  <Text className={`mt-3 text-sm ${UI.muted}`}>{t.selectGroupToScan}</Text>
-                ) : (
-                  <View className="mt-4">
-                    <View className="flex-row items-center justify-between">
-                      <Pressable
-                        onPress={() => {
-                          setFishPickGroupId(activeGroup.id);
-                          setFishPickerOpen(true);
-                        }}
-                        className={`flex-1 rounded-2xl border ${UI.border} bg-[#f9fafb] px-4 py-4 active:opacity-90`}
-                      >
-                        <Text className={`text-xs font-bold ${UI.muted}`}>{t.selectFish}</Text>
-                        <Text className={`mt-2 text-base font-extrabold ${UI.text}`} numberOfLines={1}>
-                          {activeGroup.fishName || t.chooseSpecies}
-                        </Text>
-                      </Pressable>
-
-                      <View style={{ width: 10 }} />
-
-                      <Pressable
-                        onPress={() => removeGroup(activeGroup.id)}
-                        className="rounded-2xl px-4 py-4 active:opacity-80"
-                        style={{ backgroundColor: "#fee2e2" }}
-                      >
-                        <Ionicons name="trash-outline" size={20} color="#991b1b" />
-                      </Pressable>
-                    </View>
-
-                    {activeGroup.phase === "SCAN" ? (
-                      <View className="mt-4">
-                        <Text className={`text-xs ${UI.muted}`}>{t.scanHint}</Text>
-
-                        <View className={`mt-3 overflow-hidden rounded-2xl border ${UI.border} bg-black`}>
-                          {!cameraPerm?.granted ? (
-                            <View className="p-4">
-                              <Text className="text-white text-base font-semibold">{t.camDenied}</Text>
-                              <View className="mt-3">
-                                <PrimaryBtn label={t.grantCam} onPress={requestCameraPerm} />
-                              </View>
-                            </View>
-                          ) : (
-                            <View style={{ height: 360 }}>
-                              <CameraView
-                                style={{ flex: 1 }}
-                                facing="back"
-                                enableTorch={scanTorchEnabled}
-                                barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-                                onBarcodeScanned={(e) => onBarcodeScanned(String((e as any)?.data || ""))}
-                              />
-                            </View>
-                          )}
-                        </View>
-
-                        <View className="mt-3 flex-row items-center">
-                          <GhostBtn
-                            label={t.clearAll}
-                            onPress={() => clearGroupQrs(activeGroup.id)}
-                            icon="trash-outline"
-                          />
-                          <View style={{ width: 10 }} />
-                          <View style={{ flex: 1 }}>
-                            <PrimaryBtn
-                              label={t.doneScanning}
-                              onPress={() => {
-                                if (!activeGroup.fishId) {
-                                  Alert.alert(t.required, t.groupNeedsFish);
-                                  return;
-                                }
-                                if ((activeGroup.scanned?.length || 0) === 0) {
-                                  Alert.alert(t.required, t.errGroupQrMissing);
-                                  return;
-                                }
-                                startPhotoStage(activeGroup.id);
-                              }}
-                              icon="checkmark-circle-outline"
-                            />
-                          </View>
-                        </View>
-
-                        <View className="mt-4">
-                          <Text className={`text-sm font-extrabold ${UI.text}`}>
-                            {t.scannedList} • {t.scanCount(activeGroup.scanned?.length || 0)}
-                          </Text>
-
-                          {(activeGroup.scanned || []).map((q) => (
-                            <View key={q.id} className={`mt-2 rounded-2xl border ${UI.border} bg-white px-4 py-3`}>
-                              <View className="flex-row items-center justify-between">
-                                <View style={{ flex: 1, minWidth: 0 }}>
-                                  <Text className={`text-sm font-extrabold ${UI.text}`} numberOfLines={1}>
-                                    {q.id}
-                                  </Text>
-                                  <Text className={`text-xs ${UI.muted}`} numberOfLines={1}>
-                                    {q.kind}
-                                  </Text>
-                                </View>
-                                <Pressable
-                                  onPress={() => removeQrFromGroup(activeGroup.id, q.id)}
-                                  className="rounded-full px-2 py-2 active:opacity-80"
-                                >
-                                  <Ionicons name="close-circle-outline" size={22} color="#9a3412" />
-                                </Pressable>
-                              </View>
-                            </View>
-                          ))}
-                        </View>
-                      </View>
-                    ) : null}
-
-                    {activeGroup.phase === "PHOTO" ? (
-                      <View className="mt-4">
-                        <Text className={`text-sm font-extrabold ${UI.text}`}>{t.photosStageTitle}</Text>
-                        <Text className={`mt-1 text-xs ${UI.muted}`}>{t.autoHint}</Text>
-
-                        <View className="mt-3 flex-row items-center">
-                          <GhostBtn
-                            label={t.scanMore}
-                            onPress={() => backToScanStage(activeGroup.id)}
-                            icon="arrow-back-outline"
-                          />
-                          <View style={{ width: 10 }} />
-                          <View style={{ flex: 1 }}>
-                            <PrimaryBtn
-                              label={t.capturePhoto}
-                              onPress={() => openPhotoCamera(activeGroup.id)}
-                              icon="camera-outline"
-                            />
-                          </View>
-                        </View>
-
-                        <View className="mt-3">
-                          {(activeGroup.images?.length || 0) > 0 ? (
-                            <View className="flex-row">
-                              {(activeGroup.images || []).map((u) => (
-                                <View key={u} style={{ flex: 1 }}>
-                                  <View className={`mr-2 overflow-hidden rounded-2xl border ${UI.border} bg-white`}>
-                                    <Pressable onPress={() => setImgPreviewUri(u)} className="active:opacity-95">
-                                      <Image source={{ uri: u }} style={{ width: "100%", height: 160 }} resizeMode="cover" />
-                                    </Pressable>
-                                    <Pressable
-                                      onPress={() => removeImageFromGroup(activeGroup.id, u)}
-                                      className="px-3 py-3 active:opacity-80"
-                                      style={{ backgroundColor: "#fff1f2" }}
-                                    >
-                                      <Text className="text-center text-xs font-extrabold" style={{ color: "#be123c" }}>
-                                        {t.remove}
-                                      </Text>
-                                    </Pressable>
-                                  </View>
-                                </View>
-                              ))}
-                              {(activeGroup.images?.length || 0) === 1 ? <View style={{ flex: 1 }} /> : null}
-                            </View>
-                          ) : (
-                            <View className="mt-2 rounded-2xl border border-[#e5e7eb] bg-[#f9fafb] px-4 py-4">
-                              <Text className={`text-xs ${UI.muted}`}>
-                                {lang === "ta"
-                                  ? "Photo optional. இல்லாமல் கூட DONE செய்யலாம்."
-                                  : "Photo optional. You can finish without photos."}
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-
-                        <View className="mt-4">
-                          <PrimaryBtn
-                            label={(activeGroup.images?.length || 0) > 0 ? t.finishFish : t.skipPhotos}
-                            onPress={() => finishFishGroup(activeGroup.id)}
-                            icon="checkmark-outline"
-                            color={UI.success}
-                          />
-                        </View>
-                      </View>
-                    ) : null}
-
-                    {activeGroup.phase === "DONE" ? (
-                      <View className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4">
-                        <Text className="text-emerald-900 font-extrabold text-base">
-                          {lang === "ta" ? "இந்த Fish முடிந்தது ✅" : "This fish is done ✅"}
-                        </Text>
-                        <Text className="mt-1 text-xs text-emerald-800">
-                          {lang === "ta"
-                            ? "மேலே உள்ள group list-ல அடுத்ததை தேர்வு செய்யுங்கள் அல்லது Add Fish பண்ணுங்கள்."
-                            : "Select next group above or tap Add Fish."}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-                )}
-              </Card>
-
-              <View className="mt-3">
-                <Card className="p-4">
-                  <SectionTitle title={t.dateTime} />
-                  <Text className={`mt-1 text-xs ${UI.muted}`}>{t.autoHint}</Text>
-
-                  <View className="mt-3 flex-row items-center justify-between">
-                    <Pill icon="calendar-outline" text={`${t.date}: ${fmtDate(nowPreview)}`} color="#111827" bg="#f3f4f6" />
-                    <Pill icon="time-outline" text={`${t.time}: ${fmtTime(nowPreview)}`} color="#111827" bg="#f3f4f6" />
-                  </View>
-
-                  <View className="mt-3 rounded-2xl border border-[#e5e7eb] bg-[#f9fafb] px-4 py-3">
-                    <Text className={`text-xs ${UI.muted}`}>
-                      {locLoading ? "Location: loading..." : locError ? locError : locText(liveLoc)}
+                    <Text className={`mt-1 text-xs ${UI.muted}`} numberOfLines={1}>
+                      {tripLoading ? t.loadingTrips : trips.length ? `${trips.length} trips` : t.noTrips}
                     </Text>
                   </View>
-                </Card>
-              </View>
-            </View>
-          ) : null}
-
-          {/* STEP 3 */}
-          {step === 3 ? (
-            <View>
-              <Card className="p-4">
-                <Text className={`text-sm ${UI.muted}`}>{t.step3Hint}</Text>
-
-                <View className="mt-4 rounded-2xl border border-[#e5e7eb] bg-[#f9fafb] px-4 py-4">
-                  <View className="flex-row items-center">
-                    <Ionicons name="boat-outline" size={16} color="#111827" />
-                    <Text className={`ml-2 text-xs font-bold ${UI.muted}`}>{t.vessel}</Text>
-                  </View>
-                  <Text className={`mt-1 text-base font-extrabold ${UI.text}`} numberOfLines={2}>
-                    {selectedVesselLabel || "—"}
-                  </Text>
-
-                  <View style={{ height: 10 }} />
-
-                  <View className="flex-row items-center">
-                    <Ionicons name="document-text-outline" size={16} color="#111827" />
-                    <Text className={`ml-2 text-xs font-bold ${UI.muted}`}>{t.trip}</Text>
-                  </View>
-                  <Text className={`mt-1 text-base font-extrabold ${UI.text}`} numberOfLines={2}>
-                    {tripLabelText || "—"}
-                  </Text>
-
-                  <View style={{ height: 10 }} />
-
-                  <View className="flex-row items-center">
-                    <Ionicons name="qr-code-outline" size={16} color="#111827" />
-                    <Text className={`ml-2 text-xs font-bold ${UI.muted}`}>{t.totalQr(totalQrCount)}</Text>
-                  </View>
+                  <Ionicons name="chevron-forward" size={22} color="#111827" />
                 </View>
+              </Pressable>
 
-                <View className="mt-4">
-                  {groups.map((g, idx) => (
-                    <View key={g.id} className={`mb-2 rounded-2xl border ${UI.border} bg-white px-4 py-4`}>
-                      <Text className={`text-sm font-extrabold ${UI.text}`} numberOfLines={1}>
-                        {idx + 1}. {g.fishName || "—"}
-                      </Text>
-                      <Text className={`mt-1 text-xs ${UI.muted}`}>
-                        QR: {g.scanned?.length || 0} • Photos: {g.images?.length || 0} ({t.optional}) • {phaseLabel(g.phase)}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </Card>
-            </View>
-          ) : null}
+              <View style={{ height: 12 }} />
 
-          {/* STEP 4 */}
-          {step === 4 ? (
-            <View>
-              <Card className="p-4">
-                <Text className={`text-base font-extrabold ${UI.text}`}>
-                  {lang === "ta" ? "சேமிக்க தயாராக உள்ளது" : "Ready to Save"}
+              <View className="rounded-2xl border border-[#e5e7eb] bg-[#f9fafb] px-4 py-3">
+                <Text className={`text-xs ${UI.muted}`}>
+                  {ownerLoading ? t.loadingOwner : `Owner: ${ownerCode || "—"} (${ownerId || "—"})`}
                 </Text>
-
-                <View className="mt-4">
-                  <PrimaryBtn
-                    label={posting ? (lang === "ta" ? "சேமிக்கிறது..." : "Saving...") : t.save}
-                    onPress={save}
-                    disabled={posting}
-                    icon="cloud-upload-outline"
-                  />
-                </View>
-              </Card>
-            </View>
-          ) : null}
-
-          {/* FOOTER NAV */}
-          <View className="mt-4">
-            <Card className="p-3">
-              <View className="flex-row items-center">
-                <View style={{ flex: 1 }}>
-                  <GhostBtn label={t.back} onPress={goBack} disabled={step === 1} icon="arrow-back-outline" />
-                </View>
-
-                <View style={{ width: 10 }} />
-
-                {step < 4 ? (
-                  <View style={{ flex: 1.4 }}>
-                    <PrimaryBtn
-                      label={t.next}
-                      onPress={goNext}
-                      disabled={step === 2 && !allGroupsDone}
-                      icon="arrow-forward-outline"
-                      color={step === 2 ? (allGroupsDone ? UI.accent : "#cbd5e1") : UI.accent}
-                    />
-                  </View>
-                ) : null}
+                <Text className={`mt-1 text-xs ${UI.muted}`}>
+                  {fishLoading ? t.loadingFish : `Fish types: ${fishTypes.length}`}
+                </Text>
               </View>
             </Card>
           </View>
-        </View>
+        ) : null}
+
+        {/* STEP 2 */}
+        {step === 2 ? (
+          <View className="px-4 mt-4">
+            <StepHeader
+              step={2}
+              title={lang === "ta" ? "மீன் & QR scan" : "Fish & QR Scan"}
+              hint={t.step2Hint}
+              right={
+                <Pressable
+                  onPress={() => setFishPickerOpen(true)}
+                  className="rounded-full px-4 py-2 active:opacity-80"
+                  style={{ backgroundColor: "#e0f2fe" }}
+                >
+                  <Text className="text-xs font-extrabold" style={{ color: "#075985" }}>
+                    {lang === "ta" ? "மீன் தேர்வு" : "Pick Fish"}
+                  </Text>
+                </Pressable>
+              }
+            />
+
+            <View style={{ height: 12 }} />
+
+            {/* Locked info (same logic, simpler UI) */}
+            {lockTripSelection ? (
+              <Card className="p-4">
+                <View className="flex-row items-center justify-between">
+                  <Text className={`text-base font-extrabold ${UI.text}`} numberOfLines={2} style={{ flex: 1 }}>
+                    {t.lockedTitle}
+                  </Text>
+                  <Pressable
+                    onPress={() => {
+                      setLockTripSelection(false);
+                      setStep(1);
+                    }}
+                    className="rounded-full px-4 py-2 active:opacity-80"
+                    style={{ backgroundColor: "#fee2e2" }}
+                  >
+                    <Text className="text-xs font-extrabold" style={{ color: "#991b1b" }}>
+                      {t.lockedChange}
+                    </Text>
+                  </Pressable>
+                </View>
+                <Text className={`mt-2 text-sm ${UI.muted}`}>{t.lockedSub}</Text>
+
+                <View className="mt-3 rounded-2xl border border-[#e5e7eb] bg-[#f9fafb] px-4 py-3">
+                  <Text className={`text-xs font-extrabold ${UI.muted}`}>{lang === "ta" ? "Vessel" : "Vessel"}</Text>
+                  <Text className={`mt-1 text-base font-extrabold ${UI.text}`} numberOfLines={2}>
+                    {selectedVesselLabel || (prefillLoading ? t.lockedLoading : "—")}
+                  </Text>
+
+                  <View style={{ height: 10 }} />
+
+                  <Text className={`text-xs font-extrabold ${UI.muted}`}>{lang === "ta" ? "Trip" : "Trip"}</Text>
+                  <Text className={`mt-1 text-base font-extrabold ${UI.text}`} numberOfLines={2}>
+                    {tripLabelText || routeTripParam || (prefillLoading ? t.lockedLoading : "—")}
+                  </Text>
+
+                  {!selectedVesselDbId || !tripId ? (
+                    <Text className="mt-3 text-sm font-extrabold" style={{ color: UI.warn }}>
+                      {prefillLoading ? t.lockedLoading : t.lockedMissing}
+                    </Text>
+                  ) : null}
+                </View>
+              </Card>
+            ) : (
+              <Card className="p-4">
+                <Text className={`text-sm font-extrabold ${UI.text}`}>{lang === "ta" ? "தேர்ந்தவை" : "Selected"}</Text>
+                <Text className={`mt-2 text-sm ${UI.muted}`} numberOfLines={2}>
+                  {selectedVesselLabel ? `Vessel: ${selectedVesselLabel}` : "Vessel: —"}
+                </Text>
+                <Text className={`mt-1 text-sm ${UI.muted}`} numberOfLines={2}>
+                  {tripLabelText ? `Trip: ${tripLabelText}` : "Trip: —"}
+                </Text>
+
+                <View style={{ height: 12 }} />
+
+                <View className="flex-row" style={{ gap: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <GhostBtn label={lang === "ta" ? "Vessel" : "Vessel"} onPress={() => setVesselPickerOpen(true)} icon="boat-outline" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <GhostBtn
+                      label={lang === "ta" ? "Trip" : "Trip"}
+                      onPress={() => setTripPickerOpen(true)}
+                      icon="document-text-outline"
+                      disabled={!selectedVesselDbId && !lockTripSelection}
+                    />
+                  </View>
+                </View>
+              </Card>
+            )}
+
+            <View style={{ height: 12 }} />
+
+            {/* Groups list (bigger + simple) */}
+            <Card className="p-4">
+              <View className="flex-row items-center justify-between">
+                <Text className={`text-lg font-extrabold ${UI.text}`} numberOfLines={1}>
+                  {t.fishGroupsTitle}
+                </Text>
+                <Pressable
+                  onPress={addGroup}
+                  className="rounded-full px-4 py-2 active:opacity-80"
+                  style={{ backgroundColor: UI.accent }}
+                >
+                  <Text className="text-white font-extrabold">{t.addFish}</Text>
+                </Pressable>
+              </View>
+
+              <Text className={`mt-2 text-sm ${UI.muted}`}>{t.step2Hint}</Text>
+
+              <View className="mt-3">
+                {groups.map((g, idx) => {
+                  const active = g.id === activeGroupId;
+                  const fish = g.fishName || `${t.group} ${idx + 1}`;
+                  const qrN = g.scanned?.length || 0;
+                  const imgN = g.images?.length || 0;
+                  const phase = phaseLabel(g.phase);
+
+                  return (
+                    <Pressable
+                      key={g.id}
+                      onPress={() => setActiveGroupId(g.id)}
+                      className={`mb-2 rounded-2xl border px-4 py-4 active:opacity-90 ${
+                        active ? "border-[#bae6fd] bg-[#e0f2fe]" : `${UI.border} bg-white`
+                      }`}
+                    >
+                      <View className="flex-row items-center justify-between">
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text className={`text-lg font-extrabold ${UI.text}`} numberOfLines={1}>
+                            {idx + 1}. {fish}
+                          </Text>
+                          <Text className={`mt-1 text-sm font-semibold ${UI.muted}`} numberOfLines={1}>
+                            {t.groupQrCount(qrN)} • {phase} • Photos: {imgN}
+                          </Text>
+                        </View>
+
+                        <Ionicons name={active ? "checkmark-circle-outline" : "chevron-forward"} size={24} color="#111827" />
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View className="mt-2">
+                <Text className={`text-sm font-extrabold ${UI.text}`}>
+                  {t.totalQr(totalQrCount)}
+                </Text>
+                <Text className={`mt-1 text-xs ${UI.muted}`}>
+                  {locLoading ? "Location: loading..." : locError ? "Location: error" : locText(liveLoc)}
+                </Text>
+              </View>
+            </Card>
+
+            {/* Active group actions */}
+            {activeGroup ? (
+              <View style={{ height: 12 }} />
+            ) : null}
+
+            {activeGroup ? (
+              <Card className="p-4">
+                <Text className={`text-base font-extrabold ${UI.text}`}>
+                  {lang === "ta" ? "இப்போதைய குழு" : "Current Group"}
+                </Text>
+
+                <View style={{ height: 10 }} />
+
+                {/* Select fish */}
+                <Pressable
+                  onPress={() => {
+                    setFishPickGroupId(activeGroup.id);
+                    setFishPickerOpen(true);
+                  }}
+                  className={`rounded-2xl border ${UI.border} px-4 py-4 active:opacity-90`}
+                  style={{ backgroundColor: "#f9fafb" }}
+                >
+                  <View className="flex-row items-center">
+                    <Ionicons name="fish-outline" size={22} color="#111827" />
+                    <View style={{ flex: 1, minWidth: 0, marginLeft: 10 }}>
+                      <Text className={`text-sm font-extrabold ${UI.muted}`}>{t.selectFish}</Text>
+                      <Text className={`mt-1 text-xl font-extrabold ${UI.text}`} numberOfLines={1}>
+                        {activeGroup.fishName || t.chooseSpecies}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={22} color="#111827" />
+                  </View>
+                </Pressable>
+
+                <View style={{ height: 12 }} />
+
+                {/* Scan section */}
+                {activeGroup.phase === "SCAN" ? (
+                  <View>
+                    <View className="rounded-2xl border border-[#e5e7eb] bg-[#f9fafb] px-4 py-3">
+                      <Text className={`text-sm font-extrabold ${UI.text}`}>
+                        {lang === "ta" ? "QR Scan (Camera)" : "QR Scan (Camera)"}
+                      </Text>
+                      <Text className={`mt-1 text-xs ${UI.muted}`}>
+                        {activeGroupCanScan
+                          ? (lang === "ta" ? "இப்போது QR-ஐ காட்டுங்கள். Scan ஆகும்." : "Show QR now. It will scan.")
+                          : (lang === "ta"
+                              ? "மீன் தேர்வு + Vessel/Trip தேர்வு வேண்டும்."
+                              : "Need Fish + Vessel/Trip selected.")}
+                      </Text>
+                    </View>
+
+                    <View className={`mt-3 overflow-hidden rounded-2xl border ${UI.border} bg-black`}>
+                      {!cameraPerm?.granted ? (
+                        <View className="p-4">
+                          <Text className="text-white text-base font-semibold">{t.camDenied}</Text>
+                          <View className="mt-3">
+                            <PrimaryBtn label={t.grantCam} onPress={requestCameraPerm} />
+                          </View>
+                        </View>
+                      ) : (
+                        <View style={{ height: 360 }}>
+                          <CameraView
+                            style={{ flex: 1 }}
+                            facing="back"
+                            enableTorch={scanTorchEnabled}
+                            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                            onBarcodeScanned={(e) => onBarcodeScanned(String((e as any)?.data || ""))}
+                          />
+                        </View>
+                      )}
+                    </View>
+
+                    <View style={{ height: 12 }} />
+
+                    <View className="flex-row" style={{ gap: 10 }}>
+                      <View style={{ flex: 1 }}>
+                        <GhostBtn
+                          label={lang === "ta" ? "QR நீக்கு" : "Clear QRs"}
+                          onPress={() => clearGroupQrs(activeGroup.id)}
+                          icon="trash-outline"
+                        />
+                      </View>
+                      <View style={{ flex: 1.2 }}>
+                        <PrimaryBtn
+                          label={t.doneScanning}
+                          onPress={() => {
+                            if (!activeGroup.fishId) {
+                              Alert.alert(t.required, t.groupNeedsFish);
+                              return;
+                            }
+                            if ((activeGroup.scanned?.length || 0) === 0) {
+                              Alert.alert(t.required, t.errGroupQrMissing);
+                              return;
+                            }
+                            startPhotoStage(activeGroup.id);
+                          }}
+                          icon="checkmark-circle-outline"
+                          color={UI.success}
+                        />
+                      </View>
+                    </View>
+
+                    <View style={{ height: 12 }} />
+
+                    <Text className={`text-base font-extrabold ${UI.text}`}>
+                      {t.scannedList} • {t.scanCount(activeGroup.scanned?.length || 0)}
+                    </Text>
+
+                    {(activeGroup.scanned || []).map((q) => (
+                      <View key={q.id} className={`mt-2 rounded-2xl border ${UI.border} bg-white px-4 py-3`}>
+                        <View className="flex-row items-center justify-between">
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text className={`text-base font-extrabold ${UI.text}`} numberOfLines={1}>
+                              {q.id}
+                            </Text>
+                            <Text className={`text-xs ${UI.muted}`} numberOfLines={1}>
+                              {q.kind}
+                            </Text>
+                          </View>
+                          <Pressable onPress={() => removeQrFromGroup(activeGroup.id, q.id)} className="rounded-full px-2 py-2 active:opacity-80">
+                            <Ionicons name="close-circle-outline" size={26} color="#9a3412" />
+                          </Pressable>
+                        </View>
+                      </View>
+                    ))}
+
+                    <View style={{ height: 10 }} />
+
+                    <Pressable
+                      onPress={() => removeGroup(activeGroup.id)}
+                      className="rounded-2xl px-4 py-4 active:opacity-80"
+                      style={{ backgroundColor: "#fee2e2" }}
+                    >
+                      <View className="flex-row items-center justify-center">
+                        <Ionicons name="trash-outline" size={20} color="#991b1b" />
+                        <Text className="ml-2 text-base font-extrabold" style={{ color: "#991b1b" }}>
+                          {lang === "ta" ? "இந்த குழுவை நீக்கு" : "Delete this group"}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  </View>
+                ) : null}
+
+                {/* PHOTO stage */}
+                {activeGroup.phase === "PHOTO" ? (
+                  <View>
+                    <View className="rounded-2xl border border-[#e5e7eb] bg-[#f9fafb] px-4 py-3">
+                      <Text className={`text-base font-extrabold ${UI.text}`}>{t.photosStageTitle}</Text>
+                      <Text className={`mt-1 text-xs ${UI.muted}`}>{t.autoHint}</Text>
+                    </View>
+
+                    <View style={{ height: 12 }} />
+
+                    <View className="flex-row" style={{ gap: 10 }}>
+                      <View style={{ flex: 1 }}>
+                        <GhostBtn label={t.scanMore} onPress={() => backToScanStage(activeGroup.id)} icon="arrow-back-outline" />
+                      </View>
+                      <View style={{ flex: 1.2 }}>
+                        <PrimaryBtn label={t.capturePhoto} onPress={() => openPhotoCamera(activeGroup.id)} icon="camera-outline" />
+                      </View>
+                    </View>
+
+                    <View style={{ height: 12 }} />
+
+                    {(activeGroup.images?.length || 0) > 0 ? (
+                      <View className="flex-row" style={{ gap: 10 }}>
+                        {(activeGroup.images || []).map((u) => (
+                          <View key={u} style={{ flex: 1 }}>
+                            <View className={`overflow-hidden rounded-2xl border ${UI.border} bg-white`}>
+                              <Pressable onPress={() => setImgPreviewUri(u)} className="active:opacity-95">
+                                <Image source={{ uri: u }} style={{ width: "100%", height: 170 }} resizeMode="cover" />
+                              </Pressable>
+                              <Pressable
+                                onPress={() => removeImageFromGroup(activeGroup.id, u)}
+                                className="px-3 py-3 active:opacity-80"
+                                style={{ backgroundColor: "#fff1f2" }}
+                              >
+                                <Text className="text-center text-sm font-extrabold" style={{ color: "#be123c" }}>
+                                  {t.remove}
+                                </Text>
+                              </Pressable>
+                            </View>
+                          </View>
+                        ))}
+                        {(activeGroup.images?.length || 0) === 1 ? <View style={{ flex: 1 }} /> : null}
+                      </View>
+                    ) : (
+                      <View className="rounded-2xl border border-[#e5e7eb] bg-[#f9fafb] px-4 py-4">
+                        <Text className={`text-sm ${UI.muted}`}>
+                          {lang === "ta" ? "Photo optional. இல்லாமலும் DONE செய்யலாம்." : "Photo optional. You can finish without photos."}
+                        </Text>
+                      </View>
+                    )}
+
+                    <View style={{ height: 12 }} />
+
+                    <PrimaryBtn
+                      label={(activeGroup.images?.length || 0) > 0 ? t.finishFish : t.skipPhotos}
+                      onPress={() => finishFishGroup(activeGroup.id)}
+                      icon="checkmark-outline"
+                      color={UI.success}
+                    />
+                  </View>
+                ) : null}
+
+                {/* DONE stage */}
+                {activeGroup.phase === "DONE" ? (
+                  <View className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4">
+                    <Text className="text-emerald-900 font-extrabold text-lg">
+                      {lang === "ta" ? "இந்த மீன் முடிந்தது ✅" : "This fish is done ✅"}
+                    </Text>
+                    <Text className="mt-1 text-sm text-emerald-800">
+                      {lang === "ta" ? "அடுத்த குழுவை தேர்வு செய்யுங்கள் அல்லது + Add Fish." : "Select next group or tap + Add Fish."}
+                    </Text>
+                  </View>
+                ) : null}
+              </Card>
+            ) : null}
+
+            <View style={{ height: 12 }} />
+
+            <Card className="p-4">
+              <Text className={`text-base font-extrabold ${UI.text}`}>{t.dateTime}</Text>
+              <Text className={`mt-1 text-xs ${UI.muted}`}>{t.autoHint}</Text>
+
+              <View className="mt-3 flex-row" style={{ gap: 10 }}>
+                <View style={{ flex: 1, backgroundColor: "#f3f4f6", borderRadius: 16, padding: 12 }}>
+                  <Text className={`text-xs font-extrabold ${UI.muted}`}>{t.date}</Text>
+                  <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>{fmtDate(nowPreview)}</Text>
+                </View>
+                <View style={{ flex: 1, backgroundColor: "#f3f4f6", borderRadius: 16, padding: 12 }}>
+                  <Text className={`text-xs font-extrabold ${UI.muted}`}>{t.time}</Text>
+                  <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>{fmtTime(nowPreview)}</Text>
+                </View>
+              </View>
+
+              <View className="mt-3 rounded-2xl border border-[#e5e7eb] bg-[#f9fafb] px-4 py-3">
+                <Text className={`text-xs ${UI.muted}`}>
+                  {locLoading ? "Location: loading..." : locError ? locError : locText(liveLoc)}
+                </Text>
+              </View>
+            </Card>
+          </View>
+        ) : null}
+
+        {/* STEP 3 */}
+        {step === 3 ? (
+          <View className="px-4 mt-4">
+            <StepHeader step={3} title={lang === "ta" ? "Review" : "Review"} hint={t.step3Hint} />
+
+            <View style={{ height: 12 }} />
+
+            <Card className="p-4">
+              <Text className={`text-base font-extrabold ${UI.text}`}>{lang === "ta" ? "தேர்ந்தவை" : "Selected"}</Text>
+
+              <View className="mt-3 rounded-2xl border border-[#e5e7eb] bg-[#f9fafb] px-4 py-4">
+                <Text className={`text-xs font-extrabold ${UI.muted}`}>{t.vessel}</Text>
+                <Text className={`mt-1 text-base font-extrabold ${UI.text}`} numberOfLines={2}>
+                  {selectedVesselLabel || "—"}
+                </Text>
+
+                <View style={{ height: 10 }} />
+
+                <Text className={`text-xs font-extrabold ${UI.muted}`}>{t.trip}</Text>
+                <Text className={`mt-1 text-base font-extrabold ${UI.text}`} numberOfLines={2}>
+                  {tripLabelText || "—"}
+                </Text>
+
+                <View style={{ height: 10 }} />
+
+                <Text className={`text-xs font-extrabold ${UI.muted}`}>{lang === "ta" ? "மொத்த QR" : "Total QR"}</Text>
+                <Text className={`mt-1 text-base font-extrabold ${UI.text}`}>{totalQrCount}</Text>
+              </View>
+
+              <View style={{ height: 12 }} />
+
+              {groups.map((g, idx) => (
+                <View key={g.id} className={`mb-2 rounded-2xl border ${UI.border} bg-white px-4 py-4`}>
+                  <Text className={`text-base font-extrabold ${UI.text}`} numberOfLines={1}>
+                    {idx + 1}. {g.fishName || "—"}
+                  </Text>
+                  <Text className={`mt-1 text-sm ${UI.muted}`}>
+                    QR: {g.scanned?.length || 0} • Photos: {g.images?.length || 0} • {phaseLabel(g.phase)}
+                  </Text>
+                </View>
+              ))}
+            </Card>
+          </View>
+        ) : null}
+
+        {/* STEP 4 */}
+        {step === 4 ? (
+          <View className="px-4 mt-4">
+            <StepHeader step={4} title={lang === "ta" ? "சேமிக்க தயாராக" : "Ready to Save"} hint={lang === "ta" ? "Save அழுத்துங்கள்." : "Press Save."} />
+
+            <View style={{ height: 12 }} />
+
+            <Card className="p-4">
+              <PrimaryBtn
+                label={posting ? (lang === "ta" ? "சேமிக்கிறது..." : "Saving...") : t.save}
+                onPress={save}
+                disabled={posting}
+                icon="cloud-upload-outline"
+                color={UI.accent}
+              />
+              <Text className={`mt-3 text-xs ${UI.muted}`}>
+                {lang === "ta"
+                  ? "Net இல்லையெனில் Local-ல் save ஆகும். Net வந்ததும் auto sync ஆகும்."
+                  : "If no internet, it will save locally and auto-sync later."}
+              </Text>
+            </Card>
+          </View>
+        ) : null}
       </ScrollView>
+
+      {/* ✅ Bottom navigation bar (big + fixed) */}
+      <View
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          paddingHorizontal: 14,
+          paddingTop: 12,
+          paddingBottom: 14 + (insets.bottom || 0),
+          backgroundColor: "rgba(246,247,251,0.98)",
+          borderTopWidth: 1,
+          borderTopColor: "#e5e7eb",
+        }}
+      >
+        <View className="flex-row" style={{ gap: 10 }}>
+          <View style={{ flex: 1 }}>
+            <GhostBtn label={t.back} onPress={goBack} disabled={step === 1} icon="arrow-back-outline" />
+          </View>
+
+          {step < 4 ? (
+            <View style={{ flex: 1.3 }}>
+              <PrimaryBtn
+                label={t.next}
+                onPress={goNext}
+                disabled={step === 2 && !allGroupsDone}
+                icon="arrow-forward-outline"
+                color={step === 2 ? (allGroupsDone ? UI.accent : "#cbd5e1") : UI.accent}
+              />
+            </View>
+          ) : (
+            <View style={{ flex: 1.3 }}>
+              <PrimaryBtn
+                label={posting ? (lang === "ta" ? "சேமிக்கிறது..." : "Saving...") : t.save}
+                onPress={save}
+                disabled={posting}
+                icon="cloud-upload-outline"
+                color={UI.accent}
+              />
+            </View>
+          )}
+        </View>
+      </View>
 
       {/* ✅ FULL SCREEN PICKERS */}
       <FullScreenPickerModal
@@ -3616,13 +3576,11 @@ export default function CreateCatchLog() {
         visible={fishPickerOpen}
         title={t.chooseSpecies}
         items={fishOptions as any}
-        selectedKey={
-          fishPickGroupId ? String(groups.find((g) => g.id === fishPickGroupId)?.fishId || "") : ""
-        }
+        selectedKey={fishPickGroupId ? String(groups.find((g) => g.id === fishPickGroupId)?.fishId || "") : ""}
         mode="grid"
         numColumns={2}
         showImages={true}
-        searchPlaceholder="Search product (e.g. tuna)"
+        searchPlaceholder="Search fish (e.g. tuna)"
         confirmLabel="Next"
         insetsBottom={insets.bottom}
         onClose={() => {

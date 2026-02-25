@@ -281,6 +281,11 @@ function toIntSafe(v: any) {
   return 0;
 }
 
+// ✅ NEW: only allow APPROVED vessels
+function isApprovedStatus(s: any) {
+  return String(s ?? "").trim().toUpperCase() === "APPROVED";
+}
+
 /* ---------------- API ---------------- */
 const API_BASE = "https://rootverse-backend-5qoo.onrender.com";
 const ME_CACHE_KEY = "RV_ME_CACHE_V1";
@@ -430,6 +435,7 @@ type VesselItem = {
   name: string; // govt_registration_number
   subName?: string; // vessel_name
   code?: string | null;
+  approval_status?: string | null; // ✅ NEW (so cache also can filter)
 };
 
 // ✅ backend items w/ image
@@ -454,7 +460,12 @@ async function readVesselsCache(ownerDbId: number): Promise<VesselItem[] | null>
     const raw = await AsyncStorage.getItem(`${VESSEL_CACHE_PREFIX}${ownerDbId}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as VesselItem[]) : null;
+    const arr = Array.isArray(parsed) ? (parsed as VesselItem[]) : null;
+    if (!arr) return null;
+
+    // ✅ only approved from cache too
+    const approvedOnly = arr.filter((v) => isApprovedStatus(v?.approval_status));
+    return approvedOnly;
   } catch {
     return null;
   }
@@ -462,7 +473,12 @@ async function readVesselsCache(ownerDbId: number): Promise<VesselItem[] | null>
 
 async function writeVesselsCache(ownerDbId: number, items: VesselItem[]) {
   try {
-    await AsyncStorage.setItem(`${VESSEL_CACHE_PREFIX}${ownerDbId}`, JSON.stringify(items));
+    // ✅ store only approved
+    const approvedOnly = (items || []).filter((v) => isApprovedStatus(v?.approval_status));
+    await AsyncStorage.setItem(
+      `${VESSEL_CACHE_PREFIX}${ownerDbId}`,
+      JSON.stringify(approvedOnly),
+    );
   } catch {}
 }
 
@@ -667,7 +683,10 @@ function FullScreenPickerModal({
             {item.label}
           </Text>
           {!!item.subtitle ? (
-            <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: 11, marginTop: 4 }} numberOfLines={1}>
+            <Text
+              style={{ color: "rgba(255,255,255,0.75)", fontSize: 11, marginTop: 4 }}
+              numberOfLines={1}
+            >
               {item.subtitle}
             </Text>
           ) : null}
@@ -697,7 +716,10 @@ function FullScreenPickerModal({
               {item.label}
             </Text>
             {!!item.subtitle ? (
-              <Text style={{ color: "rgba(255,255,255,0.70)", fontSize: 12, marginTop: 4 }} numberOfLines={1}>
+              <Text
+                style={{ color: "rgba(255,255,255,0.70)", fontSize: 12, marginTop: 4 }}
+                numberOfLines={1}
+              >
                 {item.subtitle}
               </Text>
             ) : null}
@@ -1205,6 +1227,7 @@ export default function NewTripRequest() {
   }, [isOnline]);
 
   // ✅ ONLY OWNER VESSELS (LIKE CATCHLOG): userId -> ownerDbId -> vessels
+  // ✅ CHANGE: show ONLY APPROVED vessels (filter by approval_status === "APPROVED")
   useEffect(() => {
     let alive = true;
 
@@ -1261,7 +1284,12 @@ export default function NewTripRequest() {
           return vOwner === resolvedOwnerDbId;
         });
 
-        const list: VesselItem[] = ownerOnly
+        // ✅ FILTER: keep only APPROVED from API
+        const approvedOnly = ownerOnly.filter((x: any) =>
+          isApprovedStatus(x?.approval_status ?? x?.approvalStatus),
+        );
+
+        const list: VesselItem[] = approvedOnly
           .map((x: any) => {
             const id =
               toIntSafe(x?.id) ||
@@ -1281,12 +1309,15 @@ export default function NewTripRequest() {
             ).trim();
 
             const name = govtReg || vesselName || `Vessel ${id}`;
-
             const subName = vesselName && govtReg ? vesselName : "";
 
-            return { id, name, subName, code: null };
+            const approval_status = String(x?.approval_status ?? x?.approvalStatus ?? "")
+              .trim()
+              .toUpperCase();
+
+            return { id, name, subName, code: null, approval_status: approval_status || null };
           })
-          .filter((v) => v.id && v.name);
+          .filter((v) => v.id && v.name && isApprovedStatus(v?.approval_status));
 
         if (!alive) return;
 
