@@ -1027,6 +1027,16 @@ export default function MyTrips() {
       planned_at: fmtDateTime(
         t?.planned_at ?? t?.plannedAt ?? t?.planned_on ?? t?.created_at ?? t?.createdAt
       ),
+      completed_at: fmtDateTime(
+  t?.completed_at ??
+    t?.completedAt ??
+    t?.comleted_at ??
+    t?.comletedAt ??
+    t?.completed_on ??
+    t?.completedOn ??
+    t?.updated_at ??
+    t?.updatedAt
+),
       arrival_at: fmtDateTime(t?.arrival_at ?? t?.arrivalAt),
     };
   }, [detailsData, detailsTripRowId, vesselNameMap]);
@@ -1136,7 +1146,14 @@ export default function MyTrips() {
                       <View className="mt-2">
                         <Row label="Landing" value={detailsView.location_name} />
                         <Row label="Planned At" value={detailsView.planned_at} />
-                        <Row label="Arrival At" value={detailsView.arrival_at} />
+                        {detailsView.status === "COMPLETED" ? (
+  <Row
+    label="Completed At"
+    value={detailsView.completed_at || detailsView.arrival_at}
+  />
+) : (
+  <Row label="Arrival At" value={detailsView.arrival_at} />
+)}
                         <Row label="Created At" value={detailsView.created_at} />
                         <Row label="Updated At" value={detailsView.updated_at} />
                       </View>
