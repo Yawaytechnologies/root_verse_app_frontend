@@ -1,3 +1,4 @@
+// src/http.ts
 import { Platform } from "react-native";
 
 export const API_BASE = (
@@ -5,10 +6,44 @@ export const API_BASE = (
   "https://rootverse-backend-5qoo.onrender.com/"
 ).replace(/\/$/, "");
 
-function timeout(ms: number) {
-  return new Promise((_, rej) =>
-    setTimeout(() => rej(new Error("Timeout")), ms)
+function isNetworkLikeError(e: any) {
+  const msg = String(e?.message || e || "");
+  return (
+    msg.includes("Network request failed") ||
+    msg.includes("Failed to fetch") ||
+    msg.includes("Timeout") ||
+    msg.includes("AbortError") ||
+    msg.includes("aborted")
   );
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit | undefined,
+  ms: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+
+  try {
+    return await fetch(url, { ...(init || {}), signal: controller.signal });
+  } catch (e: any) {
+    // ✅ normalize all bad-network cases into one code your app understands
+    if (isNetworkLikeError(e)) throw new Error("NETWORK_ERROR");
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readBody(res: Response) {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 export async function httpJson<T>(
@@ -18,19 +53,18 @@ export async function httpJson<T>(
 ): Promise<T> {
   const url = `${API_BASE}${path}`;
 
-  const res = (await Promise.race([fetch(url, init), timeout(ms)])) as Response;
-
-  const text = await res.text();
-  let data: any = null;
-
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = text;
-  }
+  const res = await fetchWithTimeout(url, init, ms);
+  const data = await readBody(res);
 
   if (!res.ok) {
-    const msg = (data && (data.message || data.error)) || `HTTP ${res.status}`;
+    // ✅ ONLY 401 = auth invalid
+    if (res.status === 401) throw new Error("UNAUTHORIZED");
+
+    const msg =
+      (data && (data.message || data.error)) ||
+      (typeof data === "string" ? data : null) ||
+      `HTTP ${res.status}`;
+
     throw new Error(msg);
   }
 
@@ -44,22 +78,22 @@ export async function httpPutForm<T>(
 ): Promise<T> {
   const url = `${API_BASE}${path}`;
 
-  const res = (await Promise.race([
-    fetch(url, { method: "PUT", body: form }),
-    timeout(ms),
-  ])) as Response;
+  const res = await fetchWithTimeout(
+    url,
+    { method: "PUT", body: form },
+    ms
+  );
 
-  const text = await res.text();
-  let data: any = null;
-
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = text;
-  }
+  const data = await readBody(res);
 
   if (!res.ok) {
-    const msg = (data && (data.message || data.error)) || `HTTP ${res.status}`;
+    if (res.status === 401) throw new Error("UNAUTHORIZED");
+
+    const msg =
+      (data && (data.message || data.error)) ||
+      (typeof data === "string" ? data : null) ||
+      `HTTP ${res.status}`;
+
     throw new Error(msg);
   }
 
@@ -86,7 +120,9 @@ export async function appendImageToForm(
 
 /** ✅ EXPORT AN OBJECT so you can do: import { http } from "@/src/http" */
 export const http = {
-  getJson: <T>(path: string, ms?: number) => httpJson<T>(path, { method: "GET" }, ms),
+  getJson: <T>(path: string, ms?: number) =>
+    httpJson<T>(path, { method: "GET" }, ms),
+
   postJson: <T>(path: string, body: any, ms?: number) =>
     httpJson<T>(
       path,
@@ -97,5 +133,7 @@ export const http = {
       },
       ms
     ),
-  putForm: <T>(path: string, form: FormData, ms?: number) => httpPutForm<T>(path, form, ms),
+
+  putForm: <T>(path: string, form: FormData, ms?: number) =>
+    httpPutForm<T>(path, form, ms),
 };
