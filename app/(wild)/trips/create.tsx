@@ -1,5 +1,6 @@
-// app/(wild)/trips/create.tsx  (or your current path)
+// app/(wild)/trips/create.tsx
 import DateTimePicker from "@react-native-community/datetimepicker";
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -288,8 +289,14 @@ function isApprovedStatus(s: any) {
 
 /* ---------------- API ---------------- */
 const API_BASE = "https://rootverse-backend-5qoo.onrender.com";
-const ME_CACHE_KEY = "RV_ME_CACHE_V1";
-const LAST_USER_ID_KEY = "RV_LAST_USER_ID_V1";
+const ME_CACHE_KEY_PREFIX = "RV_ME_CACHE_V1";
+const LAST_USER_ID_KEY_PREFIX = "RV_LAST_USER_ID_V1";
+
+// ✅ cache is now scoped by current login user, so old user data won't leak
+function scopedStorageKey(prefix: string, scope?: number | string | null) {
+  const s = String(scope ?? "").trim();
+  return `${prefix}:${s || "default"}`;
+}
 
 // ✅ caches for backend lists
 const FISHING_METHODS_CACHE_KEY = "RV_FISHING_METHODS_CACHE_V1";
@@ -302,13 +309,18 @@ type MeCache = {
   ownerDbId: number;
 };
 
-async function readMeCache(): Promise<MeCache | null> {
+async function readMeCache(scope?: number | string): Promise<MeCache | null> {
   try {
-    const raw = await AsyncStorage.getItem(ME_CACHE_KEY);
-    if (!raw) {
-      // fallback keys
-      const ownerCode = String((await AsyncStorage.getItem("owner_code")) || "").trim();
+    const scopedKey = scopedStorageKey(ME_CACHE_KEY_PREFIX, scope);
+    const raw = await AsyncStorage.getItem(scopedKey);
 
+    if (!raw) {
+      // ✅ legacy fallback ONLY when we don't know the current login user
+      if (scope !== null && scope !== undefined && String(scope).trim()) {
+        return null;
+      }
+
+      const ownerCode = String((await AsyncStorage.getItem("owner_code")) || "").trim();
       const ownerIdRaw = (await AsyncStorage.getItem("owner_id")) || "";
       const ownerDbId = toIntSafe(ownerIdRaw);
 
@@ -320,6 +332,7 @@ async function readMeCache(): Promise<MeCache | null> {
 
     const p = JSON.parse(raw);
     if (!p || typeof p !== "object") return null;
+
     return {
       ownerName: String(p.ownerName || "").trim(),
       registrationNo: String(p.registrationNo || "").trim(),
@@ -330,14 +343,31 @@ async function readMeCache(): Promise<MeCache | null> {
     return null;
   }
 }
-async function writeMeCache(data: MeCache) {
+
+async function writeMeCache(data: MeCache, scope?: number | string) {
   try {
-    await AsyncStorage.setItem(ME_CACHE_KEY, JSON.stringify(data));
+    await AsyncStorage.setItem(
+      scopedStorageKey(ME_CACHE_KEY_PREFIX, scope),
+      JSON.stringify(data),
+    );
+
+    // ✅ keep legacy keys also fresh so other old screens don't stay stale
+    if (String(data?.ownerCode || "").trim()) {
+      await AsyncStorage.setItem("owner_code", String(data.ownerCode).trim());
+    }
+    if (toIntSafe(data?.ownerDbId)) {
+      await AsyncStorage.setItem("owner_id", String(toIntSafe(data.ownerDbId)));
+    }
   } catch {}
 }
 
-async function fetchMeFromApi(): Promise<MeCache> {
-  const token = await AsyncStorage.getItem("auth_token");
+async function fetchMeFromApi(
+  tokenOverride?: string,
+  scope?: number | string,
+): Promise<MeCache> {
+  const storedToken = await AsyncStorage.getItem("auth_token");
+  const token = String(tokenOverride || storedToken || "").trim();
+
   const res = await fetch(`${API_BASE}/api/me`, {
     method: "GET",
     headers: {
@@ -357,7 +387,10 @@ async function fetchMeFromApi(): Promise<MeCache> {
   const userId = toIntSafe(u?.id);
   if (userId) {
     try {
-      await AsyncStorage.setItem(LAST_USER_ID_KEY, String(userId));
+      await AsyncStorage.setItem(
+        scopedStorageKey(LAST_USER_ID_KEY_PREFIX, scope || userId),
+        String(userId),
+      );
     } catch {}
   }
 
@@ -435,7 +468,7 @@ type VesselItem = {
   name: string; // govt_registration_number
   subName?: string; // vessel_name
   code?: string | null;
-  approval_status?: string | null; // ✅ NEW (so cache also can filter)
+  approval_status?: string | null; // ✅ NEW
 };
 
 // ✅ backend items w/ image
@@ -497,8 +530,9 @@ function unwrapData<T>(payload: any): T {
   if (payload?.data != null) return payload.data as T;
   return payload as T;
 }
-async function getAuthHeaders() {
-  const token = await AsyncStorage.getItem("auth_token");
+async function getAuthHeaders(tokenOverride?: string) {
+  const storedToken = await AsyncStorage.getItem("auth_token");
+  const token = String(tokenOverride || storedToken || "").trim();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 async function geoGet<T>(path: string): Promise<T> {
@@ -514,14 +548,17 @@ async function geoGet<T>(path: string): Promise<T> {
 }
 
 // ✅ NEW: owner db id fetch like catchlog (/api/owner/fetch/:userId)
-async function getLastUserId(): Promise<number> {
-  const raw = await AsyncStorage.getItem(LAST_USER_ID_KEY);
+async function getLastUserId(scope?: number | string): Promise<number> {
+  const raw = await AsyncStorage.getItem(scopedStorageKey(LAST_USER_ID_KEY_PREFIX, scope));
   const n = toIntSafe(raw);
   return n > 0 ? n : 0;
 }
 
-async function fetchOwnerDbIdFromUserId(userId: number): Promise<number> {
-  const headers = await getAuthHeaders();
+async function fetchOwnerDbIdFromUserId(
+  userId: number,
+  tokenOverride?: string,
+): Promise<number> {
+  const headers = await getAuthHeaders(tokenOverride);
   const res = await fetch(`${API_BASE}/api/owner/fetch/${encodeURIComponent(String(userId))}`, {
     method: "GET",
     headers: { Accept: "application/json", ...headers },
@@ -922,10 +959,281 @@ async function flushTripQueue(send: (payload: TripCreatePayload) => Promise<any>
   return { sent, left: 0 };
 }
 
+/* ---------------- UI HELPERS (Wizard UI only) ---------------- */
+function IconBubble({
+  name,
+  bg = "#fff3e7",
+  color = "#7a4a12",
+}: {
+  name: any;
+  bg?: string;
+  color?: string;
+}) {
+  return (
+    <View
+      style={{
+        width: 42,
+        height: 42,
+        borderRadius: 14,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: bg,
+        borderWidth: 1,
+        borderColor: "#ead7c8",
+      }}
+    >
+      <Ionicons name={name} size={22} color={color} />
+    </View>
+  );
+}
+
+function BigPickRow({
+  icon,
+  title,
+  value,
+  placeholder,
+  onPress,
+  disabled,
+  helper,
+}: {
+  icon: any;
+  title: string;
+  value?: string;
+  placeholder: string;
+  onPress: () => void;
+  disabled?: boolean;
+  helper?: string;
+}) {
+  const hasValue = !!(value && value.trim());
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={{
+        opacity: disabled ? 0.45 : 1,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "#e6d4c5",
+        backgroundColor: "white",
+        paddingVertical: 14,
+        paddingHorizontal: 14,
+        marginTop: 12,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <IconBubble name={icon} />
+        <View style={{ flex: 1, marginLeft: 12, minWidth: 0 }}>
+          <Text style={{ fontSize: 13, fontWeight: "800", color: "#2b2b2b" }}>
+            {title}
+          </Text>
+
+          <Text
+            style={{
+              marginTop: 4,
+              fontSize: 18,
+              fontWeight: "900",
+              color: hasValue ? "#111827" : "#9ca3af",
+            }}
+            numberOfLines={2}
+          >
+            {hasValue ? value : placeholder}
+          </Text>
+
+          {!!helper ? (
+            <Text style={{ marginTop: 6, fontSize: 12, color: "#7a6f66" }} numberOfLines={2}>
+              {helper}
+            </Text>
+          ) : null}
+        </View>
+
+        <Ionicons name="chevron-forward" size={20} color="#7a6f66" />
+      </View>
+    </Pressable>
+  );
+}
+
+function StepHeader({
+  step,
+  total,
+  title,
+  sub,
+  icon,
+  isOnline,
+  onlineText,
+  offlineText,
+}: {
+  step: number;
+  total: number;
+  title: string;
+  sub: string;
+  icon: any;
+  isOnline: boolean;
+  onlineText: string;
+  offlineText: string;
+}) {
+  return (
+    <View
+      style={{
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "#ead7c8",
+        backgroundColor: "white",
+        padding: 14,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <IconBubble
+          name={icon}
+          bg={isOnline ? "#ecfdf5" : "#fffbeb"}
+          color={isOnline ? "#047857" : "#92400e"}
+        />
+        <View style={{ flex: 1, marginLeft: 12 }}>
+          <Text style={{ fontSize: 12, fontWeight: "900", color: "#7a6f66" }}>
+            Step {step} / {total}
+          </Text>
+          <Text style={{ fontSize: 18, fontWeight: "900", color: "#111827", marginTop: 2 }}>
+            {title}
+          </Text>
+          <Text style={{ fontSize: 12, color: "#7a6f66", marginTop: 4 }}>
+            {sub}
+          </Text>
+        </View>
+
+        <View style={{ alignItems: "flex-end" }}>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <View
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: 999,
+                backgroundColor: isOnline ? "#10b981" : "#f59e0b",
+                marginRight: 8,
+              }}
+            />
+            <Text style={{ fontSize: 12, fontWeight: "900", color: isOnline ? "#047857" : "#92400e" }}>
+              {isOnline ? onlineText : offlineText}
+            </Text>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function ReviewRow({
+  icon,
+  label,
+  value,
+}: {
+  icon: any;
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "flex-start", marginTop: 12 }}>
+      <IconBubble name={icon} bg="#f8fafc" color="#334155" />
+      <View style={{ flex: 1, marginLeft: 12 }}>
+        <Text style={{ fontSize: 12, fontWeight: "900", color: "#7a6f66" }}>{label}</Text>
+        <Text style={{ fontSize: 16, fontWeight: "900", color: "#111827", marginTop: 3 }}>
+          {value || "—"}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 /* ---------------- SCREEN ---------------- */
 export default function NewTripRequest() {
   const dispatch = useAppDispatch();
   const insets = useSafeAreaInsets();
+
+  // ✅ current login info first (prevents stale owner from previous login)
+  const authTokenFromStore = useAppSelector((s: any) => {
+    return s.login?.token ?? s.auth?.token ?? undefined;
+  });
+
+  const activeLoginUserId = useAppSelector((s: any) => {
+    return (
+      toIntSafe(
+        s.login?.user?.id ??
+          s.login?.user?.user_id ??
+          s.auth?.me?.id ??
+          s.auth?.me?.user_id ??
+          s.me?.me?.id ??
+          s.me?.me?.user_id,
+      ) || 0
+    );
+  });
+
+  const activeOwnerNameFromStore = useAppSelector((s: any) => {
+    return String(
+      s.login?.user?.owner_name ??
+        s.login?.user?.ownerName ??
+        s.login?.user?.username ??
+        s.login?.user?.name ??
+        s.auth?.me?.owner_name ??
+        s.auth?.me?.ownerName ??
+        s.auth?.me?.username ??
+        s.auth?.me?.name ??
+        s.me?.me?.owner_name ??
+        s.me?.me?.ownerName ??
+        s.me?.me?.username ??
+        s.me?.me?.name ??
+        "",
+    ).trim();
+  });
+
+  const activeOwnerCodeFromStore = useAppSelector((s: any) => {
+    return String(
+      s.login?.user?.owner_code ??
+        s.login?.user?.ownerCode ??
+        s.auth?.me?.owner_code ??
+        s.auth?.me?.ownerCode ??
+        s.me?.me?.owner_code ??
+        s.me?.me?.ownerCode ??
+        "",
+    ).trim();
+  });
+
+  const activeOwnerDbIdFromStore = useAppSelector((s: any) => {
+    return (
+      toIntSafe(
+        s.login?.user?.owner_db_id ??
+          s.login?.user?.ownerDbId ??
+          s.auth?.me?.owner_db_id ??
+          s.auth?.me?.ownerDbId ??
+          s.me?.me?.owner_db_id ??
+          s.me?.me?.ownerDbId,
+      ) ||
+      toIntSafe(
+        s.login?.user?.owner_id ??
+          s.auth?.me?.owner_id ??
+          s.me?.me?.owner_id,
+      ) ||
+      0
+    );
+  });
+
+  const activeRegistrationNoFromStore = useAppSelector((s: any) => {
+    return String(
+      s.login?.user?.govt_id ??
+        s.login?.user?.registration_no ??
+        s.login?.user?.reg_no ??
+        s.login?.user?.registrationNo ??
+        s.login?.user?.vessel_reg_no ??
+        s.auth?.me?.govt_id ??
+        s.auth?.me?.registration_no ??
+        s.auth?.me?.reg_no ??
+        s.auth?.me?.registrationNo ??
+        s.auth?.me?.vessel_reg_no ??
+        s.me?.me?.govt_id ??
+        s.me?.me?.registration_no ??
+        s.me?.me?.reg_no ??
+        s.me?.me?.registrationNo ??
+        s.me?.me?.vessel_reg_no ??
+        "",
+    ).trim();
+  });
 
   const [lang, setLang] = useState<Lang>("ta");
   const t = i18n[lang];
@@ -1009,7 +1317,7 @@ export default function NewTripRequest() {
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
 
-  // ✅ FULL SCREEN PICKERS (methods + fish + others)
+  // ✅ FULL SCREEN PICKERS
   const [methodPickerOpen, setMethodPickerOpen] = useState(false);
   const [fishPickerOpen, setFishPickerOpen] = useState(false);
   const [vesselPickerOpen, setVesselPickerOpen] = useState(false);
@@ -1022,11 +1330,108 @@ export default function NewTripRequest() {
 
   const flushingRef = useRef(false);
 
+  /* ---------------- WIZARD STEP UI STATE (UI only) ---------------- */
+  const TOTAL_STEPS = 5;
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+
+  const stepMeta = useMemo(() => {
+    return {
+      1: {
+        icon: "boat",
+        title: lang === "ta" ? "வள்ளம் + முறை + மீன்" : "Vessel + Method + Fish",
+        sub: lang === "ta" ? "இந்த 3-ஐ தேர்வு பண்ணுங்க" : "Pick these 3 items",
+      },
+      2: {
+        icon: "location",
+        title: lang === "ta" ? "இடம் தேர்வு" : "Pick Location",
+        sub:
+          lang === "ta"
+            ? "நாடு → மாநிலம் → மாவட்டம் → நிலையம்"
+            : "Country → State → District → Station",
+      },
+      3: {
+        icon: "calendar",
+        title: lang === "ta" ? "தேதி + QR" : "Date + QR",
+        sub: lang === "ta" ? "பயண தேதி/நேரம் தேர்வு பண்ணுங்க" : "Pick planned date & time",
+      },
+      4: {
+        icon: "wallet",
+        title: lang === "ta" ? "குழு + செலவு" : "Crew + Cost",
+        sub: lang === "ta" ? "குழு, டீசல், ஐஸ்" : "Crew, diesel, ice",
+      },
+      5: {
+        icon: "checkmark-circle",
+        title: lang === "ta" ? "சரிபார்ப்பு" : "Review",
+        sub:
+          lang === "ta"
+            ? "சரி என்றால் Submit பண்ணுங்க"
+            : "Confirm everything and submit",
+      },
+    } as const;
+  }, [lang]);
+
+  const guardStep = (s: number) => {
+    if (s === 1) {
+      if (!vesselSel?.id) return Alert.alert(t.title, t.errVessel), false;
+      if (!methodSel?.id) return Alert.alert(t.title, t.errMethod), false;
+      if (!fishSel?.id) return Alert.alert(t.title, t.errFishSpecies), false;
+      return true;
+    }
+    if (s === 2) {
+      if (!countrySel?.id) return Alert.alert(t.title, t.errCountry), false;
+      if (!stateSel?.id) return Alert.alert(t.title, t.errState), false;
+      if (!districtSel?.id) return Alert.alert(t.title, t.errDistrict), false;
+      if (!locationSel?.id) return Alert.alert(t.title, t.errLocation), false;
+      return true;
+    }
+    if (s === 3) {
+      if (!plannedDT) return Alert.alert(t.title, t.errPlanned), false;
+      return true;
+    }
+    return true;
+  };
+
+  const goNext = () => {
+    if (!guardStep(step)) return;
+    setStep((prev) => (prev < TOTAL_STEPS ? ((prev + 1) as any) : prev));
+  };
+
+  const goBackStep = () => {
+    if (step === 1) return router.back();
+    setStep((prev) => (prev > 1 ? ((prev - 1) as any) : prev));
+  };
+
+  /* ---------------- ME cache / network watchers ---------------- */
+
+  // ✅ immediately sync current login store values into local state
+  useEffect(() => {
+    if (activeOwnerNameFromStore) setOwnerName(activeOwnerNameFromStore);
+    if (activeRegistrationNoFromStore) setRegistrationNo(activeRegistrationNoFromStore);
+    if (activeOwnerCodeFromStore) setOwnerCode(activeOwnerCodeFromStore);
+    if (activeOwnerDbIdFromStore) setOwnerDbId(Number(activeOwnerDbIdFromStore));
+  }, [
+    activeOwnerNameFromStore,
+    activeRegistrationNoFromStore,
+    activeOwnerCodeFromStore,
+    activeOwnerDbIdFromStore,
+  ]);
+
+  // ✅ read scoped cache per current logged-in user
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const cached = await readMeCache();
+        if (!alive) return;
+
+        // clear stale user immediately when login changes
+        setOwnerName("");
+        setRegistrationNo("");
+        setOwnerCode("");
+        setOwnerDbId(0);
+        setMeError(null);
+        setMeLoading(false);
+
+        const cached = await readMeCache(activeLoginUserId || undefined);
         if (!alive) return;
 
         if (cached) {
@@ -1048,7 +1453,7 @@ export default function NewTripRequest() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [activeLoginUserId]);
 
   useEffect(() => {
     let alive = true;
@@ -1077,19 +1482,31 @@ export default function NewTripRequest() {
     let alive = true;
     if (!isOnline) return;
 
-    if (ownerCode && ownerDbId) return;
+    const hasFreshStoreOwner =
+      !!String(activeOwnerCodeFromStore || "").trim() && !!Number(activeOwnerDbIdFromStore);
+
+    const hasEnoughLocalOwner =
+      !!String(ownerCode || "").trim() &&
+      !!Number(ownerDbId) &&
+      !!String(ownerName || "").trim();
+
+    // ✅ if Redux already has current login owner, don't refetch
+    // ✅ if scoped local data is already complete for known login user, don't refetch
+    if (hasFreshStoreOwner || (activeLoginUserId > 0 && hasEnoughLocalOwner)) return;
 
     (async () => {
       setMeLoading(true);
       setMeError(null);
       try {
-        const fresh = await fetchMeFromApi();
+        const fresh = await fetchMeFromApi(authTokenFromStore, activeLoginUserId || undefined);
         if (!alive) return;
+
         setOwnerName(fresh.ownerName);
         setRegistrationNo(fresh.registrationNo);
         setOwnerCode(fresh.ownerCode);
         setOwnerDbId(Number(fresh.ownerDbId || 0));
-        await writeMeCache(fresh);
+
+        await writeMeCache(fresh, activeLoginUserId || undefined);
 
         if (fresh.ownerCode) {
           await patchOwnerCodeInTripQueue(fresh.ownerCode);
@@ -1107,7 +1524,16 @@ export default function NewTripRequest() {
     return () => {
       alive = false;
     };
-  }, [isOnline, ownerCode, ownerDbId]);
+  }, [
+    isOnline,
+    authTokenFromStore,
+    activeLoginUserId,
+    activeOwnerCodeFromStore,
+    activeOwnerDbIdFromStore,
+    ownerCode,
+    ownerDbId,
+    ownerName,
+  ]);
 
   // ✅ fishing methods from backend (+ cache)
   useEffect(() => {
@@ -1226,8 +1652,7 @@ export default function NewTripRequest() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline]);
 
-  // ✅ ONLY OWNER VESSELS (LIKE CATCHLOG): userId -> ownerDbId -> vessels
-  // ✅ CHANGE: show ONLY APPROVED vessels (filter by approval_status === "APPROVED")
+  // ✅ ONLY OWNER VESSELS (LIKE CATCHLOG) + ✅ APPROVED ONLY
   useEffect(() => {
     let alive = true;
 
@@ -1235,15 +1660,19 @@ export default function NewTripRequest() {
       setVessels([]);
       setVesselSel(null);
 
-      if (!ownerDbId && !isOnline) return;
+      const ownerDbIdHint = activeOwnerDbIdFromStore || ownerDbId;
 
-      let resolvedOwnerDbId = ownerDbId;
+      if (!ownerDbIdHint && !isOnline) return;
+
+      let resolvedOwnerDbId = ownerDbIdHint;
 
       if (isOnline) {
         try {
-          const userId = await getLastUserId();
+          const userId =
+            activeLoginUserId || (await getLastUserId(activeLoginUserId || undefined));
+
           if (userId) {
-            const realOwnerId = await fetchOwnerDbIdFromUserId(userId);
+            const realOwnerId = await fetchOwnerDbIdFromUserId(userId, authTokenFromStore);
             if (realOwnerId && realOwnerId !== resolvedOwnerDbId) {
               resolvedOwnerDbId = realOwnerId;
               setOwnerDbId(realOwnerId);
@@ -1335,9 +1764,9 @@ export default function NewTripRequest() {
     return () => {
       alive = false;
     };
-  }, [ownerDbId, isOnline]);
+  }, [ownerDbId, activeOwnerDbIdFromStore, activeLoginUserId, authTokenFromStore, isOnline]);
 
-  // ✅ NEW: Load countries (same as vessel create)
+  // ✅ Load countries
   useEffect(() => {
     let alive = true;
     if (!isOnline) return;
@@ -1359,7 +1788,7 @@ export default function NewTripRequest() {
 
         setCountries(list);
 
-        // keep old flow smooth: auto select first country (like vessel create)
+        // auto select first country
         if (!countrySel && list.length > 0) {
           setCountrySel(list[0]);
         }
@@ -1376,12 +1805,11 @@ export default function NewTripRequest() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline]);
 
-  // ✅ NEW: country -> states (state API same as vessel create)
+  // ✅ country -> states
   useEffect(() => {
     let alive = true;
 
     (async () => {
-      // reset below (but keep same UI/flow)
       setStateSel(null);
       setDistrictSel(null);
       setLocationSel(null);
@@ -1510,6 +1938,7 @@ export default function NewTripRequest() {
     };
   }, [districtSel?.id, isOnline]);
 
+  // ✅ Auto flush queue when online
   useEffect(() => {
     let alive = true;
 
@@ -1611,6 +2040,7 @@ export default function NewTripRequest() {
     }));
   }, [locations]);
 
+  /* ---------------- SUBMIT (unchanged logic) ---------------- */
   const submit = async () => {
     if (!methodSel?.id) return Alert.alert(t.title, t.errMethod);
     if (!fishSel?.id) return Alert.alert(t.title, t.errFishSpecies);
@@ -1625,13 +2055,13 @@ export default function NewTripRequest() {
     let ownerFinal = String(ownerCode || "").trim();
     if (isOnline && !ownerFinal) {
       try {
-        const fresh = await fetchMeFromApi();
+        const fresh = await fetchMeFromApi(authTokenFromStore, activeLoginUserId || undefined);
         ownerFinal = String(fresh.ownerCode || "").trim();
         setOwnerName(fresh.ownerName);
         setRegistrationNo(fresh.registrationNo);
         setOwnerCode(fresh.ownerCode);
         setOwnerDbId(Number(fresh.ownerDbId || 0));
-        await writeMeCache(fresh);
+        await writeMeCache(fresh, activeLoginUserId || undefined);
       } catch {}
     }
 
@@ -1732,9 +2162,10 @@ export default function NewTripRequest() {
     }
   };
 
+  /* ---------------- UI (Wizard / Step-by-step) ---------------- */
   return (
-    <SafeAreaView className="flex-1 bg-[#fbf6f1]">
-      {/* ✅ FULL SCREEN PICKERS */}
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#fbf6f1" }}>
+      {/* ✅ FULL SCREEN PICKERS (unchanged behavior) */}
       <FullScreenPickerModal
         visible={methodPickerOpen}
         title={t.fishingMethod}
@@ -1795,7 +2226,6 @@ export default function NewTripRequest() {
         }}
       />
 
-      {/* ✅ NEW: Country picker */}
       <FullScreenPickerModal
         visible={countryPickerOpen}
         title={t.country}
@@ -1876,344 +2306,320 @@ export default function NewTripRequest() {
         }}
       />
 
-      <ScrollView contentContainerClassName="p-4 pb-10">
-        <View className="mb-3 flex-row items-center justify-between">
-          <View>
-            <Text className="text-lg font-bold text-[#2b2b2b]">{t.title}</Text>
-
-            <View className="mt-1 flex-row items-center gap-2">
-              <View
-                className="h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: isOnline ? "#10b981" : "#f59e0b" }}
-              />
-              <Text
-                className="text-xs font-semibold"
-                style={{ color: isOnline ? "#047857" : "#92400e" }}
-              >
-                {isOnline ? t.online : t.offline}
-              </Text>
-              {syncing ? (
-                <Text className="text-[11px] text-[#7a6f66]"> • {t.syncing}</Text>
-              ) : null}
-            </View>
-
-            {meLoading ? (
-              <View className="mt-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2">
-                <Text className="text-xs font-semibold text-blue-800">{t.meLoading}</Text>
-              </View>
-            ) : null}
-
-            {meError ? (
-              <View className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
-                <Text className="text-xs font-semibold text-rose-800">
-                  {t.meError}: {meError}
-                </Text>
-              </View>
-            ) : null}
-
-            {pendingCount > 0 ? (
-              <View className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
-                <Text className="text-xs font-semibold text-amber-800">
-                  {t.pending}: {pendingCount} {isOnline ? "" : "(offline)"}
-                </Text>
-              </View>
-            ) : null}
+      {/* ======= CONTENT ======= */}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingTop: 14,
+          paddingBottom: 140 + insets.bottom,
+        }}
+      >
+        {/* Title row + language toggle */}
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={{ fontSize: 20, fontWeight: "900", color: "#111827" }}>{t.title}</Text>
+            <Text style={{ marginTop: 2, fontSize: 12, color: "#7a6f66" }}>
+              {pendingCount > 0 ? `${t.pending}: ${pendingCount}` : ""}
+              {syncing ? ` • ${t.syncing}` : ""}
+              {vesselsLoading || methodLoading || fishLoading || countriesLoading || statesLoading || districtsLoading || locationsLoading
+                ? ` • ${t.loading}`
+                : ""}
+            </Text>
           </View>
 
           <Pressable
             onPress={() => setLang((x) => (x === "ta" ? "en" : "ta"))}
-            className="rounded-full border border-[#ead7c8] bg-white px-3 py-2 active:opacity-80"
+            style={{
+              paddingHorizontal: 14,
+              paddingVertical: 10,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: "#ead7c8",
+              backgroundColor: "white",
+            }}
           >
-            <Text className="text-xs font-semibold text-[#2b2b2b]">
+            <Text style={{ fontSize: 12, fontWeight: "900", color: "#111827" }}>
               {lang === "ta" ? "English" : "தமிழ்"}
             </Text>
           </Pressable>
         </View>
 
-        <Card className="p-4">
-          <View className="flex-row justify-between">
-            <View>
-              <Label>{t.ownerName}:</Label>
-              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">{ownerName || "—"}</Text>
-              <Text className="mt-1 text-[11px] text-[#7a6f66]">
-                Owner Code: {ownerCode || "—"} | Owner DB ID: {ownerDbId ? String(ownerDbId) : "—"}
-              </Text>
+        {/* Step header */}
+        <StepHeader
+          step={step}
+          total={TOTAL_STEPS}
+          title={stepMeta[step].title}
+          sub={stepMeta[step].sub}
+          icon={stepMeta[step].icon}
+          isOnline={isOnline}
+          onlineText={t.online}
+          offlineText={t.offline}
+        />
+
+        {/* Owner card (simple) */}
+        <View style={{ marginTop: 12 }}>
+          <Card className="p-4">
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={{ fontSize: 12, color: "#7a6f66", fontWeight: "900" }}>{t.ownerName}</Text>
+                <Text style={{ marginTop: 4, fontSize: 16, fontWeight: "900", color: "#111827" }}>
+                  {ownerName || "—"}
+                </Text>
+                <Text style={{ marginTop: 4, fontSize: 12, color: "#7a6f66" }} numberOfLines={1}>
+                  {registrationNo ? `${t.regNo}: ${registrationNo}` : ""}
+                </Text>
+              </View>
+
+              <View style={{ alignItems: "flex-end" }}>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Ionicons name="key" size={16} color="#7a6f66" />
+                  <Text style={{ marginLeft: 6, fontSize: 12, color: "#7a6f66" }}>
+                    {ownerCode || "—"}
+                  </Text>
+                </View>
+                <Text style={{ marginTop: 6, fontSize: 12, color: "#7a6f66" }}>
+                  DB: {ownerDbId ? String(ownerDbId) : "—"}
+                </Text>
+              </View>
             </View>
-            <View>
-              <Label>{t.regNo}:</Label>
-              <Text className="mt-1 text-sm font-semibold text-[#2b2b2b]">
-                {registrationNo || "—"}
-              </Text>
-            </View>
+
+            {meLoading ? (
+              <View style={{ marginTop: 10, borderRadius: 12, backgroundColor: "#eff6ff", padding: 10, borderWidth: 1, borderColor: "#bfdbfe" }}>
+                <Text style={{ fontSize: 12, fontWeight: "900", color: "#1e40af" }}>{t.meLoading}</Text>
+              </View>
+            ) : null}
+
+            {meError ? (
+              <View style={{ marginTop: 10, borderRadius: 12, backgroundColor: "#fff1f2", padding: 10, borderWidth: 1, borderColor: "#fecdd3" }}>
+                <Text style={{ fontSize: 12, fontWeight: "900", color: "#9f1239" }}>
+                  {t.meError}: {meError}
+                </Text>
+              </View>
+            ) : null}
+          </Card>
+        </View>
+
+        {/* ===== STEP 1 ===== */}
+        {step === 1 ? (
+          <View style={{ marginTop: 14 }}>
+            <Text style={{ fontSize: 14, fontWeight: "900", color: "#7a6f66" }}>
+              {lang === "ta" ? "முதலில் இவை 3 தேர்வு பண்ணுங்க" : "First choose these 3"}
+            </Text>
+
+            <BigPickRow
+              icon="boat"
+              title={t.vessel}
+              value={
+                vesselSel?.name
+                  ? `${vesselSel.name}${vesselSel.subName ? ` • ${vesselSel.subName}` : ""}`
+                  : ""
+              }
+              placeholder={lang === "ta" ? "வள்ளத்தை தேர்வு செய்ய தட்டுங்கள்" : "Tap to choose vessel"}
+              onPress={() => setVesselPickerOpen(true)}
+              helper={lang === "ta" ? "Approved vessel மட்டும் வரும்" : "Only APPROVED vessels shown"}
+            />
+
+            <BigPickRow
+              icon="fish"
+              title={t.fishingMethod}
+              value={methodSel?.name || ""}
+              placeholder={lang === "ta" ? "மீன்பிடி முறையை தேர்வு செய்ய தட்டுங்கள்" : "Tap to choose method"}
+              onPress={() => setMethodPickerOpen(true)}
+              helper={lang === "ta" ? "படம் இருந்தா காட்டும்" : "Shows image if available"}
+            />
+
+            <BigPickRow
+              icon="nutrition"
+              title={t.fishSpecies}
+              value={fishSel?.name || ""}
+              placeholder={lang === "ta" ? "மீன் வகையை தேர்வு செய்ய தட்டுங்கள்" : "Tap to choose fish"}
+              onPress={() => setFishPickerOpen(true)}
+              helper={lang === "ta" ? "மீன் பெயரை தேடி தேர்வு செய்யலாம்" : "You can search fish name"}
+            />
           </View>
-        </Card>
+        ) : null}
 
-        <View className="mt-4">
-          <Text className="text-base font-bold text-[#2b2b2b]">{t.tripDetails}</Text>
+        {/* ===== STEP 2 ===== */}
+        {step === 2 ? (
+          <View style={{ marginTop: 14 }}>
+            <Text style={{ fontSize: 14, fontWeight: "900", color: "#7a6f66" }}>
+              {lang === "ta" ? "இடம் தேர்வு பண்ணுங்க" : "Choose location"}
+            </Text>
 
-          <Card className="mt-3 p-4">
-            <Label>{t.tripName}</Label>
-            <FieldBox>
-              <Text className="text-base text-[#2b2b2b]">{tripName}</Text>
-            </FieldBox>
+            <BigPickRow
+              icon="flag"
+              title={t.country}
+              value={countrySel?.name || ""}
+              placeholder={lang === "ta" ? "நாடு தேர்வு" : "Select country"}
+              onPress={() => {
+                if (!isOnline) return Alert.alert(t.title, t.savedOffline);
+                setCountryPickerOpen(true);
+              }}
+              disabled={!isOnline}
+              helper={
+                !isOnline
+                  ? lang === "ta"
+                    ? "Net இல்லாமல் பட்டியல் வராது"
+                    : "Need internet for lists"
+                  : ""
+              }
+            />
 
-            <View className="mt-3">
-              <FieldBox>
-                <Pressable onPress={() => setVesselPickerOpen(true)} className="active:opacity-80">
-                  <Label>{t.vessel}</Label>
+            <BigPickRow
+              icon="map"
+              title={t.state}
+              value={stateSel?.name || ""}
+              placeholder={lang === "ta" ? "மாநிலம் தேர்வு" : "Select state"}
+              onPress={() => {
+                if (!countrySel?.id) return Alert.alert(t.title, t.errCountry);
+                setStatePickerOpen(true);
+              }}
+              disabled={!countrySel?.id}
+            />
 
-                  <Text className={`mt-1 text-base ${vesselSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
-                    {vesselSel?.name || t.select}
+            <BigPickRow
+              icon="business"
+              title={t.district}
+              value={districtSel?.name || ""}
+              placeholder={lang === "ta" ? "மாவட்டம் தேர்வு" : "Select district"}
+              onPress={() => {
+                if (!stateSel?.id) return Alert.alert(t.title, t.errState);
+                setDistrictPickerOpen(true);
+              }}
+              disabled={!stateSel?.id}
+            />
+
+            <BigPickRow
+              icon="location"
+              title={t.nearStation}
+              value={locationSel?.name || ""}
+              placeholder={lang === "ta" ? "நிலையம் தேர்வு" : "Select station"}
+              onPress={() => {
+                if (!districtSel?.id) return Alert.alert(t.title, t.errDistrict);
+                setLocationPickerOpen(true);
+              }}
+              disabled={!districtSel?.id}
+              helper={
+                locationSel
+                  ? lang === "ta"
+                    ? "நீங்க தேர்வு பண்ணின இடம்"
+                    : "Chosen station"
+                  : ""
+              }
+            />
+          </View>
+        ) : null}
+
+        {/* ===== STEP 3 ===== */}
+        {step === 3 ? (
+          <View style={{ marginTop: 14 }}>
+            <Text style={{ fontSize: 14, fontWeight: "900", color: "#7a6f66" }}>
+              {lang === "ta" ? "தேதி/நேரம் + QR" : "Date/time + QR"}
+            </Text>
+
+            {/* Planned DateTime */}
+            <Pressable
+              onPress={() => setShowPlannedDate(true)}
+              style={{
+                marginTop: 12,
+                borderRadius: 18,
+                borderWidth: 1,
+                borderColor: "#e6d4c5",
+                backgroundColor: "white",
+                padding: 14,
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <IconBubble name="calendar" />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "900", color: "#2b2b2b" }}>
+                    {t.plannedTripDT}
                   </Text>
-
-                  {vesselSel?.subName ? (
-                    <Text className="mt-1 text-[11px] text-[#7a6f66]">{vesselSel.subName}</Text>
-                  ) : null}
-
-                  <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
-                </Pressable>
-              </FieldBox>
-            </View>
-
-            <View className="mt-3">
-              <FieldBox>
-                <Pressable onPress={() => setMethodPickerOpen(true)} className="active:opacity-80">
-                  <Label>{t.fishingMethod}</Label>
-
-                  <View className="flex-row items-center mt-1">
-                    {methodSel?.image_url ? (
-                      <Image
-                        source={{ uri: String(methodSel.image_url) }}
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 10,
-                          marginRight: 10,
-                          backgroundColor: "#f2e8df",
-                        }}
-                        resizeMode="cover"
-                      />
-                    ) : null}
-                    <Text className={`text-base ${methodSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
-                      {methodSel?.name || t.select}
-                    </Text>
-                  </View>
-
-                  <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
-                </Pressable>
-              </FieldBox>
-            </View>
-
-            <View className="mt-3">
-              <FieldBox>
-                <Pressable onPress={() => setFishPickerOpen(true)} className="active:opacity-80">
-                  <Label>{t.fishSpecies}</Label>
-
-                  <View className="flex-row items-center mt-1">
-                    {fishSel?.image_url ? (
-                      <Image
-                        source={{ uri: String(fishSel.image_url) }}
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 10,
-                          marginRight: 10,
-                          backgroundColor: "#f2e8df",
-                        }}
-                        resizeMode="cover"
-                      />
-                    ) : null}
-                    <Text className={`text-base ${fishSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
-                      {fishSel?.name || t.select}
-                    </Text>
-                  </View>
-
-                  {fishSel?.code ? (
-                    <Text className="mt-1 text-[11px] text-[#7a6f66]">Code: {fishSel.code}</Text>
-                  ) : null}
-
-                  <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
-                </Pressable>
-              </FieldBox>
-            </View>
-
-            {/* ✅ NEW: Country field (same style) */}
-            <View className="mt-3">
-              <FieldBox>
-                <Pressable
-                  onPress={() => {
-                    if (!isOnline) return Alert.alert(t.title, t.savedOffline);
-                    setCountryPickerOpen(true);
-                  }}
-                  className="active:opacity-80"
-                >
-                  <Label>{t.country}</Label>
-                  <Text className={`mt-1 text-base ${countrySel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
-                    {countrySel?.name || t.select}
+                  <Text
+                    style={{
+                      marginTop: 4,
+                      fontSize: 18,
+                      fontWeight: "900",
+                      color: plannedStr ? "#111827" : "#9ca3af",
+                    }}
+                  >
+                    {plannedStr || (lang === "ta" ? "தேதி/நேரம் தேர்வு" : "Select date & time")}
                   </Text>
-                </Pressable>
-              </FieldBox>
-            </View>
-
-            <View className="mt-3">
-              <FieldBox>
-                <Pressable
-                  onPress={() => {
-                    if (!countrySel?.id) return Alert.alert(t.title, t.errCountry);
-                    setStatePickerOpen(true);
-                  }}
-                  className="active:opacity-80"
-                >
-                  <Label>{t.state}</Label>
-                  <Text className={`mt-1 text-base ${stateSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
-                    {stateSel?.name || t.select}
-                  </Text>
-                </Pressable>
-              </FieldBox>
-            </View>
-
-            <View className="mt-3">
-              <FieldBox>
-                <Pressable
-                  onPress={() => {
-                    if (!stateSel?.id) return Alert.alert(t.title, t.errState);
-                    setDistrictPickerOpen(true);
-                  }}
-                  className="active:opacity-80"
-                >
-                  <Label>{t.district}</Label>
-                  <Text className={`mt-1 text-base ${districtSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
-                    {districtSel?.name || t.select}
-                  </Text>
-                </Pressable>
-              </FieldBox>
-            </View>
-
-            <View className="mt-3">
-              <FieldBox>
-                <Pressable
-                  onPress={() => {
-                    if (!districtSel?.id) return Alert.alert(t.title, t.errDistrict);
-                    setLocationPickerOpen(true);
-                  }}
-                  className="active:opacity-80"
-                >
-                  <Label>{t.nearStation}</Label>
-                  <Text className={`mt-1 text-base ${locationSel ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
-                    {locationSel?.name || t.select}
-                  </Text>
-
-                  {locationSel ? (
-                    <Text className="mt-1 text-[11px] text-[#7a6f66]">
-                      Payload near_station(name): {locationSel.name} | payload location_id: {locationSel.id} | derived
-                      state_id: {locationSel.state_id} | derived district_id: {locationSel.district_id}
-                    </Text>
-                  ) : (
-                    <Text className="mt-1 text-[11px] text-[#b1a59a]">{t.tapToSelect}</Text>
-                  )}
-                </Pressable>
-              </FieldBox>
-            </View>
-
-            <View className="mt-3">
-              <FieldBox>
-                <Pressable onPress={() => setShowPlannedDate(true)} className="active:opacity-80">
-                  <Label>{t.plannedTripDT}</Label>
-                  <Text className={`mt-1 text-base ${plannedStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
-                    {plannedStr || t.select}
-                  </Text>
-                </Pressable>
-              </FieldBox>
-
-              {showPlannedDate && Platform.OS !== "web" && (
-                <DateTimePicker
-                  value={plannedDT ?? new Date()}
-                  mode="date"
-                  display={Platform.OS === "ios" ? "spinner" : "default"}
-                  onChange={(e, date) => {
-                    if ((e as any).type === "dismissed") return setShowPlannedDate(false);
-                    setShowPlannedDate(false);
-                    if (date) {
-                      const base = plannedDT ?? new Date();
-                      const merged = new Date(date);
-                      merged.setHours(base.getHours(), base.getMinutes(), 0, 0);
-                      setPlannedDT(merged);
-                      setShowPlannedTime(true);
-                    }
-                  }}
-                />
-              )}
-
-              {showPlannedTime && Platform.OS !== "web" && (
-                <DateTimePicker
-                  value={plannedDT ?? new Date()}
-                  mode="time"
-                  display={Platform.OS === "ios" ? "spinner" : "default"}
-                  onChange={(e, date) => {
-                    if ((e as any).type === "dismissed") return setShowPlannedTime(false);
-                    setShowPlannedTime(false);
-                    if (date) {
-                      const base = plannedDT ?? new Date();
-                      const merged = new Date(base);
-                      merged.setHours(date.getHours(), date.getMinutes(), 0, 0);
-                      setPlannedDT(merged);
-                    }
-                  }}
-                />
-              )}
-            </View>
-          </Card>
-        </View>
-
-        <View className="mt-4">
-          <Text className="text-base font-bold text-[#2b2b2b]">{t.crewDetails}</Text>
-
-          <Card className="mt-3 p-4">
-            <View className="flex-row items-start">
-              <View className="flex-1 pr-3">
-                <Text className="text-sm font-semibold text-[#2b2b2b]" numberOfLines={1}>
-                  {t.crewMembers}: {crewCount}
-                </Text>
-                <Text className="mt-1 text-[11px] text-[#7a6f66]" numberOfLines={2}>
-                  {t.crewHelp}
-                </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#7a6f66" />
               </View>
+            </Pressable>
 
-              <View className="flex-row items-center">
-                <Pressable
-                  onPress={() => setCrewCount((c) => Math.max(0, c - 1))}
-                  disabled={crewCount === 0}
-                  className="h-10 w-10 items-center justify-center rounded-full border border-[#ead7c8] bg-white active:opacity-80"
-                  style={{ opacity: crewCount === 0 ? 0.45 : 1 }}
-                >
-                  <Text className="text-base font-extrabold text-[#2b2b2b]">−</Text>
-                </Pressable>
+            {showPlannedDate && Platform.OS !== "web" && (
+              <DateTimePicker
+                value={plannedDT ?? new Date()}
+                mode="date"
+                display={Platform.OS === "ios" ? "spinner" : "default"}
+                onChange={(e, date) => {
+                  if ((e as any).type === "dismissed") return setShowPlannedDate(false);
+                  setShowPlannedDate(false);
+                  if (date) {
+                    const base = plannedDT ?? new Date();
+                    const merged = new Date(date);
+                    merged.setHours(base.getHours(), base.getMinutes(), 0, 0);
+                    setPlannedDT(merged);
+                    setShowPlannedTime(true);
+                  }
+                }}
+              />
+            )}
 
-                <View style={{ width: 10 }} />
+            {showPlannedTime && Platform.OS !== "web" && (
+              <DateTimePicker
+                value={plannedDT ?? new Date()}
+                mode="time"
+                display={Platform.OS === "ios" ? "spinner" : "default"}
+                onChange={(e, date) => {
+                  if ((e as any).type === "dismissed") return setShowPlannedTime(false);
+                  setShowPlannedTime(false);
+                  if (date) {
+                    const base = plannedDT ?? new Date();
+                    const merged = new Date(base);
+                    merged.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                    setPlannedDT(merged);
+                  }
+                }}
+              />
+            )}
 
-                <Pressable
-                  onPress={() => setCrewCount((c) => c + 1)}
-                  className="h-10 w-10 items-center justify-center rounded-full border border-[#a06b2a] bg-[#fff3e7] active:opacity-80"
-                >
-                  <Text className="text-base font-extrabold text-[#7a4a12]">+</Text>
-                </Pressable>
+            {/* Expected return */}
+            <Pressable
+              onPress={() => setShowReturnPicker(true)}
+              style={{
+                marginTop: 12,
+                borderRadius: 18,
+                borderWidth: 1,
+                borderColor: "#e6d4c5",
+                backgroundColor: "white",
+                padding: 14,
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <IconBubble name="time" />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "900", color: "#2b2b2b" }}>
+                    {t.expectedReturn}
+                  </Text>
+                  <Text
+                    style={{
+                      marginTop: 4,
+                      fontSize: 18,
+                      fontWeight: "900",
+                      color: returnStr ? "#111827" : "#9ca3af",
+                    }}
+                  >
+                    {returnStr || (lang === "ta" ? "விருப்பம் (optional)" : "Optional")}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#7a6f66" />
               </View>
-            </View>
-          </Card>
-        </View>
-
-        <View className="mt-4">
-          <Text className="text-base font-bold text-[#2b2b2b]">{t.planning}</Text>
-
-          <Card className="mt-3 p-4">
-            <FieldBox>
-              <Pressable onPress={() => setShowReturnPicker(true)} className="active:opacity-80">
-                <Label>{t.expectedReturn}</Label>
-                <Text className={`mt-1 text-base ${returnStr ? "text-[#2b2b2b]" : "text-[#b1a59a]"}`}>
-                  {returnStr || t.select}
-                </Text>
-              </Pressable>
-            </FieldBox>
+            </Pressable>
 
             {showReturnPicker && Platform.OS !== "web" && (
               <DateTimePicker
@@ -2228,124 +2634,373 @@ export default function NewTripRequest() {
               />
             )}
 
-            <View className="mt-4">
-              <Label>{t.qrCount}</Label>
-              <FieldBox>
-                <Text className="text-[11px] text-[#7a6f66]">{t.qrHelp}</Text>
-                <TextInput
-                  value={qrCount}
-                  onChangeText={(v) => setQrCount(onlyInt(v))}
-                  placeholder={t.qrCountPH}
-                  keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
-                  inputMode="numeric"
-                  className="mt-1 text-base text-[#2b2b2b]"
-                />
-              </FieldBox>
-            </View>
-
-            <View className="mt-4">
-              <Text className="text-sm font-bold text-[#2b2b2b]">{t.suppliesCost}</Text>
-
-              <View className="mt-3">
-                <Label>{t.diesel}</Label>
-                <View className="mt-2 flex-row gap-3">
-                  <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
-                    <Text className="text-[11px] text-[#7a6f66]">{t.liters}</Text>
-                    <TextInput
-                      value={dieselLiters}
-                      onChangeText={(v) => setDieselLiters(onlyDecimal(v))}
-                      placeholder="e.g. 120"
-                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
-                      inputMode="decimal"
-                      className="mt-1 text-base text-[#2b2b2b]"
-                    />
-                  </View>
-                  <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
-                    <Text className="text-[11px] text-[#7a6f66]">{t.ratePerLiter}</Text>
-                    <TextInput
-                      value={dieselRate}
-                      onChangeText={(v) => setDieselRate(onlyDecimal(v))}
-                      placeholder="e.g. 95"
-                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
-                      inputMode="decimal"
-                      className="mt-1 text-base text-[#2b2b2b]"
-                    />
-                  </View>
-                </View>
-
-                <View className="mt-2 rounded-xl border border-[#ffd9b6] bg-[#fff3e7] px-3 py-2">
-                  <Text className="text-xs font-semibold text-[#7a4a12]">
-                    {t.dieselCost}: {money(dieselCost)}
+            {/* QR Count */}
+            <View
+              style={{
+                marginTop: 12,
+                borderRadius: 18,
+                borderWidth: 1,
+                borderColor: "#e6d4c5",
+                backgroundColor: "white",
+                padding: 14,
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <IconBubble name="qr-code" />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "900", color: "#2b2b2b" }}>
+                    {t.qrCount}
                   </Text>
+                  <Text style={{ marginTop: 4, fontSize: 12, color: "#7a6f66" }}>{t.qrHelp}</Text>
+                  <TextInput
+                    value={qrCount}
+                    onChangeText={(v) => setQrCount(onlyInt(v))}
+                    placeholder={t.qrCountPH}
+                    keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
+                    inputMode="numeric"
+                    style={{
+                      marginTop: 8,
+                      fontSize: 18,
+                      fontWeight: "900",
+                      color: "#111827",
+                      borderWidth: 1,
+                      borderColor: "#ead7c8",
+                      borderRadius: 14,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      backgroundColor: "#fffaf5",
+                    }}
+                  />
                 </View>
-              </View>
-
-              <View className="mt-4">
-                <Label>{t.ice}</Label>
-                <View className="mt-2 flex-row gap-3">
-                  <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
-                    <Text className="text-[11px] text-[#7a6f66]">{t.kg}</Text>
-                    <TextInput
-                      value={iceKg}
-                      onChangeText={(v) => setIceKg(onlyDecimal(v))}
-                      placeholder="e.g. 60"
-                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
-                      inputMode="decimal"
-                      className="mt-1 text-base text-[#2b2b2b]"
-                    />
-                  </View>
-                  <View className="flex-1 rounded-xl border border-[#e6d4c5] bg-white px-3 py-3">
-                    <Text className="text-[11px] text-[#7a6f66]">{t.ratePerKg}</Text>
-                    <TextInput
-                      value={iceRate}
-                      onChangeText={(v) => setIceRate(onlyDecimal(v))}
-                      placeholder="e.g. 15"
-                      keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
-                      inputMode="decimal"
-                      className="mt-1 text-base text-[#2b2b2b]"
-                    />
-                  </View>
-                </View>
-
-                <View className="mt-2 rounded-xl border border-[#ffd9b6] bg-[#fff3e7] px-3 py-2">
-                  <Text className="text-xs font-semibold text-[#7a4a12]">
-                    {t.iceCost}: {money(iceCost)}
-                  </Text>
-                </View>
-              </View>
-
-              <View className="mt-4 rounded-2xl border border-[#a06b2a] bg-[#fff3e7] px-4 py-3">
-                <Text className="text-xs text-[#7a4a12]">{t.totalCost}</Text>
-                <Text className="mt-1 text-lg font-extrabold text-[#2b2b2b]">{money(totalCost)}</Text>
-                <Text className="mt-1 text-[11px] text-[#7a6f66]">{t.totalHelp}</Text>
               </View>
             </View>
-          </Card>
-        </View>
+          </View>
+        ) : null}
 
-        <View className="mt-6 flex-row gap-3">
-          <Pressable
-            onPress={() => router.back()}
-            disabled={posting}
-            className="flex-1 rounded-2xl border border-[#ead7c8] bg-white p-4 active:opacity-80"
-            style={{ opacity: posting ? 0.7 : 1 }}
-          >
-            <Text className="text-center text-[#2b2b2b] font-semibold">{t.cancel}</Text>
-          </Pressable>
+        {/* ===== STEP 4 ===== */}
+        {step === 4 ? (
+          <View style={{ marginTop: 14 }}>
+            <Text style={{ fontSize: 14, fontWeight: "900", color: "#7a6f66" }}>
+              {lang === "ta" ? "குழு + செலவு" : "Crew + Cost"}
+            </Text>
 
-          <Pressable
-            onPress={submit}
-            disabled={posting}
-            className="flex-1 rounded-2xl bg-[#a06b2a] p-4 active:opacity-90"
-            style={{ opacity: posting ? 0.7 : 1 }}
-          >
-            <Text className="text-center text-white font-semibold">{posting ? "..." : t.submit}</Text>
-          </Pressable>
-        </View>
+            {/* Crew */}
+            <View style={{ marginTop: 12, borderRadius: 18, borderWidth: 1, borderColor: "#e6d4c5", backgroundColor: "white", padding: 14 }}>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <IconBubble name="people" />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "900", color: "#2b2b2b" }}>{t.crewMembers}</Text>
+                  <Text style={{ marginTop: 4, fontSize: 26, fontWeight: "900", color: "#111827" }}>{crewCount}</Text>
+                  <Text style={{ marginTop: 4, fontSize: 12, color: "#7a6f66" }}>{t.crewHelp}</Text>
+                </View>
 
-        {/* small bottom padding so last button not hide on iPhone */}
-        <View style={{ height: 12 + insets.bottom }} />
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Pressable
+                    onPress={() => setCrewCount((c) => Math.max(0, c - 1))}
+                    disabled={crewCount === 0}
+                    style={{
+                      width: 50,
+                      height: 50,
+                      borderRadius: 999,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderWidth: 1,
+                      borderColor: "#ead7c8",
+                      backgroundColor: "white",
+                      opacity: crewCount === 0 ? 0.45 : 1,
+                    }}
+                  >
+                    <Ionicons name="remove" size={22} color="#111827" />
+                  </Pressable>
+
+                  <View style={{ width: 12 }} />
+
+                  <Pressable
+                    onPress={() => setCrewCount((c) => c + 1)}
+                    style={{
+                      width: 50,
+                      height: 50,
+                      borderRadius: 999,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderWidth: 1,
+                      borderColor: "#a06b2a",
+                      backgroundColor: "#fff3e7",
+                    }}
+                  >
+                    <Ionicons name="add" size={22} color="#7a4a12" />
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+
+            {/* Diesel */}
+            <View style={{ marginTop: 12, borderRadius: 18, borderWidth: 1, borderColor: "#e6d4c5", backgroundColor: "white", padding: 14 }}>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <IconBubble name="flame" />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "900", color: "#2b2b2b" }}>{t.diesel}</Text>
+
+                  <View style={{ flexDirection: "row", marginTop: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 12, color: "#7a6f66", fontWeight: "900" }}>{t.liters}</Text>
+                      <TextInput
+                        value={dieselLiters}
+                        onChangeText={(v) => setDieselLiters(onlyDecimal(v))}
+                        placeholder="e.g. 120"
+                        keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
+                        inputMode="decimal"
+                        style={{
+                          marginTop: 6,
+                          fontSize: 18,
+                          fontWeight: "900",
+                          color: "#111827",
+                          borderWidth: 1,
+                          borderColor: "#ead7c8",
+                          borderRadius: 14,
+                          paddingHorizontal: 12,
+                          paddingVertical: 10,
+                          backgroundColor: "#fffaf5",
+                        }}
+                      />
+                    </View>
+
+                    <View style={{ width: 10 }} />
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 12, color: "#7a6f66", fontWeight: "900" }}>{t.ratePerLiter}</Text>
+                      <TextInput
+                        value={dieselRate}
+                        onChangeText={(v) => setDieselRate(onlyDecimal(v))}
+                        placeholder="e.g. 95"
+                        keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
+                        inputMode="decimal"
+                        style={{
+                          marginTop: 6,
+                          fontSize: 18,
+                          fontWeight: "900",
+                          color: "#111827",
+                          borderWidth: 1,
+                          borderColor: "#ead7c8",
+                          borderRadius: 14,
+                          paddingHorizontal: 12,
+                          paddingVertical: 10,
+                          backgroundColor: "#fffaf5",
+                        }}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={{ marginTop: 10, borderRadius: 14, backgroundColor: "#fff3e7", padding: 10, borderWidth: 1, borderColor: "#ffd9b6" }}>
+                    <Text style={{ fontSize: 14, fontWeight: "900", color: "#7a4a12" }}>
+                      {t.dieselCost}: {money(dieselCost)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            {/* Ice */}
+            <View style={{ marginTop: 12, borderRadius: 18, borderWidth: 1, borderColor: "#e6d4c5", backgroundColor: "white", padding: 14 }}>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <IconBubble name="snow" />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "900", color: "#2b2b2b" }}>{t.ice}</Text>
+
+                  <View style={{ flexDirection: "row", marginTop: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 12, color: "#7a6f66", fontWeight: "900" }}>{t.kg}</Text>
+                      <TextInput
+                        value={iceKg}
+                        onChangeText={(v) => setIceKg(onlyDecimal(v))}
+                        placeholder="e.g. 60"
+                        keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
+                        inputMode="decimal"
+                        style={{
+                          marginTop: 6,
+                          fontSize: 18,
+                          fontWeight: "900",
+                          color: "#111827",
+                          borderWidth: 1,
+                          borderColor: "#ead7c8",
+                          borderRadius: 14,
+                          paddingHorizontal: 12,
+                          paddingVertical: 10,
+                          backgroundColor: "#fffaf5",
+                        }}
+                      />
+                    </View>
+
+                    <View style={{ width: 10 }} />
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 12, color: "#7a6f66", fontWeight: "900" }}>{t.ratePerKg}</Text>
+                      <TextInput
+                        value={iceRate}
+                        onChangeText={(v) => setIceRate(onlyDecimal(v))}
+                        placeholder="e.g. 15"
+                        keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
+                        inputMode="decimal"
+                        style={{
+                          marginTop: 6,
+                          fontSize: 18,
+                          fontWeight: "900",
+                          color: "#111827",
+                          borderWidth: 1,
+                          borderColor: "#ead7c8",
+                          borderRadius: 14,
+                          paddingHorizontal: 12,
+                          paddingVertical: 10,
+                          backgroundColor: "#fffaf5",
+                        }}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={{ marginTop: 10, borderRadius: 14, backgroundColor: "#fff3e7", padding: 10, borderWidth: 1, borderColor: "#ffd9b6" }}>
+                    <Text style={{ fontSize: 14, fontWeight: "900", color: "#7a4a12" }}>
+                      {t.iceCost}: {money(iceCost)}
+                    </Text>
+                  </View>
+
+                  <View style={{ marginTop: 12, borderRadius: 18, backgroundColor: "#fff3e7", padding: 12, borderWidth: 1, borderColor: "#a06b2a" }}>
+                    <Text style={{ fontSize: 12, color: "#7a4a12", fontWeight: "900" }}>{t.totalCost}</Text>
+                    <Text style={{ marginTop: 4, fontSize: 22, fontWeight: "900", color: "#111827" }}>
+                      {money(totalCost)}
+                    </Text>
+                    <Text style={{ marginTop: 4, fontSize: 12, color: "#7a6f66" }}>{t.totalHelp}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
+        {/* ===== STEP 5 ===== */}
+        {step === 5 ? (
+          <View style={{ marginTop: 14 }}>
+            <Text style={{ fontSize: 14, fontWeight: "900", color: "#7a6f66" }}>
+              {lang === "ta" ? "சரிபார்த்து Submit பண்ணுங்க" : "Review and submit"}
+            </Text>
+
+            <View style={{ marginTop: 12, borderRadius: 18, borderWidth: 1, borderColor: "#e6d4c5", backgroundColor: "white", padding: 14 }}>
+              <ReviewRow icon="receipt" label={t.tripName} value={tripName} />
+              <ReviewRow
+                icon="boat"
+                label={t.vessel}
+                value={
+                  vesselSel?.name
+                    ? `${vesselSel.name}${vesselSel.subName ? ` • ${vesselSel.subName}` : ""}`
+                    : ""
+                }
+              />
+              <ReviewRow icon="fish" label={t.fishingMethod} value={methodSel?.name || ""} />
+              <ReviewRow icon="nutrition" label={t.fishSpecies} value={fishSel?.name || ""} />
+              <ReviewRow icon="location" label={t.nearStation} value={locationSel?.name || ""} />
+              <ReviewRow icon="calendar" label={t.plannedTripDT} value={plannedStr || ""} />
+              <ReviewRow icon="time" label={t.expectedReturn} value={returnStr || (lang === "ta" ? "விருப்பம்" : "Optional")} />
+              <ReviewRow icon="qr-code" label={t.qrCount} value={qrCount || "0"} />
+              <ReviewRow icon="people" label={t.crewMembers} value={String(crewCount)} />
+              <ReviewRow icon="cash" label={t.totalCost} value={money(totalCost)} />
+
+              <View style={{ marginTop: 14, borderTopWidth: 1, borderTopColor: "#f1e5da", paddingTop: 12 }}>
+                <Text style={{ fontSize: 12, color: "#7a6f66" }}>
+                  {lang === "ta"
+                    ? "Online இருந்தா serverக்கு போகும். Offline இருந்தா local-ல save ஆகும்."
+                    : "If online it posts to server. If offline it saves locally."}
+                </Text>
+              </View>
+            </View>
+          </View>
+        ) : null}
       </ScrollView>
+
+      {/* ======= BOTTOM ACTION BAR (big buttons) ======= */}
+      <View
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          paddingHorizontal: 16,
+          paddingTop: 10,
+          paddingBottom: 12 + insets.bottom,
+          backgroundColor: "rgba(251,246,241,0.96)",
+          borderTopWidth: 1,
+          borderTopColor: "#ead7c8",
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <Pressable
+            onPress={goBackStep}
+            disabled={posting}
+            style={{
+              flex: 1,
+              height: 56,
+              borderRadius: 18,
+              borderWidth: 1,
+              borderColor: "#ead7c8",
+              backgroundColor: "white",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: posting ? 0.6 : 1,
+              flexDirection: "row",
+            }}
+          >
+            <Ionicons name="arrow-back" size={20} color="#111827" />
+            <View style={{ width: 8 }} />
+            <Text style={{ fontSize: 16, fontWeight: "900", color: "#111827" }}>
+              {lang === "ta" ? "பின்" : "Back"}
+            </Text>
+          </Pressable>
+
+          <View style={{ width: 12 }} />
+
+          {step < TOTAL_STEPS ? (
+            <Pressable
+              onPress={goNext}
+              disabled={posting}
+              style={{
+                flex: 1,
+                height: 56,
+                borderRadius: 18,
+                backgroundColor: "#a06b2a",
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: posting ? 0.6 : 1,
+                flexDirection: "row",
+              }}
+            >
+              <Text style={{ fontSize: 16, fontWeight: "900", color: "white" }}>
+                {lang === "ta" ? "அடுத்து" : "Next"}
+              </Text>
+              <View style={{ width: 8 }} />
+              <Ionicons name="arrow-forward" size={20} color="white" />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={submit}
+              disabled={posting}
+              style={{
+                flex: 1,
+                height: 56,
+                borderRadius: 18,
+                backgroundColor: "#16a34a",
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: posting ? 0.6 : 1,
+                flexDirection: "row",
+              }}
+            >
+              <Ionicons name="checkmark-circle" size={22} color="white" />
+              <View style={{ width: 8 }} />
+              <Text style={{ fontSize: 16, fontWeight: "900", color: "white" }}>
+                {posting ? "..." : t.submit}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
