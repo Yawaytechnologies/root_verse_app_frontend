@@ -59,8 +59,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "782bc067-ddb8-4fe6-933c-4d11d57ec0a3"
+        "projectId": "4479ca9f-8770-4521-b4f1-a22580f8ff41"
       }
-    }
+    },
+    "owner": "kalkiram"
   }
 }
