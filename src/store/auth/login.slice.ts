@@ -1,30 +1,41 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
-import { ENV } from "../../config/env";
+import { http } from "../../services/http";
+import { persistSession, logoutSession } from "./authSession.slice";
+import { fetchMe, clearMe } from "./me.slice";
 
-export const TOKEN_KEY = "auth_token"; // ✅ MUST match me.slice.ts
-
-type ApprovalStatus = "APPROVED" | "PENDING_APPROVAL" | "REJECTED";
-export type RootverseType = "WILD_CAPTURE" | "AQUACULTURE" | "MARICULTURE" | "QUALITY_CHECKER";
+type ApprovalStatus = "APPROVED" | "PENDING_APPROVAL" | "REJECTED" | string;
+export type RootverseType =
+  | "WILD_CAPTURE"
+  | "AQUACULTURE"
+  | "MARICULTURE"
+  | "QUALITY_CHECKER"
+  | "CRATE_PACKER"
+  | string;
 
 type LoginRes = {
   token?: string;
   access_token?: string;
+  jwt?: string;
+
   message?: string;
   status?: ApprovalStatus;
   rootverse_type?: RootverseType;
+
   user?: {
     status?: ApprovalStatus;
     rootverse_type?: RootverseType;
     [key: string]: any;
   };
-  data?: any; // some backends wrap here
+
+  data?: any; // backend may wrap here
   [key: string]: any;
 };
 
 type LoginState = {
   loading: boolean;
   error: string | null;
+
+  // optional (authSession is source of truth)
   token: string | null;
   status: ApprovalStatus | null;
   rootverse_type: RootverseType | null;
@@ -44,44 +55,56 @@ function pickToken(payload: any): string | null {
   const token =
     payload?.token ||
     payload?.access_token ||
+    payload?.jwt ||
     payload?.data?.token ||
     payload?.data?.access_token ||
     payload?.data?.jwt ||
-    payload?.jwt ||
     payload?.data?.data?.token ||
     payload?.data?.data?.access_token;
 
   return typeof token === "string" && token.length > 0 ? token : null;
 }
 
+function pickStatus(payload: any): ApprovalStatus | null {
+  return (
+    payload?.status ??
+    payload?.user?.status ??
+    payload?.data?.status ??
+    payload?.data?.user?.status ??
+    null
+  );
+}
+
+function pickRootverseType(payload: any): RootverseType | null {
+  return (
+    payload?.rootverse_type ??
+    payload?.user?.rootverse_type ??
+    payload?.data?.rootverse_type ??
+    payload?.data?.user?.rootverse_type ??
+    null
+  );
+}
+
+/**
+ * ✅ Login flow (single source of truth):
+ * 1) POST /api/auth/login { phone_no }
+ * 2) persistSession(token)  -> saves + sets http Bearer token
+ * 3) fetchMe()              -> GET /api/me using http layer
+ */
 export const loginWithPhone = createAsyncThunk<
   { token: string; status: ApprovalStatus | null; rootverse_type: RootverseType | null; user?: any },
   string,
   { rejectValue: string }
->("login/withPhone", async (phone_no, { rejectWithValue }) => {
+>("login/withPhone", async (phone_no, { dispatch, rejectWithValue }) => {
   try {
     const cleanPhone = String(phone_no || "").trim();
+    if (!cleanPhone) return rejectWithValue("ENTER_PHONE_NUMBER");
 
-  
-
-    // ✅ OWNERS = REAL BACKEND (your old working API)
-    const res = await fetch(`${ENV.API_BASE}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ phone_no: cleanPhone }),
-    });
-
-    const text = await res.text();
-    let data: any = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      return rejectWithValue("LOGIN_NOT_JSON");
-    }
-
-    if (!res.ok) {
-      return rejectWithValue(data?.error || data?.message || "Login failed");
-    }
+    const data = await http.postJson<LoginRes>(
+      "/api/auth/login",
+      { phone_no: cleanPhone },
+      15000
+    );
 
     const token = pickToken(data);
     if (!token) {
@@ -89,17 +112,32 @@ export const loginWithPhone = createAsyncThunk<
       return rejectWithValue("NO_TOKEN");
     }
 
-    // ✅ save token for fetchMe()
-    await AsyncStorage.setItem(TOKEN_KEY, token);
+    // ✅ store token + set http token
+    await dispatch(persistSession(token)).unwrap();
 
-    const status: ApprovalStatus | null = data?.status ?? data?.user?.status ?? null;
-    const rootverse_type: RootverseType | null =
-      data?.rootverse_type ?? data?.user?.rootverse_type ?? null;
+    // ✅ load profile (fire and forget)
+    // dispatch(fetchMe());
 
-    return { token, status, rootverse_type, user: data?.user ?? data?.data?.user ?? null };
+    const status = pickStatus(data);
+    const rootverse_type = pickRootverseType(data);
+    const user = (data as any)?.user ?? (data as any)?.data?.user ?? null;
+
+    return { token, status, rootverse_type, user };
   } catch (e: any) {
-    return rejectWithValue(e?.message || "Network error");
+    return rejectWithValue(String(e?.message || "LOGIN_FAILED"));
   }
+});
+
+/**
+ * ✅ Proper logout:
+ * - clears authSession (storage + http token)
+ * - clears me
+ * - clears login slice state
+ */
+export const logout = createAsyncThunk("login/logout", async (_, { dispatch }) => {
+  dispatch(clearMe());
+  await dispatch(logoutSession()).unwrap();
+  return true;
 });
 
 const loginSlice = createSlice({
@@ -109,13 +147,12 @@ const loginSlice = createSlice({
     clearLoginError(state) {
       state.error = null;
     },
-    logout(state) {
+    resetLoginState(state) {
+      state.loading = false;
+      state.error = null;
       state.token = null;
       state.status = null;
       state.rootverse_type = null;
-      state.error = null;
-      state.loading = false;
-      AsyncStorage.removeItem(TOKEN_KEY);
     },
   },
   extraReducers: (b) => {
@@ -135,10 +172,18 @@ const loginSlice = createSlice({
 
     b.addCase(loginWithPhone.rejected, (s, a) => {
       s.loading = false;
-      s.error = a.payload || "Login failed";
+      s.error = a.payload || "LOGIN_FAILED";
+    });
+
+    b.addCase(logout.fulfilled, (s) => {
+      s.loading = false;
+      s.error = null;
+      s.token = null;
+      s.status = null;
+      s.rootverse_type = null;
     });
   },
 });
 
-export const { clearLoginError, logout } = loginSlice.actions;
+export const { clearLoginError, resetLoginState } = loginSlice.actions;
 export default loginSlice.reducer;

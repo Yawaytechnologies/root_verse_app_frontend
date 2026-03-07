@@ -1,6 +1,15 @@
 // src/components/quality/QcScannerScreen.tsx
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { Alert, Animated, Pressable, Text, TextInput, View, Image } from "react-native";
+import {
+  Alert,
+  Animated,
+  Pressable,
+  Text,
+  TextInput,
+  View,
+  Image,
+  AppState,
+} from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Location from "expo-location";
@@ -27,9 +36,18 @@ import {
 import { selectInspector } from "../../store/qualityAuth/qualityAuth.slice";
 import { type Division, type Lang } from "./QualityUI";
 
-import WildInspectionModal, { type WildFormState, wildInitial } from "./modals/WildInspectionModal";
-import AquaInspectionModal, { type AquaFormState, aquaInitial } from "./modals/AquaInspectionModal";
-import MariInspectionModal, { type MariFormState, mariInitial } from "./modals/MariInspectionModal";
+import WildInspectionModal, {
+  type WildFormState,
+  wildInitial,
+} from "./modals/WildInspectionModal";
+import AquaInspectionModal, {
+  type AquaFormState,
+  aquaInitial,
+} from "./modals/AquaInspectionModal";
+import MariInspectionModal, {
+  type MariFormState,
+  mariInitial,
+} from "./modals/MariInspectionModal";
 
 import {
   getQcFillQueue,
@@ -53,7 +71,10 @@ function upper(x: any) {
   return String(x || "").toUpperCase().trim();
 }
 function normCode(raw: string) {
-  return String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
+  return String(raw || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
 }
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -131,7 +152,7 @@ function toCoordString(n: any): string | null {
 }
 
 /* =========================
-   ✅ IMAGE COMPRESSION (400–800KB)
+   IMAGE COMPRESSION (400–800KB)
    ========================= */
 
 const KB = 1024;
@@ -140,7 +161,9 @@ function isRemoteUri(uri: string) {
   return /^https?:\/\//i.test(String(uri || ""));
 }
 
-async function getImageDims(uri: string): Promise<{ w: number; h: number } | null> {
+async function getImageDims(
+  uri: string
+): Promise<{ w: number; h: number } | null> {
   return await new Promise((resolve) => {
     Image.getSize(
       uri,
@@ -150,7 +173,6 @@ async function getImageDims(uri: string): Promise<{ w: number; h: number } | nul
   });
 }
 
-// your TS defs hide `size`
 const FS_ANY: any = FileSystem;
 
 async function ensureFileUri(uri: string): Promise<string> {
@@ -158,10 +180,13 @@ async function ensureFileUri(uri: string): Promise<string> {
   if (!u) return u;
 
   if (u.startsWith("content://")) {
-    const base: string | null = FS_ANY.documentDirectory ?? FS_ANY.cacheDirectory ?? null;
+    const base: string | null =
+      FS_ANY.documentDirectory ?? FS_ANY.cacheDirectory ?? null;
     if (!base) return u;
 
-    const dest = `${base}qc_img_${Date.now()}_${Math.random().toString(16).slice(2)}.jpg`;
+    const dest = `${base}qc_img_${Date.now()}_${Math.random()
+      .toString(16)
+      .slice(2)}.jpg`;
 
     try {
       await FileSystem.copyAsync({ from: u, to: dest });
@@ -207,7 +232,9 @@ async function compressToRange(
   const fileUri = await ensureFileUri(uri);
 
   try {
-    const info0 = await FileSystem.getInfoAsync(fileUri, { size: true } as any);
+    const info0 = await FileSystem.getInfoAsync(fileUri, {
+      size: true,
+    } as any);
     const bytes0 = getSizeBytesFromInfo(info0);
     const sizeKB0 = bytes0 ? bytes0 / KB : 0;
     if (sizeKB0 >= minKB && sizeKB0 <= maxKB) return fileUri;
@@ -215,7 +242,9 @@ async function compressToRange(
 
   const dims = await getImageDims(fileUri);
   const shouldResize = !!dims?.w && dims.w > width;
-  const actions: ImageManipulator.Action[] = shouldResize ? [{ resize: { width } }] : [];
+  const actions: ImageManipulator.Action[] = shouldResize
+    ? [{ resize: { width } }]
+    : [];
 
   let q = startQuality;
   let bestUri = fileUri;
@@ -229,7 +258,9 @@ async function compressToRange(
     bestUri = r.uri;
 
     try {
-      const info = await FileSystem.getInfoAsync(bestUri, { size: true } as any);
+      const info = await FileSystem.getInfoAsync(bestUri, {
+        size: true,
+      } as any);
       const bytes = getSizeBytesFromInfo(info);
       const sizeKB = bytes ? bytes / KB : 0;
 
@@ -252,7 +283,13 @@ async function compressToRange(
 async function compressImagesInPayload(payload: any): Promise<any> {
   if (!payload || typeof payload !== "object") return payload;
 
-  const keys = ["images", "crate_images", "inspection_images", "pond_images", "pond_condition_images"];
+  const keys = [
+    "images",
+    "crate_images",
+    "inspection_images",
+    "pond_images",
+    "pond_condition_images",
+  ];
   const next = { ...payload };
 
   for (const k of keys) {
@@ -289,25 +326,36 @@ async function compressImagesInPayload(payload: any): Promise<any> {
 /* ========================= */
 
 function CornerBrackets() {
-  // fixed to match usage: 260 / corner 28 / thickness 5
   const c = "bg-[rgba(46,125,255,0.95)]";
   return (
     <View className="w-[260px] h-[260px]">
-      {/* TL */}
-      <View className={`absolute left-0 top-0 w-[28px] h-[5px] rounded-full ${c}`} />
-      <View className={`absolute left-0 top-0 w-[5px] h-[28px] rounded-full ${c}`} />
+      <View
+        className={`absolute left-0 top-0 w-[28px] h-[5px] rounded-full ${c}`}
+      />
+      <View
+        className={`absolute left-0 top-0 w-[5px] h-[28px] rounded-full ${c}`}
+      />
 
-      {/* TR */}
-      <View className={`absolute right-0 top-0 w-[28px] h-[5px] rounded-full ${c}`} />
-      <View className={`absolute right-0 top-0 w-[5px] h-[28px] rounded-full ${c}`} />
+      <View
+        className={`absolute right-0 top-0 w-[28px] h-[5px] rounded-full ${c}`}
+      />
+      <View
+        className={`absolute right-0 top-0 w-[5px] h-[28px] rounded-full ${c}`}
+      />
 
-      {/* BL */}
-      <View className={`absolute left-0 bottom-0 w-[28px] h-[5px] rounded-full ${c}`} />
-      <View className={`absolute left-0 bottom-0 w-[5px] h-[28px] rounded-full ${c}`} />
+      <View
+        className={`absolute left-0 bottom-0 w-[28px] h-[5px] rounded-full ${c}`}
+      />
+      <View
+        className={`absolute left-0 bottom-0 w-[5px] h-[28px] rounded-full ${c}`}
+      />
 
-      {/* BR */}
-      <View className={`absolute right-0 bottom-0 w-[28px] h-[5px] rounded-full ${c}`} />
-      <View className={`absolute right-0 bottom-0 w-[5px] h-[28px] rounded-full ${c}`} />
+      <View
+        className={`absolute right-0 bottom-0 w-[28px] h-[5px] rounded-full ${c}`}
+      />
+      <View
+        className={`absolute right-0 bottom-0 w-[5px] h-[28px] rounded-full ${c}`}
+      />
     </View>
   );
 }
@@ -323,7 +371,6 @@ export default function QcScannerScreen({
   const dispatch = useAppDispatch();
   const inspector = useAppSelector(selectInspector);
 
-  // ✅ per-user key used for local queue isolation
   const qcUserKey = useMemo(() => {
     const v =
       (inspector as any)?.id ??
@@ -345,6 +392,8 @@ export default function QcScannerScreen({
   const submitError = useAppSelector(selectQcFillError);
 
   const [cameraPerm, requestCameraPerm] = useCameraPermissions();
+  const [cameraKey, setCameraKey] = useState(0);
+  const [cameraActive, setCameraActive] = useState(true);
 
   const [scannedCode, setScannedCode] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
@@ -385,12 +434,41 @@ export default function QcScannerScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const primeLocation = async (forceNow: boolean): Promise<LocalLocationSnap | null> => {
+  useEffect(() => {
+    if (cameraPerm?.granted && !modalOpen) {
+      const t = setTimeout(() => {
+        setCameraKey((k) => k + 1);
+        setCameraActive(true);
+      }, 300);
+      return () => clearTimeout(t);
+    }
+  }, [cameraPerm?.granted, modalOpen]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active" && cameraPerm?.granted && !modalOpen) {
+        setCameraActive(false);
+        setCameraKey((k) => k + 1);
+        setTimeout(() => {
+          setCameraActive(true);
+          setCameraKey((k) => k + 1);
+        }, 180);
+      }
+    });
+
+    return () => sub.remove();
+  }, [cameraPerm?.granted, modalOpen]);
+
+  const primeLocation = async (
+    forceNow: boolean
+  ): Promise<LocalLocationSnap | null> => {
     if (!locPermGranted) return null;
 
     const now = Date.now();
     const cached = locCacheRef.current;
-    if (!forceNow && cached && now - cached.capturedAt < 2 * 60 * 1000) return cached;
+    if (!forceNow && cached && now - cached.capturedAt < 2 * 60 * 1000) {
+      return cached;
+    }
 
     try {
       const last = await Location.getLastKnownPositionAsync({
@@ -411,7 +489,9 @@ export default function QcScannerScreen({
         return snap;
       }
 
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Low,
+      });
       const snap: LocalLocationSnap = {
         capturedAt: Date.now(),
         coords: {
@@ -427,12 +507,20 @@ export default function QcScannerScreen({
     }
   };
 
-  const setWildField = <K extends keyof WildFormState>(k: K, v: WildFormState[K]) =>
-    setWildForm((p) => ({ ...p, [k]: v }));
-  const setAquaField = <K extends keyof AquaFormState>(k: K, v: AquaFormState[K]) =>
-    setAquaForm((p) => ({ ...p, [k]: v }));
-  const setMariField = <K extends keyof MariFormState>(k: K, v: MariFormState[K]) =>
-    setMariForm((p) => ({ ...p, [k]: v }));
+  const setWildField = <K extends keyof WildFormState>(
+    k: K,
+    v: WildFormState[K]
+  ) => setWildForm((p) => ({ ...p, [k]: v }));
+
+  const setAquaField = <K extends keyof AquaFormState>(
+    k: K,
+    v: AquaFormState[K]
+  ) => setAquaForm((p) => ({ ...p, [k]: v }));
+
+  const setMariField = <K extends keyof MariFormState>(
+    k: K,
+    v: MariFormState[K]
+  ) => setMariForm((p) => ({ ...p, [k]: v }));
 
   const viewOnlyByDate = useMemo(() => {
     const sel = String(selectedDate || "").trim();
@@ -442,6 +530,7 @@ export default function QcScannerScreen({
   }, [selectedDate, editDraft?.qrCode]);
 
   const [warnedKey, setWarnedKey] = useState<string | null>(null);
+
   useEffect(() => {
     if (!viewOnlyByDate) return;
     const k = String(selectedDate || "UNKNOWN");
@@ -455,11 +544,20 @@ export default function QcScannerScreen({
   }, [viewOnlyByDate, selectedDate, warnedKey]);
 
   const scanLineY = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(scanLineY, { toValue: 1, duration: 1300, useNativeDriver: true }),
-        Animated.timing(scanLineY, { toValue: 0, duration: 1300, useNativeDriver: true }),
+        Animated.timing(scanLineY, {
+          toValue: 1,
+          duration: 1300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(scanLineY, {
+          toValue: 0,
+          duration: 1300,
+          useNativeDriver: true,
+        }),
       ])
     );
     loop.start();
@@ -486,9 +584,21 @@ export default function QcScannerScreen({
 
     dispatch(clearCatchLog());
     dispatch(resetQcFill());
+
+    setCameraActive(false);
+    setCameraKey((k) => k + 1);
+
+    setTimeout(() => {
+      setCameraActive(true);
+      setCameraKey((k) => k + 1);
+    }, 180);
   };
 
-  const applyPrefillFromPayload = (code: string, p: any, tab: QueueTabStatus | null) => {
+  const applyPrefillFromPayload = (
+    code: string,
+    p: any,
+    tab: QueueTabStatus | null
+  ) => {
     const payload = p || {};
     setLocalTab(tab);
 
@@ -529,13 +639,14 @@ export default function QcScannerScreen({
     setHasScanned(true);
     setScannedCode(c);
     setLocalTab(null);
+    setCameraActive(false);
+    setCameraKey((k) => k + 1);
 
     void primeLocation(false);
 
     dispatch(resetQcFill());
     dispatch(clearCatchLog());
 
-    // ✅ local queue only for this qc user
     try {
       if (qcUserKey) {
         const q = await getQcFillQueue(qcUserKey);
@@ -561,11 +672,16 @@ export default function QcScannerScreen({
 
     if (viewOnlyByDate) {
       try {
-        await dispatch(fetchCatchLogByQr({ qrCode: c, mode: "FILLED_ONLY" })).unwrap();
+        await dispatch(
+          fetchCatchLogByQr({ qrCode: c, mode: "FILLED_ONLY" })
+        ).unwrap();
         setModalOpen(true);
         return;
       } catch {
-        Alert.alert("Only can able to scan already submitted", "This QR is not submitted.");
+        Alert.alert(
+          "Only can able to scan already submitted",
+          "This QR is not submitted."
+        );
         resetAll(800);
         return;
       }
@@ -580,6 +696,9 @@ export default function QcScannerScreen({
 
     const code = normCode(editDraft.qrCode);
     const p = editDraft.payload || {};
+
+    setCameraActive(false);
+    setCameraKey((k) => k + 1);
 
     applyPrefillFromPayload(code, p, "pending");
 
@@ -608,19 +727,48 @@ export default function QcScannerScreen({
 
     if (res.canceled) return;
 
-    const uris = (res.assets || []).map((a) => a.uri).filter(Boolean) as string[];
+    const uris = (res.assets || [])
+      .map((a) => a.uri)
+      .filter(Boolean) as string[];
 
-    if (division === "WILD") setWildField("images", [...wildForm.images, ...uris].slice(0, max));
-    else if (division === "AQUA")
-      setAquaField("images", [...((((aquaForm as any).images || []) as string[])), ...uris].slice(0, max));
-    else setMariField("images", [...((((mariForm as any).images || []) as string[])), ...uris].slice(0, max));
+    if (division === "WILD") {
+      setWildField("images", [...wildForm.images, ...uris].slice(0, max));
+    } else if (division === "AQUA") {
+      setAquaField(
+        "images",
+        [...(((aquaForm as any).images || []) as string[]), ...uris].slice(
+          0,
+          max
+        )
+      );
+    } else {
+      setMariField(
+        "images",
+        [...(((mariForm as any).images || []) as string[]), ...uris].slice(
+          0,
+          max
+        )
+      );
+    }
   };
 
   const removeImage = (uri: string) => {
-    if (division === "WILD") setWildField("images", wildForm.images.filter((x) => x !== uri));
-    else if (division === "AQUA")
-      setAquaField("images", ((((aquaForm as any).images || []) as string[])).filter((x) => x !== uri));
-    else setMariField("images", ((((mariForm as any).images || []) as string[])).filter((x) => x !== uri));
+    if (division === "WILD") {
+      setWildField(
+        "images",
+        wildForm.images.filter((x) => x !== uri)
+      );
+    } else if (division === "AQUA") {
+      setAquaField(
+        "images",
+        (((aquaForm as any).images || []) as string[]).filter((x) => x !== uri)
+      );
+    } else {
+      setMariField(
+        "images",
+        (((mariForm as any).images || []) as string[]).filter((x) => x !== uri)
+      );
+    }
   };
 
   const serverStatus = upper((catchLog as any)?.status);
@@ -629,7 +777,8 @@ export default function QcScannerScreen({
   const editingHoldDraft = localTab === "pending";
   const localFinal = localTab === "checked" || localTab === "rejected";
 
-  const readOnly = (viewOnlyByDate || localFinal || serverFilled) && !editingHoldDraft;
+  const readOnly =
+    (viewOnlyByDate || localFinal || serverFilled) && !editingHoldDraft;
 
   const speciesOk = useMemo(() => {
     const fishName = String((catchLog as any)?.fish_name || "").trim();
@@ -637,159 +786,188 @@ export default function QcScannerScreen({
     return !!fishId || !!fishName;
   }, [catchLog]);
 
-  const submit = async (payload: any) => {
-    if (!scannedCode) {
-      Alert.alert("Scan required", "Please scan a QR first");
-      return;
-    }
+const submit = async (payload: any) => {
+  if (!scannedCode) {
+    Alert.alert("Scan required", "Please scan a QR first");
+    return;
+  }
 
-    if (viewOnlyByDate && !editingHoldDraft) {
-      Alert.alert("Already submitted", "Past/Future date selected. Submission is disabled.");
-      return;
-    }
+  if (viewOnlyByDate && !editingHoldDraft) {
+    Alert.alert(
+      "Already submitted",
+      "Past/Future date selected. Submission is disabled."
+    );
+    return;
+  }
 
-    if (readOnly) {
-      Alert.alert("Already submitted", "This QR is already filled.");
-      return;
-    }
+  if (readOnly) {
+    Alert.alert("Already submitted", "This QR is already filled.");
+    return;
+  }
 
-    if (catchLoading) {
-      Alert.alert("Wait", "QR details still loading. Please wait.");
-      return;
-    }
-    if (catchError) {
-      Alert.alert("Cannot submit", "QR details fetch failed. Please rescan and try again.");
-      return;
-    }
-    if (!catchLog || !speciesOk) {
-      Alert.alert("Cannot submit", "Species not loaded for this QR. Submission blocked.");
-      return;
-    }
+  if (catchLoading) {
+    Alert.alert("Wait", "QR details still loading. Please wait.");
+    return;
+  }
 
-    if (!inspector?.checker_code || !inspector?.id) {
-      Alert.alert("Inspector missing", "QC inspector data not loaded");
-      return;
-    }
+  if (catchError) {
+    Alert.alert(
+      "Cannot submit",
+      "QR details fetch failed. Please rescan and try again."
+    );
+    return;
+  }
 
-    if (!qcUserKey) {
-      Alert.alert("QC user missing", "QC user key not ready. Please logout/login again.");
-      return;
-    }
+  if (!catchLog || !speciesOk) {
+    Alert.alert(
+      "Cannot submit",
+      "Species not loaded for this QR. Submission blocked."
+    );
+    return;
+  }
 
-    const cached = locCacheRef.current;
-    const locSnap =
-      cached ??
-      (await Promise.race([
-        primeLocation(false),
-        new Promise<LocalLocationSnap | null>((res) => setTimeout(() => res(null), 350)),
-      ]));
+  if (!inspector?.checker_code || !inspector?.id) {
+    Alert.alert("Inspector missing", "QC inspector data not loaded");
+    return;
+  }
 
-    const latitude = locSnap ? toCoordString(locSnap.coords.latitude) : null;
-    const longitude = locSnap ? toCoordString(locSnap.coords.longitude) : null;
+  if (!qcUserKey) {
+    Alert.alert(
+      "QC user missing",
+      "QC user key not ready. Please logout/login again."
+    );
+    return;
+  }
 
-    let processedPayload = payload;
-    try {
-      processedPayload = await compressImagesInPayload(payload);
-    } catch {
-      processedPayload = payload;
-    }
+  const cached = locCacheRef.current;
+  const locSnap =
+    cached ??
+    (await Promise.race([
+      primeLocation(false),
+      new Promise<LocalLocationSnap | null>((res) =>
+        setTimeout(() => res(null), 350)
+      ),
+    ]));
 
-    const finalPayload = {
-      ...processedPayload,
-      checker_code: inspector.checker_code,
-      quality_checker_id: inspector.id,
+  const latitude = locSnap ? toCoordString(locSnap.coords.latitude) : null;
+  const longitude = locSnap ? toCoordString(locSnap.coords.longitude) : null;
+
+  // ✅ removed heavy image compression during submit
+  const processedPayload = payload;
+
+  const finalPayload = {
+    ...processedPayload,
+    checker_code: inspector.checker_code,
+    quality_checker_id: inspector.id,
+    division,
+    ...(latitude ? { latitude } : {}),
+    ...(longitude ? { longitude } : {}),
+  };
+
+  const qcResultFromForm = getFormQcResult(finalPayload);
+  const qcStatusFromForm = deriveQcStatus(qcResultFromForm);
+
+  const createdAt = Date.now();
+  const localPayloadBase = {
+    ...finalPayload,
+    qc_result: qcResultFromForm,
+    qc_status: qcStatusFromForm,
+    _local: {
+      qrCode: scannedCode,
       division,
-      ...(latitude ? { latitude } : {}),
-      ...(longitude ? { longitude } : {}),
-    };
+      createdAt,
+      inspector: { id: inspector.id, checker_code: inspector.checker_code },
+      catchLog: catchLog ?? null,
+      location: locSnap,
+    },
+  };
 
-    const qcResultFromForm = getFormQcResult(finalPayload);
-    const qcStatusFromForm = deriveQcStatus(qcResultFromForm);
-
-    const createdAt = Date.now();
-    const localPayloadBase = {
-      ...finalPayload,
-      qc_result: qcResultFromForm,
-      qc_status: qcStatusFromForm,
-      _local: {
-        qrCode: scannedCode,
-        division,
-        createdAt,
-        inspector: { id: inspector.id, checker_code: inspector.checker_code },
-        catchLog: catchLog ?? null,
-        location: locSnap,
-      },
-    };
-
-    if (qcResultFromForm === "HOLD") {
-      try {
-        await upsertQcFillDraft(qcUserKey, scannedCode, {
-          ...localPayloadBase,
-          _local: {
-            ...(localPayloadBase as any)._local,
-            synced: false,
-            last_error: null,
-            last_error_at: null,
-          },
-        });
-
-        Alert.alert("Saved", "Saved locally as HOLD. Edit/resubmit later from Pending tab.");
-        onAfterSubmit?.("HOLD");
-        resetAll(2000);
-        return;
-      } catch (e: any) {
-        Alert.alert("Local save failed", String(e?.message || e || "Failed"));
-        return;
-      }
-    }
-
+  if (qcResultFromForm === "HOLD") {
     try {
-      const res = await dispatch(submitQcFill({ qrCode: scannedCode, payload: finalPayload })).unwrap();
-
-      const qcResult = extractQcResult(res, finalPayload);
-      const qcStatus = deriveQcStatus(qcResult);
-
-      const syncedPayload = {
+      await upsertQcFillDraft(qcUserKey, scannedCode, {
         ...localPayloadBase,
-        qc_result: qcResult,
-        qc_status: qcStatus,
-        server_qr: res?.qr || res?.raw?.qr || res?.raw?.updatedQr || res?.raw?.data?.qr || null,
         _local: {
-          ...(localPayloadBase as any)?._local,
-          synced: true,
-          syncedAt: Date.now(),
+          ...(localPayloadBase as any)._local,
+          synced: false,
           last_error: null,
           last_error_at: null,
         },
-      };
+      });
 
-      await markQcFillSynced(qcUserKey, scannedCode, syncedPayload);
-
-      Alert.alert("Success", res?.message || "QC submitted");
-      onAfterSubmit?.(qcResult);
+      Alert.alert(
+        "Saved",
+        "Saved locally as HOLD. Edit/resubmit later from Pending tab."
+      );
+      onAfterSubmit?.("HOLD");
       resetAll(2000);
+      return;
     } catch (e: any) {
-      const errText = String(e?.message || e || "Failed");
-
-      const failedPayload = {
-        ...localPayloadBase,
-        _local: {
-          ...(localPayloadBase as any)?._local,
-          synced: false,
-          last_error: errText,
-          last_error_at: Date.now(),
-        },
-      };
-
-      try {
-        await markQcFillFailed(qcUserKey, scannedCode, errText, failedPayload);
-      } catch {}
-
-      Alert.alert("Submit failed", `${errText}\n\nSaved locally. Edit/retry from the list.`);
+      Alert.alert(
+        "Local save failed",
+        String(e?.message || e || "Failed")
+      );
+      return;
     }
-  };
+  }
 
-  if (!cameraPerm) {
+  try {
+    const res = await dispatch(
+      submitQcFill({ qrCode: scannedCode, payload: finalPayload })
+    ).unwrap();
+
+    const qcResult = extractQcResult(res, finalPayload);
+    const qcStatus = deriveQcStatus(qcResult);
+
+    const syncedPayload = {
+      ...localPayloadBase,
+      qc_result: qcResult,
+      qc_status: qcStatus,
+      server_qr:
+        res?.qr ||
+        res?.raw?.qr ||
+        res?.raw?.updatedQr ||
+        res?.raw?.data?.qr ||
+        null,
+      _local: {
+        ...(localPayloadBase as any)?._local,
+        synced: true,
+        syncedAt: Date.now(),
+        last_error: null,
+        last_error_at: null,
+      },
+    };
+
+    await markQcFillSynced(qcUserKey, scannedCode, syncedPayload);
+
+    Alert.alert("Success", res?.message || "QC submitted");
+    onAfterSubmit?.(qcResult);
+    resetAll(2000);
+  } catch (e: any) {
+    const errText = String(e?.message || e || "Failed");
+
+    const failedPayload = {
+      ...localPayloadBase,
+      _local: {
+        ...(localPayloadBase as any)?._local,
+        synced: false,
+        last_error: errText,
+        last_error_at: Date.now(),
+      },
+    };
+
+    try {
+      await markQcFillFailed(qcUserKey, scannedCode, errText, failedPayload);
+    } catch {}
+
+    Alert.alert(
+      "Submit failed",
+      `${errText}\n\nSaved locally. Edit/retry from the list.`
+    );
+    resetAll(1200);
+  }
+};
+
+  if (!cameraPerm || cameraPerm.granted === null) {
     return (
       <View className="p-4">
         <Text className="text-white">Requesting camera permission…</Text>
@@ -800,7 +978,9 @@ export default function QcScannerScreen({
   if (!cameraPerm.granted) {
     return (
       <View className="p-4">
-        <Text className="text-white font-black text-[16px]">Camera permission required</Text>
+        <Text className="text-white font-black text-[16px]">
+          Camera permission required
+        </Text>
         <Text className="text-white/70 mt-2">
           Enable camera permission to scan QR codes.
         </Text>
@@ -821,7 +1001,6 @@ export default function QcScannerScreen({
         QC Scanner ({division})
       </Text>
 
-      {/* Manual Code */}
       <View className="mt-2.5 self-center w-[92%] max-w-[380px] p-2.5 rounded-[18px] bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.10)]">
         <Text className="text-white/75 font-extrabold mb-1.5 text-[12px]">
           Enter QR Code manually
@@ -853,37 +1032,45 @@ export default function QcScannerScreen({
         </Pressable>
       </View>
 
-      {/* OR divider */}
       <View className="mt-2.5 mb-2.5 self-center w-[92%] max-w-[380px] flex-row items-center justify-center gap-2.5">
         <View className="flex-1 h-[1px] bg-[rgba(255,255,255,0.15)]" />
-        <Text className="text-white/65 font-black text-[12px] tracking-[1px]">OR</Text>
+        <Text className="text-white/65 font-black text-[12px] tracking-[1px]">
+          OR
+        </Text>
         <View className="flex-1 h-[1px] bg-[rgba(255,255,255,0.15)]" />
       </View>
 
-      {/* Camera Box */}
       <View className="self-center w-[92%] max-w-[380px] rounded-[24px] overflow-hidden border border-[rgba(255,255,255,0.10)] bg-[rgba(0,0,0,0.35)]">
-        <View className="h-[300px]">
-          <CameraView
-            className="flex-1"
-            facing="back"
-            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-            onBarcodeScanned={(e: any) => {
-              const now = Date.now();
-              if (now < scanPausedUntil) return;
+        <View className="h-[300px]" style={{ height: 300 }}>
+          {cameraActive && !modalOpen ? (
+            <CameraView
+              key={cameraKey}
+              className="flex-1"
+              style={{ flex: 1 }}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+              onBarcodeScanned={(e: any) => {
+                const now = Date.now();
+                if (now < scanPausedUntil) return;
 
-              const code = String(e?.data || "").trim();
-              if (!code) return;
-              if (hasScanned) return;
+                const code = String(e?.data || "").trim();
+                if (!code) return;
+                if (hasScanned) return;
 
-              openForCode(code);
-            }}
-          />
+                openForCode(code);
+              }}
+            />
+          ) : (
+            <View style={{ flex: 1, backgroundColor: "black" }} />
+          )}
 
-          <View pointerEvents="none" className="absolute inset-0 items-center justify-center">
+          <View
+            pointerEvents="none"
+            className="absolute inset-0 items-center justify-center"
+          >
             <View className="w-[260px] h-[260px]">
               <CornerBrackets />
 
-              {/* ⚠️ needs style for animated transform (no tailwind alternative) */}
               <Animated.View
                 className="absolute left-3 right-3 top-4 h-[2px] rounded-full bg-[rgba(46,125,255,0.95)]"
                 style={{ transform: [{ translateY: scanTranslateY }] }}
@@ -893,7 +1080,9 @@ export default function QcScannerScreen({
             </View>
 
             <Text className="mt-2 text-white/85 font-black text-[13px]">
-              {lang === "en" ? "Align QR inside the box" : "QR-ஐ பெட்டிக்குள் வைத்துப் ஸ்கேன் செய்யவும்"}
+              {lang === "en"
+                ? "Align QR inside the box"
+                : "QR-ஐ பெட்டிக்குள் வைத்துப் ஸ்கேன் செய்யவும்"}
             </Text>
           </View>
         </View>
