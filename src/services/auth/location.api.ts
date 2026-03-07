@@ -75,3 +75,23 @@ export async function fetchLocationsByDistrictApi(districtId: number): Promise<L
     name: String(x.name ?? ""),
   }));
 }
+export type LocationFullItem = { id: number; name: string; location_code?: string };
+
+export async function fetchAllLocationsApi(): Promise<LocationFullItem[]> {
+  const raw: any = await getJson<any>("/api/locations");
+
+  // backend: { success, message, data: [...] }
+  const arr = Array.isArray(raw?.data)
+    ? raw.data
+    : Array.isArray(raw)
+    ? raw
+    : [];
+
+  return arr
+    .map((x: any) => ({
+      id: Number(x.id),
+      name: String(x.name ?? ""),
+      location_code: x.location_code ? String(x.location_code) : undefined,
+    }))
+    .filter((x: LocationFullItem) => Number.isFinite(x.id) && x.id > 0 && !!x.name);
+}

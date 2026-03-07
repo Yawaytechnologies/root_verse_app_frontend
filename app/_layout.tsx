@@ -13,7 +13,10 @@ import { Provider } from "react-redux";
 import { store } from "../src/store/auth/store";
 import { useAppDispatch, useAppSelector } from "../src/store/hooks";
 
-import { restoreSession, selectAuthSession } from "../src/store/auth/authSession.slice";
+import {
+  restoreSession,
+  selectAuthSession,
+} from "../src/store/auth/authSession.slice";
 import { fetchMe } from "../src/store/auth/me.slice";
 
 import NetInfo from "@react-native-community/netinfo";
@@ -26,7 +29,11 @@ import { TraceProvider } from "../src/data/wild/trace.store";
 
 import { initI18n } from "../src/components/aqua/i18n/i18n";
 
-SplashScreen.preventAutoHideAsync().catch(() => { });
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
+const PREVIEW_CRATE_PACKER =
+  String(process.env.EXPO_PUBLIC_PREVIEW_CRATE_PACKER || "").toLowerCase() ===
+  "true";
 
 function RootLayoutInner() {
   const router = useRouter();
@@ -84,8 +91,15 @@ function RootLayoutInner() {
       return;
     }
 
-    SplashScreen.hideAsync().catch(() => { });
-    const inAuthGroup = segments[0] === "(auth)";
+    SplashScreen.hideAsync().catch(() => {});
+    const rootSeg = segments?.[0];
+    const inAuthGroup = rootSeg === "(auth)";
+
+    // ✅ Preview crate packer UI without token (optional)
+    if (!token && PREVIEW_CRATE_PACKER && rootSeg === "crate_packer") {
+      console.log("[Layout] PREVIEW_CRATE_PACKER enabled -> allow /crate_packer");
+      return;
+    }
 
     // no token -> login
     if (!token) {
@@ -96,15 +110,16 @@ function RootLayoutInner() {
       return;
     }
 
-    // token -> must wait for me
-    if (meState.loading || !meState.me) {
-      console.log("[Layout] token present but me loading -> wait");
-      return;
-    }
-
+    // ✅ IMPORTANT: handle error BEFORE checking me existence
     if (meState.error) {
       console.log("[Layout] me error -> back to login:", meState.error);
       router.replace("/(auth)/login");
+      return;
+    }
+
+    // token -> must wait for me
+    if (meState.loading || !meState.me) {
+      console.log("[Layout] token present but me loading/me missing -> wait");
       return;
     }
 
@@ -116,25 +131,63 @@ function RootLayoutInner() {
 
     // pending / rejected stays in auth
     if (status === "PENDING" || status === "PENDING_APPROVAL") {
-      if (segments[1] !== "pending") router.replace("/(auth)/pending");
+      if (segments?.[1] !== "pending") router.replace("/(auth)/pending");
       return;
     }
     if (status === "REJECTED") {
-      if (segments[1] !== "rejected") router.replace("/(auth)/rejected");
+      if (segments?.[1] !== "rejected") router.replace("/(auth)/rejected");
       return;
     }
 
-    // approved -> leave auth only
-    if (inAuthGroup) {
-      if (rtype === "QUALITY_CHECKER") return router.replace("/quality");
-      if (rtype.includes("WILD")) return router.replace("/(wild)/dashboard");
-      if (rtype.includes("AQUA")) return router.replace("/(aqua)/tabs/dashboard");
-      if (rtype.includes("MARI")) return router.replace("/mariculture");
+    // ✅ role -> home mapping
+    let homePath: string | null = null;
+    let allowedRoot: string | null = null;
 
+    if (rtype === "QUALITY_CHECKER") {
+      homePath = "/quality";
+      allowedRoot = "quality";
+    } else if (rtype.includes("WILD")) {
+      homePath = "/(wild)/dashboard";
+      allowedRoot = "(wild)";
+    } else if (rtype.includes("AQUA")) {
+      homePath = "/(aqua)/tabs/dashboard";
+      allowedRoot = "(aqua)";
+    } else if (rtype.includes("MARI")) {
+      homePath = "/mariculture";
+      allowedRoot = "mariculture";
+    } else if (rtype.includes("CRATE")) {
+      // ✅ CRATE_PACKER
+      homePath = "/crate_packer";
+      allowedRoot = "crate_packer";
+    }
+
+    // unknown role -> keep user in auth (no default)
+    if (!homePath || !allowedRoot) {
       console.log("[Layout] unknown role -> STOP (no default)");
       return;
     }
-  }, [hydrated, token, segments, meState.loading, meState.me, meState.error, router]);
+
+    // ✅ if inside auth group, push user out to correct module
+    if (inAuthGroup) {
+      router.replace(homePath as any);
+      return;
+    }
+
+    // ✅ if user is outside auth but in wrong module, force correct module
+    if (rootSeg && rootSeg !== allowedRoot) {
+      console.log(`[Layout] wrong module (${rootSeg}) -> redirect ${homePath}`);
+      router.replace(homePath as any);
+      return;
+    }
+  }, [
+    hydrated,
+    token,
+    segments,
+    meState.loading,
+    meState.me,
+    meState.error,
+    router,
+  ]);
 
   if (!hydrated) {
     return <View style={{ flex: 1, backgroundColor: "black" }} />;

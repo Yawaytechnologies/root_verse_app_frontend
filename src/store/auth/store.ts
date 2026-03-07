@@ -65,8 +65,15 @@ const appReducer = combineReducers({
   theme: themeReducer,
 });
 
+const shouldHardReset = (actionType: string) => {
+  return (
+    actionType === "login/logout/fulfilled" || // ✅ our new unified logout
+    actionType === "authSession/logout/fulfilled" // ✅ keep support for old logoutSession usage
+  );
+};
+
 const rootReducer = (state: any, action: any) => {
-  if (action.type === "authSession/logout/fulfilled") {
+  if (shouldHardReset(action.type)) {
     // wipe whole redux tree to avoid role leak / blink
     state = {
       // keep app-level things if you want
@@ -75,6 +82,12 @@ const rootReducer = (state: any, action: any) => {
 
       // keep authSession hydrated true so layout doesn't freeze
       authSession: { token: null, expiresAt: null, hydrated: true },
+
+      // explicitly reset these to safe defaults
+      me: { loading: false, error: null, me: null },
+      login: { loading: false, error: null, token: null, status: null, rootverse_type: null },
+      registration: state?.registration ? undefined : undefined,
+      location: state?.location ? undefined : undefined,
     };
   }
   return appReducer(state, action);
