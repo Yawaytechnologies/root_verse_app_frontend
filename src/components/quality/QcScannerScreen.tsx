@@ -34,7 +34,8 @@ import {
 } from "../../store/quality/qcFill.slice";
 
 import { selectInspector } from "../../store/qualityAuth/qualityAuth.slice";
-import { type Division, type Lang } from "./QualityUI";
+import { Ionicons } from "@expo/vector-icons";
+import { type Division } from "./QualityUI";
 
 import WildInspectionModal, {
   type WildFormState,
@@ -60,7 +61,6 @@ import {
 
 type Props = {
   division: Division;
-  lang: Lang;
   selectedDate?: string;
   onAfterSubmit?: (qcResult: "PASS" | "HOLD" | "REJECT" | string) => void;
   editDraft?: { qrCode: string; payload: any } | null;
@@ -362,7 +362,6 @@ function CornerBrackets() {
 
 export default function QcScannerScreen({
   division,
-  lang,
   selectedDate,
   onAfterSubmit,
   editDraft,
@@ -392,6 +391,7 @@ export default function QcScannerScreen({
   const submitError = useAppSelector(selectQcFillError);
 
   const [cameraPerm, requestCameraPerm] = useCameraPermissions();
+  const [torch, setTorch] = useState(false);
   const [cameraKey, setCameraKey] = useState(0);
   const [cameraActive, setCameraActive] = useState(true);
 
@@ -997,9 +997,35 @@ const submit = async (payload: any) => {
 
   return (
     <View className="flex-1 pt-2.5">
-      <Text className="text-white text-[22px] font-black">
-        QC Scanner ({division})
-      </Text>
+      <View className="flex-row items-center justify-between mb-0">
+        <Text className="text-white text-[22px] font-black">
+          QC Scanner ({division})
+        </Text>
+
+        <Pressable
+          onPress={() => setTorch((v) => !v)}
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 12,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: torch
+              ? "rgba(255,214,0,0.20)"
+              : "rgba(255,255,255,0.08)",
+            borderWidth: 1,
+            borderColor: torch
+              ? "rgba(255,214,0,0.45)"
+              : "rgba(255,255,255,0.12)",
+          }}
+        >
+          <Ionicons
+            name={torch ? "flashlight" : "flashlight-outline"}
+            size={18}
+            color={torch ? "#FFD600" : "rgba(255,255,255,0.65)"}
+          />
+        </Pressable>
+      </View>
 
       <View className="mt-2.5 self-center w-[92%] max-w-[380px] p-2.5 rounded-[18px] bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.10)]">
         <Text className="text-white/75 font-extrabold mb-1.5 text-[12px]">
@@ -1048,6 +1074,7 @@ const submit = async (payload: any) => {
               className="flex-1"
               style={{ flex: 1 }}
               facing="back"
+              enableTorch={torch}
               barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
               onBarcodeScanned={(e: any) => {
                 const now = Date.now();
@@ -1080,9 +1107,7 @@ const submit = async (payload: any) => {
             </View>
 
             <Text className="mt-2 text-white/85 font-black text-[13px]">
-              {lang === "en"
-                ? "Align QR inside the box"
-                : "QR-ஐ பெட்டிக்குள் வைத்துப் ஸ்கேன் செய்யவும்"}
+              Align QR inside the box
             </Text>
           </View>
         </View>
@@ -1091,7 +1116,6 @@ const submit = async (payload: any) => {
       {division === "WILD" ? (
         <WildInspectionModal
           visible={modalOpen}
-          lang={lang}
           scannedCode={scannedCode}
           loading={catchLoading}
           error={catchError}
@@ -1109,7 +1133,6 @@ const submit = async (payload: any) => {
       ) : division === "AQUA" ? (
         <AquaInspectionModal
           visible={modalOpen}
-          lang={lang}
           scannedCode={scannedCode}
           loading={catchLoading}
           error={catchError}
@@ -1127,7 +1150,6 @@ const submit = async (payload: any) => {
       ) : (
         <MariInspectionModal
           visible={modalOpen}
-          lang={lang}
           scannedCode={scannedCode}
           loading={catchLoading}
           error={catchError}

@@ -4,10 +4,13 @@ import { combineReducers, configureStore } from "@reduxjs/toolkit";
 // ---- features ----
 import authReducer from "../../features/auth/authSlice";
 import tripsReducer from "../../features/trip/tripSlice";
+import aquaRegistrationReducer from "../../features/aqua/registration/registration.slice";
+import aquaApprovalsReducer from "../../features/aqua/approvals/approvals.slice";
 
 // ---- services (wild) ----
 import catchLogReducer from "../../services/wild/catchLog.slice";
 import filledQrReducer from "../../services/wild/filledQr.slice";
+import vesselsReducer from "../../services/wild/vessels/vessel.slice";
 
 // ---- auth slices ----
 import qualityAuthReducer from "../qualityAuth/qualityAuth.slice";
@@ -15,11 +18,7 @@ import locationReducer from "./location.slice";
 import loginReducer from "./login.slice";
 import meReducer from "./me.slice";
 import registrationReducer from "./registration.slice";
-
-// ✅ auth session (persisted token)
 import authSessionReducer from "./authSession.slice";
-
-// ✅ network state
 import networkReducer from "./network.slice";
 
 // ---- quality ----
@@ -27,7 +26,6 @@ import qcFillReducer from "../quality/qcFill.slice";
 import qcOverviewReducer from "../quality/qcOverview.slice";
 import qrDetailsReducer from "../quality/qrDetails.slice";
 import qualityCheckerReducer from "../qualityChecker/qualityChecker.slice";
-import vesselsReducer from "../../services/wild/vessels/vessel.slice";
 
 // ---- ui ----
 import themeReducer from "../theme.slice";
@@ -36,10 +34,13 @@ const appReducer = combineReducers({
   // features
   auth: authReducer,
   trips: tripsReducer,
+  aquaRegistration: aquaRegistrationReducer,
+  aquaApprovals: aquaApprovalsReducer,
 
   // services
   catchLog: catchLogReducer,
   filledQr: filledQrReducer,
+  vessels: vesselsReducer,
 
   // auth folder slices
   registration: registrationReducer,
@@ -64,34 +65,53 @@ const appReducer = combineReducers({
 
   // ui
   theme: themeReducer,
-    vessels: vesselsReducer,
 });
 
 const shouldHardReset = (actionType: string) => {
   return (
-    actionType === "login/logout/fulfilled" || // ✅ our new unified logout
-    actionType === "authSession/logout/fulfilled" // ✅ keep support for old logoutSession usage
+    actionType === "login/logout/fulfilled" ||
+    actionType === "authSession/logout/fulfilled"
   );
 };
 
 const rootReducer = (state: any, action: any) => {
   if (shouldHardReset(action.type)) {
-    // wipe whole redux tree to avoid role leak / blink
     state = {
-      // keep app-level things if you want
+      // keep app-level state if needed
       network: state?.network,
       theme: state?.theme,
 
-      // keep authSession hydrated true so layout doesn't freeze
+      // keep auth session hydrated
       authSession: { token: null, expiresAt: null, hydrated: true },
 
-      // explicitly reset these to safe defaults
+      // safe resets
       me: { loading: false, error: null, me: null },
-      login: { loading: false, error: null, token: null, status: null, rootverse_type: null },
-      registration: state?.registration ? undefined : undefined,
-      location: state?.location ? undefined : undefined,
+      login: {
+        loading: false,
+        error: null,
+        token: null,
+        status: null,
+        rootverse_type: null,
+      },
+
+      // let reducers reinitialize these
+      registration: undefined,
+      location: undefined,
+      aquaRegistration: undefined,
+      aquaApprovals: undefined,
+      auth: undefined,
+      trips: undefined,
+      catchLog: undefined,
+      filledQr: undefined,
+      vessels: undefined,
+      qualityAuth: undefined,
+      qualityChecker: undefined,
+      qrDetails: undefined,
+      qcFill: undefined,
+      qcOverview: undefined,
     };
   }
+
   return appReducer(state, action);
 };
 

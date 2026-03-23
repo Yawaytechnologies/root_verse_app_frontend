@@ -7,7 +7,6 @@ import {
   Text,
   View,
 } from "react-native";
-import type { Lang } from "../QualityUI";
 import {
   ActionBtn,
   ImageList,
@@ -47,7 +46,6 @@ export const mariInitial = (): MariFormState => ({
 
 type Props = {
   visible: boolean;
-  lang: Lang;
   scannedCode: string;
 
   loading?: boolean;
@@ -82,7 +80,6 @@ const SCORE = ["10", "20", "30", "40", "50", "60"] as const;
 
 export default function MariInspectionModal({
   visible,
-  lang,
   scannedCode,
   loading,
   error,
@@ -158,9 +155,7 @@ export default function MariInspectionModal({
           >
             <View style={{ flex: 1 }}>
               <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>
-                {lang === "en"
-                  ? "Mariculture Quality Inspection"
-                  : "மரிகல்ச்சர் - தர ஆய்வு"}
+                Mariculture Quality Inspection
               </Text>
               <Text
                 style={{

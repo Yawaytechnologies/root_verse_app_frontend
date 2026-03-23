@@ -16,7 +16,6 @@ import {
 
 import { fetchFilledFishDetails } from "../../../services/cratePacker/filledFishApi";
 
-type Lang = "en" | "ta";
 type FishGrade = "A" | "B" | "C" | "D";
 
 type FishRow = {
@@ -35,7 +34,6 @@ type Mode = "EDIT" | "VIEW";
 
 type Props = {
   visible: boolean;
-  lang?: Lang;
   crateQr: string;
   mode?: Mode;
   initialPayload?: any | null;
@@ -186,7 +184,6 @@ function safeItems(payload: any): any[] {
 
 export default function CratePackModal({
   visible,
-  lang = "en",
   crateQr,
   mode = "EDIT",
   initialPayload = null,
@@ -196,7 +193,6 @@ export default function CratePackModal({
   submitError,
   fishToCrateMap = {},
 }: Props) {
-  const t = (en: string, ta: string) => (lang === "ta" ? ta : en);
   const isView = mode === "VIEW";
   const uiDisabled = submitLoading || isView;
 
@@ -362,11 +358,8 @@ export default function CratePackModal({
 
     if (rows.some((r) => normCode(r.fishQr) === fishQr)) {
       Alert.alert(
-        t("Duplicate", "நகல்"),
-        t(
-          "This fish tag is already added.",
-          "இந்த மீன் டேக் ஏற்கனவே சேர்க்கப்பட்டுள்ளது."
-        )
+        "Duplicate",
+        "This fish tag is already added."
       );
       return;
     }
@@ -374,11 +367,8 @@ export default function CratePackModal({
     const existingCrate = fishToCrateMap[fishQr];
     if (existingCrate && normCode(existingCrate) !== normCode(crateQr)) {
       Alert.alert(
-        t("Already Submitted", "ஏற்கனவே சமர்ப்பிக்கப்பட்டது"),
-        t(
-          `This fish has already been submitted in crate ${existingCrate}.`,
-          `இந்த மீன் ஏற்கனவே ${existingCrate} கிரேட்டில் சமர்ப்பிக்கப்பட்டுள்ளது.`
-        )
+        "Already Submitted",
+        `This fish has already been submitted in crate ${existingCrate}.`
       );
       return;
     }
@@ -420,28 +410,28 @@ export default function CratePackModal({
   const validation = useMemo(() => {
     if (isView) return { ok: true, msg: "" };
     if (!crateQr) {
-      return { ok: false, msg: t("Crate QR missing", "கூடை QR இல்லை") };
+      return { ok: false, msg: "Crate QR missing" };
     }
     if (!crateId) {
       return {
         ok: false,
-        msg: t("Crate ID missing. Re-scan crate.", "Crate ID இல்லை. மீண்டும் ஸ்கேன் செய்யவும்."),
+        msg: "Crate ID missing. Re-scan crate.",
       };
     }
     if (!rows.length) {
       return {
         ok: false,
-        msg: t("Scan at least one fish tag", "குறைந்தது 1 மீன் டேக் ஸ்கேன் செய்யவும்"),
+        msg: "Scan at least one fish tag",
       };
     }
     if (!crateGrade) {
       return {
         ok: false,
-        msg: t("Select crate grade (A/B/C/D)", "கூடை தரம் (A/B/C/D) தேர்வு செய்யவும்"),
+        msg: "Select crate grade (A/B/C/D)",
       };
     }
     return { ok: true, msg: "" };
-  }, [crateQr, crateId, rows.length, crateGrade, lang, isView]);
+  }, [crateQr, crateId, rows.length, crateGrade, isView]);
 
   const buildPayload = () => {
     const crate_qr = normCode(crateQr);
@@ -511,7 +501,7 @@ export default function CratePackModal({
             <View style={{ flex: 1, paddingRight: 10 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                 <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>
-                  {t("Crate Packing", "கூடை பேக்கிங்")}
+                  Crate Packing
                 </Text>
 
                 {isView ? (
@@ -532,7 +522,7 @@ export default function CratePackModal({
                         fontSize: 12,
                       }}
                     >
-                      {t("ALREADY SUBMITTED", "ஏற்கனவே சமர்ப்பிக்கப்பட்டது")}
+                      ALREADY SUBMITTED
                     </Text>
                   </View>
                 ) : null}
@@ -574,7 +564,7 @@ export default function CratePackModal({
                     fontSize: 11,
                   }}
                 >
-                  {t("Crate ID", "Crate ID")}: {crateId ? String(crateId) : "—"}
+                  Crate ID: {crateId ? String(crateId) : "—"}
                 </Text>
               ) : null}
             </View>
@@ -611,7 +601,7 @@ export default function CratePackModal({
           {/* CAMERA SECTION */}
           <View style={{ paddingHorizontal: 16, paddingTop: 14 }}>
             <Text style={{ color: "rgba(255,255,255,0.70)", fontWeight: "900", fontSize: 13 }}>
-              {t("Scan Fish Tags", "மீன் டேக் ஸ்கேன்")}
+              Scan Fish Tags
             </Text>
 
             {isView ? (
@@ -626,7 +616,7 @@ export default function CratePackModal({
                 }}
               >
                 <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900" }}>
-                  {t("Read-only: fish scan disabled", "Read-only: fish scan disabled")}
+                  Read-only: fish scan disabled
                 </Text>
               </View>
             ) : !cameraPerm ? (
@@ -641,7 +631,7 @@ export default function CratePackModal({
                 }}
               >
                 <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900" }}>
-                  {t("Requesting camera…", "கேமரா அனுமதி…")}
+                  Requesting camera…
                 </Text>
               </View>
             ) : !cameraPerm.granted ? (
@@ -656,7 +646,7 @@ export default function CratePackModal({
                 }}
               >
                 <Text style={{ color: "white", fontWeight: "900" }}>
-                  {t("Camera permission required", "கேமரா அனுமதி தேவை")}
+                  Camera permission required
                 </Text>
                 <Pressable
                   onPress={requestCameraPerm}
@@ -671,7 +661,7 @@ export default function CratePackModal({
                   }}
                 >
                   <Text style={{ color: "white", fontWeight: "900" }}>
-                    {t("Allow Camera", "அனுமதி")}
+                    Allow Camera
                   </Text>
                 </Pressable>
               </View>
@@ -709,7 +699,7 @@ export default function CratePackModal({
                       await addFish(code);
                     } catch (err: any) {
                       Alert.alert(
-                        t("Fish scan failed", "மீன் ஸ்கேன் தோல்வி"),
+                        "Fish scan failed",
                         String(err?.message || err || "Failed")
                       );
                     }
@@ -765,7 +755,7 @@ export default function CratePackModal({
                       fontSize: 12,
                     }}
                   >
-                    {t("Align Fish QR inside the box", "மீன் QR-ஐ பெட்டிக்குள் வைத்துப் ஸ்கேன் செய்யவும்")}
+                    Align Fish QR inside the box
                   </Text>
                 </View>
               </View>
@@ -778,7 +768,7 @@ export default function CratePackModal({
             <View style={{ flexDirection: "row", gap: 12 }}>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: "rgba(255,255,255,0.70)", fontWeight: "900", fontSize: 13 }}>
-                  {t("Manual Fish QR", "கைமுறை மீன் QR")}
+                  Manual Fish QR
                 </Text>
                 <TextInput
                   value={fishManual}
@@ -810,8 +800,8 @@ export default function CratePackModal({
                     const code = normCode(fishManual);
                     if (!code) {
                       Alert.alert(
-                        t("Missing", "இல்லை"),
-                        t("Enter fish QR", "மீன் QR உள்ளிடவும்")
+                        "Missing",
+                        "Enter fish QR"
                       );
                       return;
                     }
@@ -820,7 +810,7 @@ export default function CratePackModal({
                       await addFish(code);
                     } catch (e: any) {
                       Alert.alert(
-                        t("Add failed", "சேர்க்க முடியவில்லை"),
+                        "Add failed",
                         String(e?.message || e || "Failed")
                       );
                     }
@@ -837,7 +827,7 @@ export default function CratePackModal({
                   }}
                 >
                   <Text style={{ color: "white", fontWeight: "900" }}>
-                    {t("Add", "சேர்")}
+                    Add
                   </Text>
                 </Pressable>
               </View>
@@ -846,12 +836,12 @@ export default function CratePackModal({
             {/* Rows */}
             <View style={{ marginTop: 16 }}>
               <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900" }}>
-                {t("Scanned Fish", "ஸ்கேன் செய்த மீன்கள்")} ({rows.length})
+                Scanned Fish ({rows.length})
               </Text>
 
               {!rows.length ? (
                 <Text style={{ marginTop: 8, color: "rgba(255,255,255,0.55)", fontWeight: "900" }}>
-                  {t("No fish scanned yet.", "இன்னும் மீன் ஸ்கேன் செய்யவில்லை.")}
+                  No fish scanned yet.
                 </Text>
               ) : (
                 <View style={{ marginTop: 10, gap: 12 }}>
@@ -903,11 +893,11 @@ export default function CratePackModal({
                       <View style={{ paddingHorizontal: 14, paddingTop: 10 }}>
                         <View style={{ flexDirection: "row", gap: 10 }}>
                           <View style={{ flex: 1 }}>
-                            <Text style={LABEL_STYLE}>{t("Species", "வகை")}</Text>
+                            <Text style={LABEL_STYLE}>Species</Text>
                           </View>
                           <View style={{ width: 74 }}>
                             <Text style={[LABEL_STYLE, { textAlign: "center" }]}>
-                              {t("Grade", "தரம்")}
+                              Grade
                             </Text>
                           </View>
                           <View style={{ width: 78 }}>
@@ -929,13 +919,13 @@ export default function CratePackModal({
 
                         <View style={{ flexDirection: "row", gap: 10 }}>
                           <View style={{ flex: 1 }}>
-                            <Text style={LABEL_STYLE}>{t("Catch Date", "பிடிப்பு தேதி")}</Text>
+                            <Text style={LABEL_STYLE}>Catch Date</Text>
                           </View>
                           <View style={{ flex: 1 }}>
-                            <Text style={LABEL_STYLE}>{t("Landed Date", "இறக்க தேதி")}</Text>
+                            <Text style={LABEL_STYLE}>Landed Date</Text>
                           </View>
                           <View style={{ width: 90 }}>
-                            <Text style={LABEL_STYLE}>{t("Method", "முறை")}</Text>
+                            <Text style={LABEL_STYLE}>Method</Text>
                           </View>
                         </View>
 
@@ -960,7 +950,7 @@ export default function CratePackModal({
             <View style={{ marginTop: 16 }}>
               <View style={{ flexDirection: "row", gap: 12, alignItems: "flex-end" }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={LABEL_STYLE}>{t("Crate Grade", "கூடை தரம்")}</Text>
+                  <Text style={LABEL_STYLE}>Crate Grade</Text>
                   <GradeSelectField
                     value={crateGrade}
                     disabled={uiDisabled}
@@ -972,7 +962,7 @@ export default function CratePackModal({
                 </View>
 
                 <View style={{ flex: 1 }}>
-                  <Text style={LABEL_STYLE}>{t("Total (kg)", "மொத்தம் (kg)")}</Text>
+                  <Text style={LABEL_STYLE}>Total (kg)</Text>
                   <View
                     style={{
                       marginTop: 6,
@@ -994,7 +984,7 @@ export default function CratePackModal({
               </View>
 
               <Text style={{ marginTop: 8, color: "rgba(255,255,255,0.55)", fontWeight: "900", fontSize: 11 }}>
-                {t("Only A / B / C / D allowed", "A / B / C / D மட்டும்")}
+                Only A / B / C / D allowed
               </Text>
             </View>
 
@@ -1026,7 +1016,7 @@ export default function CratePackModal({
             }}
           >
             <Text style={{ color: "white", textAlign: "center", fontWeight: "900" }}>
-              {t("Close", "மூடு")}
+              Close
             </Text>
           </Pressable>
 
@@ -1046,7 +1036,7 @@ export default function CratePackModal({
               }}
             >
               <Text style={{ color: "white", textAlign: "center", fontWeight: "900" }}>
-                {submitLoading ? t("Submitting…", "சமர்ப்பிக்கிறது…") : t("Submit", "சமர்ப்பி")}
+                {submitLoading ? "Submitting…" : "Submit"}
               </Text>
             </Pressable>
           ) : null}
@@ -1075,7 +1065,7 @@ export default function CratePackModal({
                   }}
                 >
                   <Text style={{ color: "white", fontWeight: "900" }}>
-                    {t("Select Crate Grade", "கூடை தரம் தேர்வு")}
+                    Select Crate Grade
                   </Text>
                   <Text
                     style={{
@@ -1085,7 +1075,7 @@ export default function CratePackModal({
                       fontSize: 12,
                     }}
                   >
-                    {t("Only A / B / C / D", "A / B / C / D மட்டும்")}
+                    Only A / B / C / D
                   </Text>
                 </View>
 
@@ -1129,7 +1119,7 @@ export default function CratePackModal({
                 }}
               >
                 <Text style={{ color: "white", fontWeight: "900" }}>
-                  {t("Cancel", "ரத்து")}
+                  Cancel
                 </Text>
               </Pressable>
             </View>

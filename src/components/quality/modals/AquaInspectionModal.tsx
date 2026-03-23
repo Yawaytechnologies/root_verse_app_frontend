@@ -7,7 +7,6 @@ import {
   Text,
   View,
 } from "react-native";
-import type { Lang } from "../QualityUI";
 import {
   ActionBtn,
   ImageList,
@@ -42,7 +41,6 @@ export const aquaInitial = (): AquaFormState => ({
 
 type Props = {
   visible: boolean;
-  lang: Lang;
   scannedCode: string;
 
   loading?: boolean;
@@ -75,7 +73,6 @@ const GRADE = ["30", "40"] as const;
 
 export default function AquaInspectionModal({
   visible,
-  lang,
   scannedCode,
   loading,
   error,
@@ -149,9 +146,7 @@ export default function AquaInspectionModal({
           >
             <View style={{ flex: 1 }}>
               <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>
-                {lang === "en"
-                  ? "Aqua Quality Inspection"
-                  : "நீர்வள - தர ஆய்வு"}
+                Aqua Quality Inspection
               </Text>
               <Text
                 style={{

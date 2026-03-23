@@ -16,9 +16,11 @@ export type Inspector = {
 
   state_id?: number;
   district_id?: number;
+  location_id?: number;
 
   state_name?: string;
   district_name?: string;
+  location_name?: string;
 
   is_active?: boolean;
   rootverse_type?: "QUALITY_CHECKER";
@@ -82,8 +84,9 @@ async function fetchStateDistrictNames(
   token: string,
   state_id?: number,
   district_id?: number,
+  location_id?: number,
 ) {
-  const out: { state_name?: string; district_name?: string } = {};
+  const out: { state_name?: string; district_name?: string; location_name?: string } = {};
 
   // ---- STATES ----
   if (state_id && !out.state_name) {
@@ -142,6 +145,35 @@ async function fetchStateDistrictNames(
     }
   }
 
+  // ---- LOCATION ----
+  if (location_id && !out.location_name) {
+    // try district-scoped endpoint first
+    if (district_id) {
+      try {
+        const raw = await apiGet(token, `/api/locations/district/${district_id}`);
+        const list = pickList(raw);
+        const found = list.find((x) => cleanNum(x?.id ?? x?.location_id ?? x?.locationId) === location_id);
+        const nm = found
+          ? cleanStr(found?.name ?? found?.location_name ?? found?.locationName)
+          : undefined;
+        if (nm) out.location_name = nm;
+      } catch {}
+    }
+
+    // fallback: all locations
+    if (!out.location_name) {
+      try {
+        const raw = await apiGet(token, "/api/locations");
+        const list = pickList(raw);
+        const found = list.find((x) => cleanNum(x?.id ?? x?.location_id ?? x?.locationId) === location_id);
+        const nm = found
+          ? cleanStr(found?.name ?? found?.location_name ?? found?.locationName)
+          : undefined;
+        if (nm) out.location_name = nm;
+      } catch {}
+    }
+  }
+
   return out;
 }
 
@@ -152,6 +184,7 @@ async function fetchQcByCode(token: string, checkerCode: string): Promise<Partia
 
     const stateId = cleanNum(d?.state_id) ?? cleanNum(d?.state?.id);
     const distId = cleanNum(d?.district_id) ?? cleanNum(d?.district?.id);
+    const locId = cleanNum(d?.location_id) ?? cleanNum(d?.location?.id) ?? cleanNum(d?.locationId);
 
     return {
       id: cleanNum(d?.id),
@@ -163,9 +196,11 @@ async function fetchQcByCode(token: string, checkerCode: string): Promise<Partia
 
       state_id: stateId,
       district_id: distId,
+      location_id: locId,
 
       state_name: cleanStr(d?.state_name) ?? cleanStr(d?.state?.name),
       district_name: cleanStr(d?.district_name) ?? cleanStr(d?.district?.name),
+      location_name: cleanStr(d?.location_name) ?? cleanStr(d?.location?.name) ?? cleanStr(d?.locationName),
 
       is_active: d?.is_active,
       rootverse_type: "QUALITY_CHECKER",
@@ -197,6 +232,7 @@ export const fetchQcMe = createAsyncThunk<Inspector, void, { rejectValue: string
 
       const stateId = cleanNum(me?.state_id) ?? cleanNum(me?.state?.id);
       const distId = cleanNum(me?.district_id) ?? cleanNum(me?.district?.id);
+      const locId = cleanNum(me?.location_id) ?? cleanNum(me?.location?.id) ?? cleanNum(me?.locationId);
 
       let inspector: Inspector = {
         id: cleanNum(me?.id ?? me?.quality_checker_id ?? me?.qc_id),
@@ -209,9 +245,11 @@ export const fetchQcMe = createAsyncThunk<Inspector, void, { rejectValue: string
 
         state_id: stateId,
         district_id: distId,
+        location_id: locId,
 
         state_name: cleanStr(me?.state_name) ?? cleanStr(me?.state?.name),
         district_name: cleanStr(me?.district_name) ?? cleanStr(me?.district?.name),
+        location_name: cleanStr(me?.location_name) ?? cleanStr(me?.location?.name) ?? cleanStr(me?.locationName),
 
         is_active: me?.is_active,
         rootverse_type: "QUALITY_CHECKER",
@@ -224,8 +262,10 @@ export const fetchQcMe = createAsyncThunk<Inspector, void, { rejectValue: string
       const needsMore =
         !cleanStr(inspector.state_name) ||
         !cleanStr(inspector.district_name) ||
+        !cleanStr(inspector.location_name) ||
         !inspector.state_id ||
-        !inspector.district_id;
+        !inspector.district_id ||
+        !inspector.location_id;
 
       if (needsMore) {
         const full = await fetchQcByCode(token, inspector.checker_code);
@@ -235,10 +275,16 @@ export const fetchQcMe = createAsyncThunk<Inspector, void, { rejectValue: string
       // 2) frontend-only join using master endpoints
       const stillMissingNames =
         (!cleanStr(inspector.state_name) && !!inspector.state_id) ||
-        (!cleanStr(inspector.district_name) && !!inspector.district_id);
+        (!cleanStr(inspector.district_name) && !!inspector.district_id) ||
+        (!cleanStr(inspector.location_name) && !!inspector.location_id);
 
       if (stillMissingNames) {
-        const names = await fetchStateDistrictNames(token, inspector.state_id, inspector.district_id);
+        const names = await fetchStateDistrictNames(
+          token,
+          inspector.state_id,
+          inspector.district_id,
+          inspector.location_id,
+        );
         inspector = { ...inspector, ...names };
       }
 
