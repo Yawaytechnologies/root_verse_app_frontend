@@ -21,12 +21,10 @@ import {
   FullRow,
   TwoColRow,
   type Division,
-  type Lang,
 } from "./QualityUI";
 
 type Props = {
   division: Division;
-  lang: Lang;
 };
 
 const TOKEN_KEY = "auth_token";
@@ -59,7 +57,7 @@ function normalizeFilled(raw: any) {
   return { ...obj, _images: mergedImages };
 }
 
-export default function QcScanViewDetailsScreen({ division, lang }: Props) {
+export default function QcScanViewDetailsScreen({ division }: Props) {
   const [cameraPerm, requestCameraPerm] = useCameraPermissions();
 
   const [hasScanned, setHasScanned] = useState(false);
@@ -197,7 +195,7 @@ export default function QcScanViewDetailsScreen({ division, lang }: Props) {
     <View style={{ marginTop: 12 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
         <Text style={{ color: "white", fontSize: 20, fontWeight: "900" }}>
-          {lang === "en" ? "Scan & View Details" : "ஸ்கேன் & விவரங்கள்"} ({division})
+          Scan & View Details ({division})
         </Text>
 
         <Pressable
@@ -212,7 +210,7 @@ export default function QcScanViewDetailsScreen({ division, lang }: Props) {
           }}
         >
           <Text style={{ color: "white", fontWeight: "900" }}>
-            {lang === "en" ? "Rescan" : "மீண்டும்"}
+            Rescan
           </Text>
         </Pressable>
       </View>
@@ -275,7 +273,7 @@ export default function QcScanViewDetailsScreen({ division, lang }: Props) {
             </View>
 
             <Text style={{ marginTop: 14, color: "rgba(255,255,255,0.85)", fontWeight: "900" }}>
-              {lang === "en" ? "Align QR inside the box" : "QR-ஐ பெட்டிக்குள் வைத்துப் ஸ்கேன் செய்யவும்"}
+              Align QR inside the box
             </Text>
           </View>
         </View>
@@ -293,7 +291,7 @@ export default function QcScanViewDetailsScreen({ division, lang }: Props) {
         }}
       >
         <Text style={{ color: "rgba(255,255,255,0.75)", fontWeight: "800", marginBottom: 8 }}>
-          {lang === "en" ? "Enter QR Code manually" : "QR Code கைமுறையாக உள்ளிடவும்"}
+          Enter QR Code manually
         </Text>
 
         <TextInput
@@ -333,7 +331,7 @@ export default function QcScanViewDetailsScreen({ division, lang }: Props) {
           }}
         >
           <Text style={{ color: "white", fontWeight: "900" }}>
-            {lang === "en" ? "View Details" : "விவரங்களை காண்க"}
+            View Details
           </Text>
         </Pressable>
       </View>
@@ -372,7 +370,7 @@ export default function QcScanViewDetailsScreen({ division, lang }: Props) {
             >
               <View style={{ flex: 1 }}>
                 <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>
-                  {lang === "en" ? "Overall Details" : "முழு விவரங்கள்"}
+                  Overall Details
                 </Text>
                 <Text style={{ color: "rgba(255,255,255,0.6)", marginTop: 4, fontWeight: "700" }}>
                   {scannedCode}
@@ -532,7 +530,7 @@ export default function QcScanViewDetailsScreen({ division, lang }: Props) {
                 }}
               >
                 <Text style={{ color: "white", fontWeight: "900" }}>
-                  {lang === "en" ? "Close" : "மூடு"}
+                  Close
                 </Text>
               </Pressable>
             </View>

@@ -15,7 +15,6 @@ import * as Location from "expo-location";
 import { captureRef } from "react-native-view-shot";
 import { Ionicons } from "@expo/vector-icons";
 
-import type { Lang } from "../QualityUI";
 import {
   ensureFileUri,
   ImageList,
@@ -91,7 +90,6 @@ export const wildInitial = (): WildFormState => ({
 
 type Props = {
   visible: boolean;
-  lang: Lang;
   scannedCode: string;
 
   loading?: boolean;
@@ -212,7 +210,6 @@ const POWERED_LINE = "Powered by Rootverse";
 export default function WildInspectionModal(props: Props) {
   const {
     visible,
-    lang,
     scannedCode,
     loading,
     error,
@@ -483,7 +480,6 @@ export default function WildInspectionModal(props: Props) {
   const codeToShow = String(
     scannedCode || data?.fish_code || data?.qr_code || "",
   ).trim();
-  const t = (en: string, ta: string) => (lang === "ta" ? ta : en);
 
   return (
     <Modal visible={visible} transparent animationType="fade">
@@ -493,7 +489,7 @@ export default function WildInspectionModal(props: Props) {
             <View className="flex-row items-start justify-between">
               <View className="flex-1 pr-3">
                 <Text className="text-white font-extrabold text-lg">
-                  {t("Wild Quality Inspection", "காட்டு தர ஆய்வு")}
+                  {"Wild Quality Inspection"}
                 </Text>
 
                 <View
@@ -541,10 +537,7 @@ export default function WildInspectionModal(props: Props) {
 
                 {readOnly && (
                   <Text className="mt-2 text-amber-300 font-extrabold">
-                    {t(
-                      "Already submitted (Read-only)",
-                      "ஏற்கனவே சமர்ப்பிக்கப்பட்டது (Read-only)",
-                    )}
+                    Already submitted (Read-only)
                   </Text>
                 )}
                 {!readOnly && !validation.ok && (
@@ -584,18 +577,18 @@ export default function WildInspectionModal(props: Props) {
 
             <TwoCol>
               <View className="flex-1">
-                <Label>{t("Fish Code", "மீன் கோடு")}</Label>
+                <Label>Fish Code</Label>
                 <ReadOnly value={codeToShow || scannedCode || "—"} />
               </View>
               <View className="flex-1">
-                <Label>{t("Species", "மீன் வகை")}</Label>
+                <Label>Species</Label>
                 <ReadOnly value={speciesAuto || "-"} />
               </View>
             </TwoCol>
 
             <TwoCol>
               <View className="flex-1">
-                <Label>{t("QC Result", "QC முடிவு")}</Label>
+                <Label>QC Result</Label>
                 <Select<QcResult>
                   value={(form.qc_result || "") as QcResult | ""}
                   onValueChange={(v) => {
@@ -605,25 +598,25 @@ export default function WildInspectionModal(props: Props) {
                   }}
                   items={["PASS", "HOLD", "REJECT"] as const}
                   disabled={readOnly || submitLoading}
-                  placeholder={t("Select", "தேர்வு")}
+                  placeholder="Select"
                 />
               </View>
 
               <View className="flex-1">
-                <Label>{t("Quality Grade", "தர நிலை")}</Label>
+                <Label>Quality Grade</Label>
                 <Select<QualityGrade>
                   value={(form.quality_grade || "") as QualityGrade | ""}
                   onValueChange={(v) => setFormField("quality_grade", v)}
                   items={["A", "B", "C"] as const}
                   disabled={readOnly || submitLoading}
-                  placeholder={t("Select", "தேர்வு")}
+                  placeholder="Select"
                 />
               </View>
             </TwoCol>
 
             <TwoCol>
               <View className="flex-1">
-                <Label>{t("Weight (kg)", "எடை (kg)")}</Label>
+                <Label>Weight (kg)</Label>
                 <Input
                   value={form.weight_kg}
                   onChangeText={(v) =>
@@ -637,7 +630,7 @@ export default function WildInspectionModal(props: Props) {
               </View>
 
               <View className="flex-1">
-                <Label>{t("Temp (°C)", "வெப்பநிலை (°C)")}</Label>
+                <Label>Temp (°C)</Label>
                 <Input
                   value={form.temperature_c}
                   onChangeText={(v) =>
@@ -652,18 +645,18 @@ export default function WildInspectionModal(props: Props) {
 
             <TwoCol>
               <View className="flex-1">
-                <Label>{t("Size", "அளவு")}</Label>
+                <Label>Size</Label>
                 <Select<"SMALL" | "MEDIUM" | "LARGE">
                   value={(form.size || "") as "SMALL" | "MEDIUM" | "LARGE" | ""}
                   onValueChange={(v) => setFormField("size", v)}
                   items={["SMALL", "MEDIUM", "LARGE"] as const}
                   disabled={readOnly || submitLoading}
-                  placeholder={t("Select", "தேர்வு")}
+                  placeholder="Select"
                 />
               </View>
 
               <View className="flex-1">
-                <Label>{t("Damage", "சேதம்")}</Label>
+                <Label>Damage</Label>
                 <Select<"NONE" | "MINOR" | "MODERATE" | "SEVERE">
                   value={
                     (form.damage || "") as
@@ -676,32 +669,27 @@ export default function WildInspectionModal(props: Props) {
                   onValueChange={(v) => setFormField("damage", v)}
                   items={["NONE", "MINOR", "MODERATE", "SEVERE"] as const}
                   disabled={readOnly || submitLoading}
-                  placeholder={t("Select", "தேர்வு")}
+                  placeholder="Select"
                 />
               </View>
             </TwoCol>
 
-            <Label>{t("Reject Reason", "நிராகரிப்பு காரணம்")}</Label>
+            <Label>Reject Reason</Label>
             <Select<RejectReason>
               value={(form.reject_reason || "") as RejectReason | ""}
               onValueChange={(v) => setFormField("reject_reason", v)}
               items={REJECT_REASONS}
               disabled={readOnly || submitLoading || !isReject}
               placeholder={
-                isReject
-                  ? t("Select", "தேர்வு")
-                  : t(
-                      "Only when QC Result = REJECT",
-                      "QC முடிவு = REJECT ஆனாலே",
-                    )
+                isReject ? "Select" : "Only when QC Result = REJECT"
               }
             />
 
-            <Label>{t("Remarks", "குறிப்பு")}</Label>
+            <Label>Remarks</Label>
             <Input
               value={form.remarks}
               onChangeText={(v) => setFormField("remarks", v)}
-              placeholder={t("Write remarks", "குறிப்பு எழுதவும்")}
+              placeholder="Write remarks"
               multiline
               numberOfLines={4}
               disabled={readOnly || submitLoading}
@@ -709,7 +697,7 @@ export default function WildInspectionModal(props: Props) {
 
             <TwoCol>
               <View className="flex-1">
-                <Label>{t("Capture", "படம் எடு")}</Label>
+                <Label>Capture</Label>
                 <Pressable
                   onPress={onCaptureImage}
                   disabled={readOnly || submitLoading || wmBusy}
@@ -723,16 +711,14 @@ export default function WildInspectionModal(props: Props) {
                   <View className="flex-row items-center justify-center">
                     <Ionicons name="camera-outline" size={18} color="white" />
                     <Text className="text-white font-extrabold ml-2">
-                      {wmBusy
-                        ? t("Processing…", "செயலாக்கம்…")
-                        : t("Capture", "படம் எடு")}
+                      {wmBusy ? "Processing…" : "Capture"}
                     </Text>
                   </View>
                 </Pressable>
               </View>
 
               <View className="flex-1">
-                <Label>{t("Gallery", "கேலரி")}</Label>
+                <Label>Gallery</Label>
                 <Pressable
                   onPress={onPickGalleryStamped}
                   disabled={readOnly || submitLoading || wmBusy}
@@ -746,7 +732,7 @@ export default function WildInspectionModal(props: Props) {
                   <View className="flex-row items-center justify-center">
                     <Ionicons name="images-outline" size={18} color="white" />
                     <Text className="text-white font-extrabold ml-2">
-                      {t("Pick", "தேர்வு")} ({form.images.length}/{MAX_IMAGES})
+                      Pick ({form.images.length}/{MAX_IMAGES})
                     </Text>
                   </View>
                 </Pressable>
@@ -771,7 +757,7 @@ export default function WildInspectionModal(props: Props) {
               className="flex-1 bg-white/10 p-4 rounded-2xl"
             >
               <Text className="text-white text-center font-extrabold">
-                {t("Close", "மூடு")}
+                Close
               </Text>
             </Pressable>
 
@@ -782,9 +768,7 @@ export default function WildInspectionModal(props: Props) {
                 className="flex-1 bg-blue-500/30 p-4 rounded-2xl"
               >
                 <Text className="text-white text-center font-extrabold">
-                  {submitLoading
-                    ? t("Submitting…", "சமர்ப்பிக்கிறது…")
-                    : t("Submit", "சமர்ப்பி")}
+                  {submitLoading ? "Submitting…" : "Submit"}
                 </Text>
               </Pressable>
             )}

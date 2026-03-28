@@ -1,5 +1,6 @@
 // src/components/crate_packer/CrateScannerScreen.tsx
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Animated, Pressable, Text, TextInput, View } from "react-native";
 
@@ -169,6 +170,7 @@ export default function CrateScannerScreen({
   cameraEnabled?: boolean;
 }) {
   const [cameraPerm, requestCameraPerm] = useCameraPermissions();
+  const [torch, setTorch] = useState(false);
 
   const scanPausedUntilRef = useRef(0);
   const busyRef = useRef(false);
@@ -408,16 +410,48 @@ export default function CrateScannerScreen({
 
   return (
     <View>
-      <Text
+      <View
         style={{
-          color: "white",
-          fontSize: 18,
-          fontWeight: "900",
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
           marginBottom: 10,
         }}
       >
-        {title} ({divisionLabel})
-      </Text>
+        <Text
+          style={{
+            color: "white",
+            fontSize: 18,
+            fontWeight: "900",
+          }}
+        >
+          {title} ({divisionLabel})
+        </Text>
+
+        <Pressable
+          onPress={() => setTorch((v) => !v)}
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 12,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: torch
+              ? "rgba(255,214,0,0.20)"
+              : "rgba(255,255,255,0.08)",
+            borderWidth: 1,
+            borderColor: torch
+              ? "rgba(255,214,0,0.45)"
+              : "rgba(255,255,255,0.12)",
+          }}
+        >
+          <Ionicons
+            name={torch ? "flashlight" : "flashlight-outline"}
+            size={18}
+            color={torch ? "#FFD600" : "rgba(255,255,255,0.65)"}
+          />
+        </Pressable>
+      </View>
 
       {/* Manual Code */}
       <View
@@ -565,6 +599,7 @@ export default function CrateScannerScreen({
             key={camKey}
             style={{ width: "100%", height: "100%" }}
             facing="back"
+            enableTorch={torch}
             barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
             onBarcodeScanned={(e: any) => handleScan(e?.data)}
           />

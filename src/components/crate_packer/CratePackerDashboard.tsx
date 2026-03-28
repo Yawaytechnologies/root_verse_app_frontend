@@ -197,74 +197,6 @@ function StatBox({
   );
 }
 
-function LangToggle({
-  value,
-  onToggle,
-}: {
-  value: "en" | "ta";
-  onToggle: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onToggle}
-      style={{
-        alignSelf: "flex-start",
-        paddingHorizontal: 8,
-        paddingVertical: 5,
-        borderRadius: 12,
-        backgroundColor: "rgba(255,255,255,0.06)",
-        borderWidth: 1,
-        borderColor: BORDER,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
-      }}
-    >
-      <Text
-        style={{
-          color: "rgba(255,255,255,0.85)",
-          fontWeight: "900",
-          fontSize: 12,
-        }}
-      >
-        EN
-      </Text>
-
-      <View
-        style={{
-          height: 12,
-          width: 26,
-          borderRadius: 999,
-          backgroundColor: "rgba(255,255,255,0.10)",
-          borderWidth: 1,
-          borderColor: "rgba(255,255,255,0.10)",
-          justifyContent: "center",
-          paddingHorizontal: 2,
-        }}
-      >
-        <View
-          style={{
-            height: 12,
-            width: 12,
-            borderRadius: 999,
-            backgroundColor: "#3b82f6",
-            marginLeft: value === "en" ? 0 : 18,
-          }}
-        />
-      </View>
-
-      <Text
-        style={{
-          color: "rgba(255,255,255,0.75)",
-          fontWeight: "900",
-          fontSize: 10,
-        }}
-      >
-        தமிழ்
-      </Text>
-    </Pressable>
-  );
-}
 
 export default function CratePackerDashboard({ meOverride }: { meOverride: any }) {
   const dispatch = useAppDispatch();
@@ -346,7 +278,6 @@ export default function CratePackerDashboard({ meOverride }: { meOverride: any }
     return `crate_packer_${base || "unknown"}`;
   }, [PACKER_CODE, PACKER_DB_ID, PACKER_PHONE]);
 
-  const [lang, setLang] = useState<"en" | "ta">("en");
   const [tab, setTab] = useState<CrateTabKey>("SCAN");
   const [selectedDateISO, setSelectedDateISO] = useState(
     () => new Date().toISOString()
@@ -698,12 +629,6 @@ export default function CratePackerDashboard({ meOverride }: { meOverride: any }
           </Animated.View>
         </View>
 
-        <View style={{ marginTop: 10 }}>
-          <LangToggle
-            value={lang}
-            onToggle={() => setLang((p) => (p === "en" ? "ta" : "en"))}
-          />
-        </View>
       </View>
 
       <ScrollView
@@ -734,29 +659,28 @@ export default function CratePackerDashboard({ meOverride }: { meOverride: any }
 
               <Text
                 style={{
-                  color: "rgba(255,255,255,0.92)",
-                  marginTop: 3,
-                  fontSize: 13,
-                }}
-              >
-                {lang === "en" ? "Crate Packer" : "கிரேட் பேக்கர்"} •{" "}
-                {locationText}
-              </Text>
-
-              <Text
-                style={{
                   color: "rgba(255,255,255,0.85)",
-                  marginTop: 2,
+                  marginTop: 3,
                   fontSize: 12.5,
                 }}
               >
-                {lang === "en" ? "ID" : "ஐடி"}: {PACKER_CODE || "—"}
+                Code: {PACKER_CODE || "—"}
               </Text>
 
               <Text
                 style={{
                   color: "rgba(255,255,255,0.85)",
-                  marginTop: 6,
+                  marginTop: 3,
+                  fontSize: 12.5,
+                }}
+              >
+                Location: {locationText}
+              </Text>
+
+              <Text
+                style={{
+                  color: "rgba(255,255,255,0.85)",
+                  marginTop: 3,
                   fontSize: 12.5,
                 }}
               >
@@ -779,7 +703,7 @@ export default function CratePackerDashboard({ meOverride }: { meOverride: any }
 
             <View style={{ width: 120 }}>
               <StatBox
-                label={lang === "en" ? "Total Packed" : "மொத்த பேக்"}
+                label="Total Packed"
                 value={totalPacked}
                 bg={TOTAL_PACKED_BLUE}
               />
@@ -832,7 +756,6 @@ export default function CratePackerDashboard({ meOverride }: { meOverride: any }
 
       <CratePackModal
         visible={packModalOpen}
-        lang={lang}
         crateQr={packCrateQr}
         mode={packMode}
         initialPayload={packInitialPayload}

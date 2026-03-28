@@ -13,7 +13,6 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
-
 import QcListScreen from "./QcListScreen";
 import QcScannerScreen from "./QcScannerScreen";
 
@@ -40,8 +39,10 @@ export type InspectorInfo = {
   name: string;
   state_id?: number;
   district_id?: number;
+  location_id?: number;
   state_name?: string;
   district_name?: string;
+  location_name?: string;
   id: string;
   divisionLabel: string;
 };
@@ -49,9 +50,6 @@ export type InspectorInfo = {
 type Props = {
   division: Division;
   inspector: InspectorInfo;
-  totalInspections: number;
-  completed: any[];
-  onViewInspection: (id: string) => void;
 };
 
 function pad2(n: number) {
@@ -68,15 +66,6 @@ function toYmdLocal(ts: number): string {
 function cleanName(v: any): string | undefined {
   const t = String(v ?? "").trim();
   return t ? t : undefined;
-}
-function formatZone(i: InspectorInfo) {
-  const dName = cleanName(i.district_name);
-  const sName = cleanName(i.state_name);
-
-  if (dName && sName) return `${dName}, ${sName}`;
-  if (sName) return sName;
-  if (dName) return dName;
-  return "—";
 }
 
 type TabKey = "scanner" | "checked" | "pending" | "rejected";
@@ -162,7 +151,8 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
       !qc?.checker_code ||
       !qc?.checker_name ||
       !cleanName(qc?.state_name) ||
-      !cleanName(qc?.district_name);
+      !cleanName(qc?.district_name) ||
+      !cleanName(qc?.location_name);
 
     if (needsQcProfile) dispatch(fetchQcMe());
   }, [
@@ -171,6 +161,7 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
     qc?.checker_name,
     qc?.state_name,
     qc?.district_name,
+    qc?.location_name,
   ]);
 
   const mergedInspector: InspectorInfo = useMemo(() => {
@@ -183,9 +174,12 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
       id,
       state_id: inspector.state_id ?? qc?.state_id,
       district_id: inspector.district_id ?? qc?.district_id,
+      location_id: inspector.location_id ?? qc?.location_id,
       state_name: cleanName(inspector.state_name) ?? cleanName(qc?.state_name),
       district_name:
         cleanName(inspector.district_name) ?? cleanName(qc?.district_name),
+      location_name:
+        cleanName(inspector.location_name) ?? cleanName(qc?.location_name),
     };
   }, [inspector, qc]);
 
@@ -204,7 +198,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
   }, [qc]);
 
   const [tab, setTab] = useState<TabKey>("scanner");
-  const [lang, setLang] = useState<"en" | "ta">("en");
 
   const [selectedDate, setSelectedDate] = useState<string>(() => todayYmd());
   const [editDraft, setEditDraft] = useState<{
@@ -212,7 +205,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
     payload: any;
   } | null>(null);
 
-  const zoneText = useMemo(() => formatZone(mergedInspector), [mergedInspector]);
   const [counts, setCounts] = useState({
     total: 0,
     checked: 0,
@@ -519,74 +511,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
           </Animated.View>
         </View>
 
-        {/* Toggle below icon */}
-        <View
-          style={{
-            marginTop: 10,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "flex-start",
-          }}
-        >
-          <Pressable
-            onPress={() => setLang((p) => (p === "en" ? "ta" : "en"))}
-            style={{
-              alignSelf: "flex-start",
-              paddingHorizontal: 8,
-              paddingVertical: 5,
-              borderRadius: 12,
-              backgroundColor: "rgba(255,255,255,0.06)",
-              borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.10)",
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <Text
-              style={{
-                color: "rgba(255,255,255,0.85)",
-                fontWeight: "900",
-                fontSize: 12,
-              }}
-            >
-              EN
-            </Text>
-
-            <View
-              style={{
-                height: 12,
-                width: 26,
-                borderRadius: 999,
-                backgroundColor: "rgba(255,255,255,0.10)",
-                borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.10)",
-                justifyContent: "center",
-                paddingHorizontal: 2,
-              }}
-            >
-              <View
-                style={{
-                  height: 12,
-                  width: 12,
-                  borderRadius: 999,
-                  backgroundColor: "#3b82f6",
-                  marginLeft: lang === "en" ? 0 : 18,
-                }}
-              />
-            </View>
-
-            <Text
-              style={{
-                color: "rgba(255,255,255,0.75)",
-                fontWeight: "900",
-                fontSize: 10,
-              }}
-            >
-              தமிழ்
-            </Text>
-          </Pressable>
-        </View>
       </View>
 
       {/* BODY */}
@@ -618,29 +542,54 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
 
               <Text
                 style={{
-                  color: "rgba(255,255,255,0.92)",
-                  marginTop: 3,
-                  fontSize: 13,
-                }}
-              >
-                {lang === "en" ? "Quality Inspector" : "தர ஆய்வாளர்"} •{" "}
-                {zoneText}
-              </Text>
-
-              <Text
-                style={{
                   color: "rgba(255,255,255,0.85)",
-                  marginTop: 2,
+                  marginTop: 3,
                   fontSize: 12.5,
                 }}
               >
-                {lang === "en" ? "ID" : "ஐடி"}: {mergedInspector.id}
+                Code: {mergedInspector.id}
               </Text>
+
+              {!!mergedInspector.state_name && (
+                <Text
+                  style={{
+                    color: "rgba(255,255,255,0.85)",
+                    marginTop: 3,
+                    fontSize: 12.5,
+                  }}
+                >
+                  State: {mergedInspector.state_name}
+                </Text>
+              )}
+
+              {!!mergedInspector.district_name && (
+                <Text
+                  style={{
+                    color: "rgba(255,255,255,0.85)",
+                    marginTop: 3,
+                    fontSize: 12.5,
+                  }}
+                >
+                  District: {mergedInspector.district_name}
+                </Text>
+              )}
+
+              {!!mergedInspector.location_name && (
+                <Text
+                  style={{
+                    color: "rgba(255,255,255,0.85)",
+                    marginTop: 3,
+                    fontSize: 12.5,
+                  }}
+                >
+                  Location: {mergedInspector.location_name}
+                </Text>
+              )}
 
               <Text
                 style={{
                   color: "rgba(255,255,255,0.85)",
-                  marginTop: 6,
+                  marginTop: 3,
                   fontSize: 12.5,
                 }}
               >
@@ -651,24 +600,24 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
             <View style={{ width: 150, gap: 8 }}>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <StatBox
-                  label={lang === "en" ? "Total" : "மொத்தம்"}
+                  label="Total"
                   value={counts.total}
                   bg="#3E86E0"
                 />
                 <StatBox
-                  label={lang === "en" ? "Checked" : "சோதித்தது"}
+                  label="Checked"
                   value={counts.checked}
                   bg="#34A987"
                 />
               </View>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <StatBox
-                  label={lang === "en" ? "Pending" : "நிலுவை"}
+                  label="Pending"
                   value={counts.pending}
                   bg="#D29B3B"
                 />
                 <StatBox
-                  label={lang === "en" ? "Rejected" : "நிராகரி"}
+                  label="Rejected"
                   value={counts.rejected}
                   bg="#CF5A5A"
                 />
@@ -689,35 +638,31 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
           <View style={{ flexDirection: "row" }}>
             <MiniTab
               active={tab === "scanner"}
-              label={lang === "en" ? "Scan" : "ஸ்கேன்"}
+              label="Scan"
               icon="scan-outline"
               activeColor={theme.scannerActive}
               onPress={() => setTabSmooth("scanner")}
-              lang={lang}
             />
             <MiniTab
               active={tab === "checked"}
-              label={lang === "en" ? "Checked" : "சோதித்தது"}
+              label="Checked"
               icon="checkmark-circle-outline"
               activeColor={theme.completedActive}
               onPress={() => setTabSmooth("checked")}
-              lang={lang}
             />
             <MiniTab
               active={tab === "pending"}
-              label={lang === "en" ? "Pending" : "நிலுவையில்"}
+              label="Pending"
               icon="time-outline"
               activeColor={theme.pendingActive}
               onPress={() => setTabSmooth("pending")}
-              lang={lang}
             />
             <MiniTab
               active={tab === "rejected"}
-              label={lang === "en" ? "Rejected" : "நிராகரிப்பு"}
+              label="Rejected"
               icon="close-circle-outline"
               activeColor={theme.rejectedActive}
               onPress={() => setTabSmooth("rejected")}
-              lang={lang}
             />
           </View>
 
@@ -731,7 +676,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
           {tab === "scanner" ? (
             <QcScannerScreen
               division={division}
-              lang={lang as any}
               selectedDate={selectedDate}
               editDraft={editDraft}
               onEditDraftConsumed={() => setEditDraft(null)}
@@ -742,7 +686,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
           ) : tab === "checked" ? (
             <QcListScreen
               division={division}
-              lang={lang as any}
               status="checked"
               selectedDate={selectedDate}
               onChangeDate={setSelectedDate}
@@ -750,7 +693,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
           ) : tab === "pending" ? (
             <QcListScreen
               division={division}
-              lang={lang as any}
               status="pending"
               selectedDate={selectedDate}
               onChangeDate={setSelectedDate}
@@ -762,7 +704,6 @@ export default function QualityInspectorDashboard({ division, inspector }: Props
           ) : (
             <QcListScreen
               division={division}
-              lang={lang as any}
               status="rejected"
               selectedDate={selectedDate}
               onChangeDate={setSelectedDate}
@@ -831,17 +772,13 @@ function MiniTab({
   icon,
   activeColor,
   onPress,
-  lang,
 }: {
   active: boolean;
   label: string;
   icon: any;
   activeColor: string;
   onPress: () => void;
-  lang: "en" | "ta";
 }) {
-  const isTamil = lang === "ta";
-
   return (
     <Pressable
       onPress={onPress}
@@ -875,8 +812,8 @@ function MiniTab({
             flex: 1,
             color: active ? activeColor : "rgba(255,255,255,0.55)",
             fontWeight: "900",
-            fontSize: isTamil ? 11 : 14,
-            lineHeight: isTamil ? 13 : 16,
+            fontSize: 14,
+            lineHeight: 16,
             textAlign: "left",
             ...(Platform.OS === "android"
               ? ({ includeFontPadding: false } as any)
