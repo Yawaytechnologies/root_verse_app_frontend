@@ -24,7 +24,6 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 
-// ✅ Watermark capture
 import { captureRef } from "react-native-view-shot";
 
 import { submitCatchLog } from "../../../src/services/wild/catchLog.slice";
@@ -66,23 +65,23 @@ type QrKind = "FISH" | "CRATE" | "VESSEL" | "UNKNOWN";
 type ScannedQr = { id: string; kind: QrKind };
 type SyncState = "NOT_SYNCED" | "SYNCING" | "SYNCED";
 
-/** Backend expects numeric owner db id */
 type LocalCatchLogPayload = Omit<CatchLogPayload, "ownerId"> & {
   ownerId?: number;
   fishName?: string;
   rvVesselCode?: string;
   qrKind?: QrKind;
-
   vessel_id?: number;
 };
 
 type Vessel = any;
 type Trip = any;
 
-type GroupPhase = "SCAN" | "PHOTO" | "DONE";
+// IMAGE_PROOF = new first phase (photo first, QR optional later)
+type GroupPhase = "IMAGE_PROOF" | "SCAN" | "PHOTO" | "DONE";
 
 type FishGroup = {
   id: string;
+  sessionId: string; // auto-generated e.g. "IN-TN-NA-BTR-260001-S1"
   fishId: number | null;
   fishName: string;
   scanned: ScannedQr[];
@@ -94,20 +93,17 @@ type WatermarkJob = {
   srcUri: string;
   outW: number;
   outH: number;
-  lines: string[]; // ✅ brand + ownerId + vessel + datetime + location
+  lines: string[];
 };
 
 /* ---------------- CACHE KEYS ---------------- */
 const FISH_CACHE_KEY = "rv_fish_types_cache_v1";
-const OWNER_DBID_CACHE_PREFIX = "rv_owner_db_id_cache_user_"; // + userId
-const OWNER_CODE_CACHE_PREFIX = "rv_owner_code_cache_user_"; // + userId
-
+const OWNER_DBID_CACHE_PREFIX = "rv_owner_db_id_cache_user_";
+const OWNER_CODE_CACHE_PREFIX = "rv_owner_code_cache_user_";
 const CAMERA_SESSION_KEY = "rv_camera_session_v1";
 const TOKEN_KEY = "auth_token";
-
-const VESSEL_CACHE_PREFIX = "rv_vessels_cache_owner_"; // + ownerDbId
-const TRIP_CACHE_PREFIX = "rv_approved_trips_cache_owner_"; // + ownerCode
-
+const VESSEL_CACHE_PREFIX = "rv_vessels_cache_owner_";
+const TRIP_CACHE_PREFIX = "rv_approved_trips_cache_owner_";
 const LAST_USER_ID_KEY = "rv_last_user_id_v1";
 
 /* ---------------- PARAM HELPERS ---------------- */
@@ -137,7 +133,6 @@ const i18n = {
   ta: {
     title: "பிடிப்பு பதிவு",
     sub: "",
-
     step: (n: number) => `படி ${n}/4`,
     next: "அடுத்து",
     back: "மீண்டும்",
@@ -146,13 +141,10 @@ const i18n = {
     clearAll: "அனைத்தும் நீக்கு",
     remove: "நீக்கு",
     langBtn: "English",
-
     vessel: "படகு (Vessel)",
     chooseVessel: "படகு தேர்வு செய்",
-
     trip: "பயணம் (Trip)",
     chooseTrip: "Approved Trip தேர்வு செய்",
-
     fishGroupsTitle: "மீன் + QR குழுக்கள்",
     addFish: "+ மீன் சேர்க்க",
     selectFish: "மீன் தேர்வு",
@@ -165,13 +157,11 @@ const i18n = {
     totalQr: (n: number) => `மொத்த QR: ${n}`,
     errNeedFishGroup: "குறைந்தது 1 குழு உருவாக்க வேண்டும்",
     errGroupFishMissing: "ஒவ்வொரு குழுவுக்கும் மீன் தேர்வு செய்ய வேண்டும்",
-    errGroupQrMissing: "ஒவ்வொரு குழுவுக்கும் குறைந்தது 1 QR scan செய்ய வேண்டும்",
-
+    errGroupQrMissing: "ஒவ்வொரு குழுவுக்கும் குறைந்தது 1 QR அல்லது 1 Photo தேவை.",
     scanTitle: "QR ஸ்கேன்",
     scanHint: "மீன் தேர்வு செய்த பிறகு QR scan செய்யலாம்",
     scannedList: "ஸ்கேன் செய்த QR-கள்",
     scanCount: (n: number) => `மொத்தம்: ${n}`,
-
     phaseScan: "SCAN",
     phasePhoto: "PHOTOS",
     phaseDone: "DONE",
@@ -181,62 +171,47 @@ const i18n = {
     capturePhoto: "புகைப்படம் எடு",
     finishFish: "இந்த மீன் முடி",
     photo: "Photo",
-
     camDenied: "Camera அனுமதி இல்லை",
     grantCam: "Camera அனுமதி கொடு",
-
     torch: "டார்ச்",
     torchOn: "ON",
     torchOff: "OFF",
-
     dateTime: "தேதி & நேரம் (Auto)",
     date: "தேதி",
     time: "நேரம்",
     autoHint: "Save அழுத்தும் நேரத்தில் Date/Time auto ஆக capture ஆகும்.",
-
     saved: "சேமிக்கப்பட்டது",
     offlineSaved: "இணையம் இல்லை. Local-ல் save. Net வந்தவுடன் auto sync ஆகும்.",
     syncing: "Syncing...",
     pending: "Pending",
-
     loadingOwner: "Owner loading...",
     loadingVessel: "Vessels loading...",
     loadingTrips: "Trips loading...",
     loadingFish: "Fish types loading...",
-
     noVessels: "Vessel இல்லை",
     noTrips: "Approved trips இல்லை",
-
     syncLabel: "Sync",
     syncNotSynced: "Not Synced",
     syncSyncing: "Syncing",
     syncSynced: "Fully Synced",
-
     scanBtn: "Fish Tag Scan",
     scanDisabledMsg: "முதலில் Offline pending எல்லாம் Sync ஆகணும் (Fully Synced).",
     scanModalTitle: "Fish Tag Scan",
     close: "Close",
-
     photoCamTitle: "Photo Capture",
     takePhoto: "Take Photo",
     cancel: "Cancel",
-
     max2: "Max 2 photos.",
-
     imgPreviewTitle: "Photo Preview",
-
     done: "Done",
     deleteGroup: "இந்த group-ஐ நீக்கு?",
     yes: "ஆம்",
     no: "இல்லை",
-
     step1Hint: "1) படகு தேர்வு  2) Trip தேர்வு  3) அடுத்து",
-    step2Hint: "மீன் தேர்வு → QR scan → (Photo optional) → DONE",
+    step2Hint: "மீன் தேர்வு → Photo எடு → (QR விருப்பம்) → DONE",
     step3Hint: "Review செய்து Save செய்யுங்கள்.",
-
     skipPhotos: "Photo இல்லாமலும் முடிக்கலாம்",
     optional: "Optional",
-
     lockedTitle: "Trip தேர்வு செய்யப்பட்டு வந்தது",
     lockedSub: "Trip List-ல இருந்து வந்ததால் Vessel/Trip மீண்டும் தேர்வு தேவையில்லை.",
     lockedChange: "Change",
@@ -246,7 +221,6 @@ const i18n = {
   en: {
     title: "Catch Log",
     sub: "",
-
     step: (n: number) => `Step ${n}/4`,
     next: "Next",
     back: "Back",
@@ -255,13 +229,10 @@ const i18n = {
     clearAll: "Clear all",
     remove: "Remove",
     langBtn: "தமிழ்",
-
     vessel: "Vessel",
     chooseVessel: "Choose vessel",
-
     trip: "Approved Trip",
     chooseTrip: "Choose approved trip",
-
     fishGroupsTitle: "Fish + QR Groups",
     addFish: "+ Add Fish",
     selectFish: "Select Fish",
@@ -274,13 +245,11 @@ const i18n = {
     totalQr: (n: number) => `Total QR: ${n}`,
     errNeedFishGroup: "Create at least 1 group",
     errGroupFishMissing: "Each group must have a selected fish",
-    errGroupQrMissing: "Each group must have at least 1 scanned QR",
-
+    errGroupQrMissing: "Each group needs at least 1 QR or 1 photo as proof.",
     scanTitle: "Scan QR",
     scanHint: "Select fish, then scan QRs",
     scannedList: "Scanned QRs",
     scanCount: (n: number) => `Total: ${n}`,
-
     phaseScan: "SCAN",
     phasePhoto: "PHOTOS",
     phaseDone: "DONE",
@@ -290,62 +259,47 @@ const i18n = {
     capturePhoto: "Capture Photo",
     finishFish: "Finish this fish",
     photo: "Photo",
-
     camDenied: "Camera permission denied",
     grantCam: "Grant camera access",
-
     torch: "Torch",
     torchOn: "ON",
     torchOff: "OFF",
-
     dateTime: "Date & Time (Auto)",
     date: "Date",
     time: "Time",
     autoHint: "Date/Time captured automatically when you press Save.",
-
     saved: "Saved",
     offlineSaved: "No internet. Saved locally. Auto-sync when network returns.",
     syncing: "Syncing...",
     pending: "Pending",
-
     loadingOwner: "Loading owner...",
     loadingVessel: "Loading vessels...",
     loadingTrips: "Loading trips...",
     loadingFish: "Loading fish types...",
-
     noVessels: "No vessels",
     noTrips: "No approved trips",
-
     syncLabel: "Sync",
     syncNotSynced: "Not Synced",
     syncSyncing: "Syncing",
     syncSynced: "Fully Synced",
-
     scanBtn: "Fish Tag Scan",
     scanDisabledMsg: "All offline pending must be synced first (Fully Synced).",
     scanModalTitle: "Fish Tag Scan",
     close: "Close",
-
     photoCamTitle: "Photo Capture",
     takePhoto: "Take Photo",
     cancel: "Cancel",
-
     max2: "Max 2 photos.",
-
     imgPreviewTitle: "Photo Preview",
-
     done: "Done",
     deleteGroup: "Remove this group?",
     yes: "Yes",
     no: "No",
-
     step1Hint: "1) Choose Vessel  2) Choose Trip  3) Next",
-    step2Hint: "Select Fish → Scan QR → (Photo optional) → DONE",
+    step2Hint: "Select Fish → Take Photo → (QR optional) → DONE",
     step3Hint: "Review and Save.",
-
     skipPhotos: "Finish without photos",
     optional: "Optional",
-
     lockedTitle: "Trip selected from My Trips",
     lockedSub: "You came from Trip List, so Vessel/Trip selection is locked.",
     lockedChange: "Change",
@@ -503,37 +457,6 @@ function GhostBtn({
   );
 }
 
-function StepHeader({
-  step,
-  title,
-  hint,
-  right,
-}: {
-  step: number;
-  title: string;
-  hint: string;
-  right?: React.ReactNode;
-}) {
-  return (
-    <Card className="p-4">
-      <View className="flex-row items-center justify-between">
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text className="text-[12px] font-extrabold" style={{ color: UI.accent }}>
-            STEP {step}
-          </Text>
-          <Text className={`mt-1 text-xl font-extrabold ${UI.text}`} numberOfLines={2}>
-            {title}
-          </Text>
-          <Text className={`mt-2 text-sm font-semibold ${UI.muted}`} numberOfLines={3}>
-            {hint}
-          </Text>
-        </View>
-        {right ? <View style={{ marginLeft: 10 }}>{right}</View> : null}
-      </View>
-    </Card>
-  );
-}
-
 /* ---------------- HELPERS ---------------- */
 const fmtDate = (d: Date) => {
   const yyyy = d.getFullYear();
@@ -552,27 +475,10 @@ const fmtDateTime = (d: Date) => `${fmtDate(d)} ${fmtTime(d)}`;
 function classifyQr(id: string): QrKind {
   const v = String(id || "").trim().toUpperCase();
   if (!v) return "UNKNOWN";
-
-  // ✅ Vessel QR
   if (v.startsWith("RV-VESSEL-") || v.startsWith("RV-VES-")) return "VESSEL";
-
-  // ✅ Crate/Box QR
-  if (
-    v.startsWith("RV-CRATE-") ||
-    v.startsWith("CRATE-") ||
-    v.startsWith("RV-BOX-")
-  ) {
-    return "CRATE";
-  }
-
-  // ✅ Fish Tag QR (example: IN-NA-WC-HL-001840)
-  // Pattern: AA-AA-AA-AA-<digits>
+  if (v.startsWith("RV-CRATE-") || v.startsWith("CRATE-") || v.startsWith("RV-BOX-")) return "CRATE";
   if (/^[A-Z]{2}-[A-Z]{2}-[A-Z]{2}-[A-Z]{2}-\d{4,}$/.test(v)) return "FISH";
-
-  // ✅ Slightly more flexible (if sometimes alnum segments appear)
-  // Pattern: AA-(AA|A1){3+}-<digits>
   if (/^[A-Z]{2}(?:-[A-Z0-9]{2}){3,}-\d{4,}$/.test(v)) return "FISH";
-
   return "UNKNOWN";
 }
 
@@ -586,13 +492,10 @@ function normalizeList(json: any): any[] {
 function normalizeOwnerCode(code: string) {
   const c = String(code || "").trim().toUpperCase();
   if (/^OWN-\d{4}$/.test(c)) return c;
-
   const m1 = c.match(/^OWN-?0*(\d+)$/);
   if (m1?.[1]) return `OWN-${String(m1[1]).padStart(4, "0")}`;
-
   const m2 = c.match(/^OWN\D*0*(\d+)$/);
   if (m2?.[1]) return `OWN-${String(m2[1]).padStart(4, "0")}`;
-
   return c;
 }
 
@@ -605,29 +508,22 @@ function deepFindOwnCode(obj: any): string {
   try {
     const seen = new WeakSet<object>();
     const q: any[] = [obj];
-
     while (q.length) {
       const cur = q.shift();
       if (!cur) continue;
-
       if (typeof cur === "string") {
         const s = cur.trim();
         if (/^OWN/i.test(s)) return s;
         continue;
       }
-
       if (typeof cur !== "object") continue;
-
       if (seen.has(cur)) continue;
       seen.add(cur);
-
       for (const [k, v] of Object.entries(cur)) {
         if (typeof v === "string") {
           const vs = v.trim();
           const kl = String(k).toLowerCase();
-          if ((kl.includes("owner") && kl.includes("code") && vs) || /^OWN/i.test(vs)) {
-            return vs;
-          }
+          if ((kl.includes("owner") && kl.includes("code") && vs) || /^OWN/i.test(vs)) return vs;
         } else if (v && typeof v === "object") {
           q.push(v);
         }
@@ -642,7 +538,6 @@ async function authHeaders() {
   const b = await AsyncStorage.getItem("token");
   const c = await AsyncStorage.getItem("access_token");
   const token = a || b || c || "";
-
   return {
     Accept: "application/json",
     "Content-Type": "application/json",
@@ -666,12 +561,7 @@ function vesselDbId(v: Vessel): number | null {
 
 function vesselCode(v: Vessel): string {
   return String(
-    v?.rv_vessel_id ||
-      v?.rvVesselId ||
-      v?.vessel_code ||
-      v?.rv_vessel_code ||
-      v?.rvVesselCode ||
-      "",
+    v?.rv_vessel_id || v?.rvVesselId || v?.vessel_code || v?.rv_vessel_code || v?.rvVesselCode || "",
   ).trim();
 }
 
@@ -693,16 +583,13 @@ function vesselGovtRegNo(v: Vessel): string {
 }
 
 function vesselName(v: Vessel): string {
-  return String(
-    v?.vessel_name ?? v?.vesselName ?? v?.name ?? v?.boat_name ?? v?.boatName ?? "",
-  ).trim();
+  return String(v?.vessel_name ?? v?.vesselName ?? v?.name ?? v?.boat_name ?? v?.boatName ?? "").trim();
 }
 
 function vesselLabel(v: Vessel): string {
   const reg = vesselGovtRegNo(v);
   const name = vesselName(v);
   const id = vesselDbId(v);
-
   const base = reg && name ? `${reg} • ${name}` : reg ? reg : name ? name : vesselCode(v);
   return id ? `${base}  (ID: ${id})` : base;
 }
@@ -714,8 +601,7 @@ function tripKey(tr: any): string {
 function tripLabel(tr: Trip): string {
   const code = String(tr?.trip_id || tr?.tripId || tr?.trip_code || tr?.tripCode || tr?.id || "").trim();
   const port = String(tr?.near_station || tr?.port || tr?.landing_port || tr?.landingPort || "").trim();
-  const date =
-    String(tr?.planned_at || tr?.trip_date || tr?.tripDate || tr?.created_at || "").trim() || "";
+  const date = String(tr?.planned_at || tr?.trip_date || tr?.tripDate || tr?.created_at || "").trim() || "";
   return `${code}${port ? ` • ${port}` : ""}${date ? ` • ${date.substring(0, 10)}` : ""}`;
 }
 
@@ -725,13 +611,14 @@ function tripVesselDbId(tr: any): number | null {
 }
 function tripVesselCode(tr: any): string {
   return String(
-    tr?.rv_vessel_id ??
-      tr?.rvVesselId ??
-      tr?.vessel_code ??
-      tr?.rv_vessel_code ??
-      tr?.rvVesselCode ??
-      "",
+    tr?.rv_vessel_id ?? tr?.rvVesselId ?? tr?.vessel_code ?? tr?.rv_vessel_code ?? tr?.rvVesselCode ?? "",
   ).trim();
+}
+
+/* ---------------- SESSION ID GENERATOR ---------------- */
+function generateSessionId(tripCode: string, groupIndex: number): string {
+  const base = String(tripCode || "SESSION").trim().toUpperCase();
+  return `${base}-S${groupIndex + 1}`;
 }
 
 /* ---------------- OWNER CACHE (PER LOGIN USER) ---------------- */
@@ -749,13 +636,11 @@ async function readOwnerCacheByUser(userId: number): Promise<number | null> {
       const n = Number(perUser);
       return Number.isFinite(n) && n > 0 ? n : null;
     }
-
     const generic = String((await AsyncStorage.getItem("owner_id")) || "").trim();
     if (generic && /^\d+$/.test(generic)) {
       const n = Number(generic);
       return Number.isFinite(n) && n > 0 ? n : null;
     }
-
     return null;
   } catch {
     return null;
@@ -770,7 +655,6 @@ async function readOwnerCodeCacheByUser(userId: number): Promise<string> {
   try {
     const perUser = String((await AsyncStorage.getItem(ownerCodeCacheKey(userId))) || "").trim();
     if (perUser) return perUser;
-
     const generic = String((await AsyncStorage.getItem("owner_code")) || "").trim();
     return generic;
   } catch {
@@ -788,17 +672,14 @@ async function writeOwnerCodeCacheByUser(userId: number, code: string) {
 function sanitizeImageUrl(u: any): string {
   let s = String(u ?? "").trim();
   if (!s) return "";
-
   s = s.replace(/^"+|"+$/g, "");
   s = s.replace(/%22/gi, "");
   s = s.replace(/"/g, "");
   s = s.replace(/,+$/g, "");
   s = s.trim();
-
   try {
     s = encodeURI(s);
   } catch {}
-
   return s;
 }
 
@@ -811,7 +692,6 @@ const fishImageOf = (f: FishType) => {
     (f as any)?.image_url ??
     (f as any)?.imageUrl ??
     null;
-
   const cleaned = sanitizeImageUrl(raw);
   return cleaned || null;
 };
@@ -823,7 +703,6 @@ async function readFishCache(): Promise<FishType[]> {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-
     return parsed
       .filter((f) => typeof f?.id === "number" && fishNameOf(f))
       .map((f) => ({
@@ -849,7 +728,6 @@ async function writeFishCache(list: FishType[]) {
         fish_type_url: fishImageOf(f) ?? null,
         fish_type_key: f.fish_type_key ?? null,
       }));
-
     await AsyncStorage.setItem(FISH_CACHE_KEY, JSON.stringify(safe));
   } catch {}
 }
@@ -857,18 +735,14 @@ async function writeFishCache(list: FishType[]) {
 async function fetchFishTypesFromApi(): Promise<FishType[]> {
   const res = await fetch(`${API_BASE}/api/fish-types`);
   if (!res.ok) return [];
-
   const text = await res.text();
   let json: any = null;
   try {
     json = text ? JSON.parse(text) : null;
   } catch {
-    console.log("[FISH TYPES] JSON parse failed:", text?.slice(0, 250));
     return [];
   }
-
   const list = normalizeList(json) as any[];
-
   return (Array.isArray(list) ? list : [])
     .filter((f) => typeof f?.id === "number" && String(f?.fish_name || "").trim())
     .map((f) => ({
@@ -927,16 +801,17 @@ function makeId() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-function createFishGroup(initialQr?: string): FishGroup {
+function createFishGroup(initialQr?: string, sessionId?: string): FishGroup {
   const id = makeId();
   const qr = String(initialQr || "").trim();
   const scanned: ScannedQr[] = qr ? [{ id: qr, kind: classifyQr(qr) }] : [];
   return {
     id,
+    sessionId: sessionId || "",
     fishId: null,
     fishName: "",
     scanned,
-    phase: "SCAN",
+    phase: "IMAGE_PROOF",
     images: [],
   };
 }
@@ -946,10 +821,10 @@ function locText(loc: LiveLocation | null) {
   const lat = Number(loc.latitude);
   const lng = Number(loc.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "Location: —";
-  return `Location: ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  return `Lat: ${lat.toFixed(6)}, Lon: ${lng.toFixed(6)}`;
 }
 
-/* ---------------- FULL SCREEN PICKER (Vessel/Trip/Fish) ---------------- */
+/* ---------------- FULL SCREEN PICKER ---------------- */
 type FullPickMode = "grid" | "list";
 
 type FullPickItem = {
@@ -986,7 +861,7 @@ function FullScreenPickerModal({
   mode?: FullPickMode;
   numColumns?: number;
   showImages?: boolean;
-  leadingIcon?: any; // Ionicons name
+  leadingIcon?: any;
   insetsBottom?: number;
 }) {
   const [q, setQ] = useState("");
@@ -1016,7 +891,6 @@ function FullScreenPickerModal({
   const renderGrid = ({ item }: { item: FullPickItem }) => {
     const active = item.key === tempKey;
     const uri = showImages ? sanitizeImageUrl(item.imageUri) : "";
-
     return (
       <Pressable
         onPress={() => setTempKey(item.key)}
@@ -1031,48 +905,19 @@ function FullScreenPickerModal({
           overflow: "hidden",
         }}
       >
-        <View
-          style={{
-            height: 128,
-            backgroundColor: "#e8f1ff",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
+        <View style={{ height: 128, backgroundColor: "#e8f1ff", alignItems: "center", justifyContent: "center" }}>
           {uri ? (
-            <Image
-              source={{ uri }}
-              style={{ width: "100%", height: "100%" }}
-              resizeMode="contain"
-            />
+            <Image source={{ uri }} style={{ width: "100%", height: "100%" }} resizeMode="contain" />
           ) : (
             <Ionicons name="image-outline" size={34} color="#64748b" />
           )}
         </View>
-
-        <View
-          style={{
-            paddingVertical: 12,
-            paddingHorizontal: 12,
-            backgroundColor: "rgba(0,0,0,0.55)",
-          }}
-        >
-          <Text
-            style={{
-              color: "white",
-              fontWeight: "800",
-              fontSize: 14,
-            }}
-            numberOfLines={2}
-          >
+        <View style={{ paddingVertical: 12, paddingHorizontal: 12, backgroundColor: "rgba(0,0,0,0.55)" }}>
+          <Text style={{ color: "white", fontWeight: "800", fontSize: 14 }} numberOfLines={2}>
             {item.label}
           </Text>
-
           {!!item.subtitle ? (
-            <Text
-              style={{ color: "rgba(255,255,255,0.75)", fontSize: 11, marginTop: 4 }}
-              numberOfLines={1}
-            >
+            <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: 11, marginTop: 4 }} numberOfLines={1}>
               {item.subtitle}
             </Text>
           ) : null}
@@ -1083,7 +928,6 @@ function FullScreenPickerModal({
 
   const renderList = ({ item }: { item: FullPickItem }) => {
     const active = item.key === tempKey;
-
     return (
       <Pressable
         onPress={() => setTempKey(item.key)}
@@ -1111,7 +955,6 @@ function FullScreenPickerModal({
           >
             <Ionicons name={leadingIcon || "list-outline"} size={22} color="white" />
           </View>
-
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={{ color: "white", fontWeight: "900", fontSize: 16 }} numberOfLines={2}>
               {item.label}
@@ -1122,7 +965,6 @@ function FullScreenPickerModal({
               </Text>
             ) : null}
           </View>
-
           <Ionicons
             name={active ? "checkmark-circle" : "chevron-forward"}
             size={24}
@@ -1143,11 +985,7 @@ function FullScreenPickerModal({
           >
             <Ionicons name="arrow-back" size={20} color="white" />
           </Pressable>
-
-          <Text
-            style={{ color: "white", fontWeight: "900", fontSize: 18, marginLeft: 12, flex: 1 }}
-            numberOfLines={1}
-          >
+          <Text style={{ color: "white", fontWeight: "900", fontSize: 18, marginLeft: 12, flex: 1 }} numberOfLines={1}>
             {title}
           </Text>
         </View>
@@ -1172,13 +1010,7 @@ function FullScreenPickerModal({
             onChangeText={setQ}
             placeholder={searchPlaceholder}
             placeholderTextColor="rgba(255,255,255,0.55)"
-            style={{
-              color: "white",
-              marginLeft: 10,
-              fontSize: 16,
-              flex: 1,
-              paddingVertical: 2,
-            }}
+            style={{ color: "white", marginLeft: 10, fontSize: 16, flex: 1, paddingVertical: 2 }}
           />
           {q ? (
             <Pressable onPress={() => setQ("")} style={{ padding: 6 }}>
@@ -1194,10 +1026,7 @@ function FullScreenPickerModal({
               key={`grid_${numColumns}`}
               keyExtractor={(it) => it.key}
               numColumns={numColumns}
-              contentContainerStyle={{
-                paddingHorizontal: 6,
-                paddingBottom: 120 + insetsBottom,
-              }}
+              contentContainerStyle={{ paddingHorizontal: 6, paddingBottom: 120 + insetsBottom }}
               renderItem={renderGrid}
               showsVerticalScrollIndicator={false}
             />
@@ -1206,10 +1035,7 @@ function FullScreenPickerModal({
               data={filtered}
               key="list"
               keyExtractor={(it) => it.key}
-              contentContainerStyle={{
-                paddingHorizontal: 14,
-                paddingBottom: 120 + insetsBottom,
-              }}
+              contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 120 + insetsBottom }}
               renderItem={renderList}
               showsVerticalScrollIndicator={false}
             />
@@ -1277,7 +1103,6 @@ export default function CreateCatchLog() {
   const pTripId = pickParam((params as any)?.tripId);
   const pTripDbId = pickParam((params as any)?.tripDbId);
   const pVesselId = pickParam((params as any)?.vesselId);
-
   const pTripJson = pickParam((params as any)?.tripJson);
   const pVesselJson = pickParam((params as any)?.vesselJson);
   const pTripLabel = pickParam((params as any)?.tripLabel);
@@ -1380,7 +1205,10 @@ export default function CreateCatchLog() {
   const [fishLoading, setFishLoading] = useState(false);
 
   const initGroupRef = useRef<FishGroup | null>(null);
-  if (!initGroupRef.current) initGroupRef.current = createFishGroup(initialQr);
+  if (!initGroupRef.current) {
+    const initSid = generateSessionId(routeTripParam || "SESSION", 0);
+    initGroupRef.current = createFishGroup(initialQr, initSid);
+  }
 
   const [groups, setGroups] = useState<FishGroup[]>(() => [initGroupRef.current!]);
   const [activeGroupId, setActiveGroupId] = useState<string>(() => initGroupRef.current!.id);
@@ -1406,7 +1234,6 @@ export default function CreateCatchLog() {
   const [locLoading, setLocLoading] = useState(false);
   const [locError, setLocError] = useState<string | null>(null);
 
-  // ✅ Full-screen pickers
   const [vesselPickerOpen, setVesselPickerOpen] = useState(false);
   const [tripPickerOpen, setTripPickerOpen] = useState(false);
   const [fishPickerOpen, setFishPickerOpen] = useState(false);
@@ -1422,13 +1249,12 @@ export default function CreateCatchLog() {
 
   const [imgPreviewUri, setImgPreviewUri] = useState<string | null>(null);
 
-  // ✅ Watermark compositor
   const wmViewRef = useRef<View | null>(null);
   const wmResolveRef = useRef<((uri: string) => void) | null>(null);
   const wmRejectRef = useRef<((e: any) => void) | null>(null);
   const [wmJob, setWmJob] = useState<WatermarkJob | null>(null);
   const [wmImgLoaded, setWmImgLoaded] = useState(false);
-  const [wmLayoutReady, setWmLayoutReady] = useState(false); // ✅ IMPORTANT
+  const [wmLayoutReady, setWmLayoutReady] = useState(false);
 
   const skipVesselResetRef = useRef(false);
 
@@ -1436,10 +1262,8 @@ export default function CreateCatchLog() {
     return new Promise<string>((resolve, reject) => {
       wmResolveRef.current = resolve;
       wmRejectRef.current = reject;
-
       setWmImgLoaded(false);
       setWmLayoutReady(false);
-
       const clean = (Array.isArray(lines) ? lines : []).filter(Boolean);
       setWmJob({
         srcUri,
@@ -1450,7 +1274,6 @@ export default function CreateCatchLog() {
     });
   };
 
-  // ✅ capture watermark after BOTH image load + layout ready
   useEffect(() => {
     if (!wmJob) return;
     if (!wmImgLoaded) return;
@@ -1463,15 +1286,8 @@ export default function CreateCatchLog() {
       try {
         const view = wmViewRef.current;
         if (!view) throw new Error("Watermark view not ready");
-
         await wait(60);
-
-        const outUri = await captureRef(view, {
-          format: "jpg",
-          quality: 0.9,
-          result: "tmpfile",
-        });
-
+        const outUri = await captureRef(view, { format: "jpg", quality: 0.9, result: "tmpfile" });
         if (!alive) return;
         wmResolveRef.current?.(String(outUri));
       } catch (e: any) {
@@ -1488,12 +1304,10 @@ export default function CreateCatchLog() {
       }
     })();
 
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [wmJob, wmImgLoaded, wmLayoutReady]);
 
-  // ✅ resolve user id
+  // resolve user id
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -1505,7 +1319,6 @@ export default function CreateCatchLog() {
           await AsyncStorage.setItem(LAST_USER_ID_KEY, String(meId));
           return;
         }
-
         const raw = await AsyncStorage.getItem(LAST_USER_ID_KEY);
         const lastId = Number(String(raw || "").trim());
         if (lastId && !Number.isNaN(lastId) && lastId > 0) {
@@ -1514,12 +1327,9 @@ export default function CreateCatchLog() {
         }
       } catch {}
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [meUser?.id]);
 
-  // camera session token touch
   useEffect(() => {
     const sub = AppState.addEventListener("change", async (state) => {
       if (state === "active") {
@@ -1530,86 +1340,54 @@ export default function CreateCatchLog() {
         } catch {}
       }
     });
-    return () => {
-      try {
-        sub.remove();
-      } catch {}
-    };
+    return () => { try { sub.remove(); } catch {} };
   }, []);
 
   useEffect(() => {
-    if (!torchWanted) {
-      setTorchArmed(false);
-      return;
-    }
+    if (!torchWanted) { setTorchArmed(false); return; }
     setTorchArmed(false);
     const id = setTimeout(() => setTorchArmed(true), 180);
     return () => clearTimeout(id);
   }, [torchWanted, step, activeGroupId, fishScanOpen, photoCamOpen]);
 
   useEffect(() => {
-    if (!photoTorchWanted) {
-      setPhotoTorchArmed(false);
-      return;
-    }
+    if (!photoTorchWanted) { setPhotoTorchArmed(false); return; }
     setPhotoTorchArmed(false);
     const id = setTimeout(() => setPhotoTorchArmed(true), 180);
     return () => clearTimeout(id);
   }, [photoTorchWanted, photoCamOpen]);
 
-  /* ---------------- load owner db id + owner code ---------------- */
+  /* ---------------- load owner ---------------- */
   const loadOwnerFromLogin = async (): Promise<{ id: number; code: string } | null> => {
     try {
       setOwnerLoading(true);
-
       const userId = Number(resolvedUserId);
       if (!userId || Number.isNaN(userId)) return null;
 
       const headers = await authHeaders();
       const url = `${API_BASE}/api/owner/fetch/${userId}`;
-
       const res = await fetch(url, { method: "GET", headers });
-
       const text = await res.text();
       let json: any = null;
-      try {
-        json = text ? JSON.parse(text) : null;
-      } catch {}
-
-      if (!res.ok) {
-        console.log("[OWNER FETCH FAIL]", res.status, url, text);
-        return null;
-      }
+      try { json = text ? JSON.parse(text) : null; } catch {}
+      if (!res.ok) return null;
 
       let src: any = json?.data ?? json;
       if (Array.isArray(src)) src = src[0];
-
       if (!src || typeof src !== "object") return null;
 
       const ownerDbId = Number(src?.id);
       if (!ownerDbId || Number.isNaN(ownerDbId)) return null;
 
       const ocDirect =
-        src?.owner_code ??
-        src?.ownerCode ??
-        src?.owner_code_text ??
-        src?.ownerCodeText ??
-        src?.owner_id_code ??
-        src?.ownerIdCode ??
-        src?.ownerid_code ??
-        src?.ownerid ??
-        src?.owner_code_id ??
-        src?.owner_registration_code ??
-        src?.code ??
-        src?.owner?.owner_code ??
-        src?.owner?.ownerCode ??
-        src?.owner_registration?.owner_code ??
-        src?.owner_registration?.ownerCode ??
-        "";
+        src?.owner_code ?? src?.ownerCode ?? src?.owner_code_text ?? src?.ownerCodeText ??
+        src?.owner_id_code ?? src?.ownerIdCode ?? src?.ownerid_code ?? src?.ownerid ??
+        src?.owner_code_id ?? src?.owner_registration_code ?? src?.code ??
+        src?.owner?.owner_code ?? src?.owner?.ownerCode ??
+        src?.owner_registration?.owner_code ?? src?.owner_registration?.ownerCode ?? "";
 
       const ocDeep = deepFindOwnCode(src);
       const ocFallback = padOwnFromDbId(ownerDbId);
-
       const oc = normalizeOwnerCode(String(ocDirect || ocDeep || ocFallback || ""));
 
       setOwnerId(ownerDbId);
@@ -1629,68 +1407,41 @@ export default function CreateCatchLog() {
   const ensureOwnerId = async (): Promise<number | null> => {
     const userId = Number(resolvedUserId);
     if (!userId || Number.isNaN(userId)) return null;
-
     if (ownerId && ownerId > 0) return ownerId;
-
     const cached = await readOwnerCacheByUser(userId);
-    if (cached) {
-      setOwnerId(cached);
-      return cached;
-    }
-
+    if (cached) { setOwnerId(cached); return cached; }
     if (!isOnline) return null;
     const r = await loadOwnerFromLogin();
     return r?.id ?? null;
   };
 
-  /* ---------------- fetch vessels for owner ---------------- */
+  /* ---------------- fetch vessels ---------------- */
   const fetchOwnerVessels = async (ownerDbId: number) => {
     setVesselLoading(true);
     try {
       const headers = await authHeaders();
-      const res = await fetch(`${API_BASE}/api/vessels/owner/${ownerDbId}`, {
-        method: "GET",
-        headers,
-      });
-
+      const res = await fetch(`${API_BASE}/api/vessels/owner/${ownerDbId}`, { method: "GET", headers });
       const text = await res.text();
       let json: any = null;
-      try {
-        json = text ? JSON.parse(text) : null;
-      } catch {}
-
-      if (!res.ok) {
-        setVessels([]);
-        return;
-      }
-
+      try { json = text ? JSON.parse(text) : null; } catch {}
+      if (!res.ok) { setVessels([]); return; }
       const list = normalizeList(json);
       setVessels(list);
-
       await writeVesselCache(ownerDbId, list);
     } finally {
       setVesselLoading(false);
     }
   };
 
-  /* ---------------- fetch approved trips for owner ---------------- */
+  /* ---------------- fetch trips ---------------- */
   const fetchTripsByStatus = async (owner_code: string, status: string) => {
     const headers = await authHeaders();
-    const url = `${API_BASE}/api/trip/owner/${encodeURIComponent(
-      owner_code,
-    )}/status/${encodeURIComponent(status)}`;
-
+    const url = `${API_BASE}/api/trip/owner/${encodeURIComponent(owner_code)}/status/${encodeURIComponent(status)}`;
     const res = await fetch(url, { method: "GET", headers });
     const text = await res.text();
     let json: any = null;
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch {}
-
-    if (!res.ok) {
-      return { ok: false, list: [] as any[] };
-    }
-
+    try { json = text ? JSON.parse(text) : null; } catch {}
+    if (!res.ok) return { ok: false, list: [] as any[] };
     const list = Array.isArray(json?.data) ? json.data : normalizeList(json);
     return { ok: true, list: Array.isArray(list) ? list : [] };
   };
@@ -1699,30 +1450,19 @@ export default function CreateCatchLog() {
     setTripLoading(true);
     try {
       const owner_code = normalizeOwnerCode(String(oc || ""));
-      if (!owner_code) {
-        setTrips([]);
-        return;
-      }
-
+      if (!owner_code) { setTrips([]); return; }
       const candidates = ["approved", "APPROVED", "Approved"];
-
       let final: any[] = [];
       for (const st of candidates) {
         const r = await fetchTripsByStatus(owner_code, st);
         if (!r.ok) continue;
-
         const approvedOnly = r.list.filter((x: any) => {
           const s = String(x?.approval_status ?? x?.approvalStatus ?? "").toLowerCase();
           return !s ? true : s === "approved";
         });
-
-        if (approvedOnly.length > 0) {
-          final = approvedOnly;
-          break;
-        }
+        if (approvedOnly.length > 0) { final = approvedOnly; break; }
         final = approvedOnly;
       }
-
       setTrips(final);
       await writeTripCache(owner_code, final);
     } finally {
@@ -1730,18 +1470,15 @@ export default function CreateCatchLog() {
     }
   };
 
-  /* ---------------- sync global network state locally + retrigger loads when online ---------------- */
   useEffect(() => {
     setIsOnline(globalNetworkState);
   }, [globalNetworkState]);
 
   useEffect(() => {
     if (!globalNetworkState || !meUser?.id) return;
-
     (async () => {
       const oid = await ensureOwnerId();
       if (oid) await fetchOwnerVessels(oid);
-
       const oc = normalizeOwnerCode(ownerCode);
       if (oc) await fetchApprovedTrips(oc);
     })();
@@ -1751,59 +1488,41 @@ export default function CreateCatchLog() {
   /* ---------------- fish load ---------------- */
   useEffect(() => {
     let alive = true;
-
     const loadFish = async () => {
       setFishLoading(true);
       const cached = await readFishCache();
       if (!alive) return;
-
       if (cached.length > 0) setFishTypes(cached);
-
       const net = await NetInfo.fetch();
       const online = !!net.isConnected && (net.isInternetReachable ?? true);
-      if (!online) {
-        if (alive) setFishLoading(false);
-        return;
-      }
-
+      if (!online) { if (alive) setFishLoading(false); return; }
       try {
         const fresh = await fetchFishTypesFromApi();
         if (!alive) return;
-        if (fresh.length > 0) {
-          setFishTypes(fresh);
-          await writeFishCache(fresh);
-        }
+        if (fresh.length > 0) { setFishTypes(fresh); await writeFishCache(fresh); }
       } finally {
         if (alive) setFishLoading(false);
       }
     };
-
     loadFish();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
   /* ---------------- online / auto flush queue ---------------- */
   useEffect(() => {
     let alive = true;
-
     const refreshCount = async () => {
       const c = await getQueueCount();
       if (alive) setPendingCount(c);
     };
-
     const doFlush = async () => {
       if (flushingRef.current) return;
       flushingRef.current = true;
       setSyncing(true);
-
       try {
         await refreshCount();
-
         const ensuredOwner = await ensureOwnerId();
         if (!ensuredOwner) return;
-
         await flushQueue(async (payload: any) => {
           const patched: any = { ...(payload || {}) };
           if (!patched.ownerId) patched.ownerId = ensuredOwner;
@@ -1815,13 +1534,9 @@ export default function CreateCatchLog() {
         flushingRef.current = false;
       }
     };
-
     refreshCount();
     if (globalNetworkState) doFlush();
-
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, resolvedUserId]);
 
@@ -1829,19 +1544,14 @@ export default function CreateCatchLog() {
   useEffect(() => {
     (async () => {
       if (!resolvedUserId) return;
-
       const net = await NetInfo.fetch();
       const online = !!net.isConnected && (net.isInternetReachable ?? true);
       setIsOnline(online);
-
       const userId = Number(resolvedUserId);
-
       const oid = globalNetworkState ? await ensureOwnerId() : await readOwnerCacheByUser(userId);
       if (!oid) return;
-
       const cachedV = await readVesselCache(oid);
       if (cachedV.length > 0) setVessels(cachedV);
-
       if (globalNetworkState) await fetchOwnerVessels(oid);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1850,81 +1560,52 @@ export default function CreateCatchLog() {
   /* ---------------- ownerCode -> trips ---------------- */
   useEffect(() => {
     (async () => {
-      if (!lockTripSelection) {
-        setTripId("");
-        setTripLabelText("");
-      }
-
+      if (!lockTripSelection) { setTripId(""); setTripLabelText(""); }
       const userId = Number(resolvedUserId);
-      if (!userId) {
-        setTrips([]);
-        return;
-      }
-
+      if (!userId) { setTrips([]); return; }
       let oc = normalizeOwnerCode(ownerCode);
-
       if (!oc) {
         const cached = await readOwnerCodeCacheByUser(userId);
         oc = normalizeOwnerCode(cached);
         if (oc) setOwnerCode(oc);
       }
-
       if (!oc && globalNetworkState) {
         const loaded = await loadOwnerFromLogin();
         oc = normalizeOwnerCode(String(loaded?.code || ""));
         if (oc) setOwnerCode(oc);
       }
-
-      if (!oc) {
-        setTrips([]);
-        return;
-      }
-
+      if (!oc) { setTrips([]); return; }
       const cachedTrips = await readTripCache(oc);
       if (cachedTrips.length > 0) setTrips(cachedTrips);
-
       if (globalNetworkState) await fetchApprovedTrips(oc);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline, resolvedUserId, ownerCode, lockTripSelection]);
 
-  /* ---------------- ✅ Route Prefill: set Trip + Vessel automatically ---------------- */
+  /* ---------------- Route Prefill ---------------- */
   useEffect(() => {
     let alive = true;
-
     const pickTripFrom = (list: any[]): any | null => {
       if (!Array.isArray(list) || list.length === 0) return null;
-
       if (routeTripDbId > 0) {
         const byDb = list.find((x: any) => Number(x?.id) === routeTripDbId);
         if (byDb) return byDb;
       }
-
       const wanted = String(routeTripParam || "").trim();
       if (wanted) {
         const byKey = list.find((x: any) => tripKey(x) === wanted);
         if (byKey) return byKey;
-
         const byTripId = list.find((x: any) =>
           String(x?.trip_id ?? x?.tripId ?? x?.trip_code ?? "").trim() === wanted,
         );
         if (byTripId) return byTripId;
       }
-
       return null;
     };
 
     const run = async () => {
-      if (!lockTripSelection) {
-        if (alive) setPrefillLoading(false);
-        return;
-      }
-
-      if (tripId && selectedVesselDbId) {
-        if (alive) setPrefillLoading(false);
-        return;
-      }
-
+      if (!lockTripSelection) { if (alive) setPrefillLoading(false); return; }
+      if (tripId && selectedVesselDbId) { if (alive) setPrefillLoading(false); return; }
       if (alive) setPrefillLoading(true);
 
       if (!tripId) {
@@ -1934,9 +1615,7 @@ export default function CreateCatchLog() {
       if (!tripLabelText) setTripLabelText(initialTripLabelPrefill || routeTripParam || "");
 
       let tr: any | null = tripObjFromParam || null;
-
       if (!tr) tr = pickTripFrom(trips);
-
       if (!tr) {
         const userId = Number(resolvedUserId);
         let oc = normalizeOwnerCode(ownerCode);
@@ -1947,7 +1626,6 @@ export default function CreateCatchLog() {
           if (tr && trips.length === 0 && alive) setTrips(cached);
         }
       }
-
       if (!alive) return;
 
       if (tr) {
@@ -1958,17 +1636,13 @@ export default function CreateCatchLog() {
         setTripLabelText(initialTripLabelPrefill || routeTripParam || "");
       }
 
-      const vDb =
-        (routeVesselDbId > 0 ? routeVesselDbId : null) ?? (tr ? tripVesselDbId(tr) : null);
-
+      const vDb = (routeVesselDbId > 0 ? routeVesselDbId : null) ?? (tr ? tripVesselDbId(tr) : null);
       const vCodeFromTrip = tr ? tripVesselCode(tr) : initialVesselCodePrefill;
 
       if (vDb && vDb > 0) {
         const foundV = vessels.find((v: any) => vesselDbId(v) === vDb) || null;
-
         skipVesselResetRef.current = true;
         setSelectedVesselDbId(vDb);
-
         if (foundV) {
           setSelectedVesselCode(vesselCode(foundV));
           setSelectedVesselLabel(vesselLabel(foundV));
@@ -1985,38 +1659,35 @@ export default function CreateCatchLog() {
     };
 
     run();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    lockTripSelection,
-    routeTripParam,
-    routeTripDbId,
-    routeVesselDbId,
-    trips,
-    vessels,
-    globalNetworkState,
-    resolvedUserId,
-    ownerCode,
-    tripId,
-    tripLabelText,
-    selectedVesselDbId,
-    selectedVesselCode,
+    lockTripSelection, routeTripParam, routeTripDbId, routeVesselDbId,
+    trips, vessels, globalNetworkState, resolvedUserId, ownerCode,
+    tripId, tripLabelText, selectedVesselDbId, selectedVesselCode,
   ]);
 
   useEffect(() => {
     if (!selectedVesselDbId) return;
     if (!vessels?.length) return;
-
     const foundV = vessels.find((v: any) => vesselDbId(v) === selectedVesselDbId) || null;
     if (!foundV) return;
-
     setSelectedVesselCode(vesselCode(foundV));
     setSelectedVesselLabel(vesselLabel(foundV));
   }, [selectedVesselDbId, vessels]);
 
-  /* ---------------- ✅ Sync status ---------------- */
+  /* ---------------- Refresh session IDs when tripId changes ---------------- */
+  useEffect(() => {
+    if (!tripId) return;
+    setGroups((prev) =>
+      prev.map((g, idx) => ({
+        ...g,
+        sessionId: generateSessionId(tripId, idx),
+      })),
+    );
+  }, [tripId]);
+
+  /* ---------------- Sync status ---------------- */
   const syncState: SyncState = useMemo(() => {
     if (syncing) return "SYNCING";
     if (isOnline && pendingCount === 0) return "SYNCED";
@@ -2073,18 +1744,14 @@ export default function CreateCatchLog() {
       }));
   }, [fishTypes]);
 
-  /* ---------------- when vessel changes -> reset trip selection + reset groups ---------------- */
+  /* ---------------- vessel change -> reset trip + groups ---------------- */
   useEffect(() => {
-    if (skipVesselResetRef.current) {
-      skipVesselResetRef.current = false;
-      return;
-    }
+    if (skipVesselResetRef.current) { skipVesselResetRef.current = false; return; }
     if (lockTripSelection) return;
-
     setTripId("");
     setTripLabelText("");
-
-    const fresh = createFishGroup(initialQr);
+    const sid = generateSessionId("SESSION", 0);
+    const fresh = createFishGroup(initialQr, sid);
     initGroupRef.current = fresh;
     setGroups([fresh]);
     setActiveGroupId(fresh.id);
@@ -2092,10 +1759,7 @@ export default function CreateCatchLog() {
   }, [selectedVesselDbId, lockTripSelection]);
 
   /* ---------------- Group derived helpers ---------------- */
-  const activeGroup = useMemo(() => groups.find((g) => g.id === activeGroupId) || null, [
-    groups,
-    activeGroupId,
-  ]);
+  const activeGroup = useMemo(() => groups.find((g) => g.id === activeGroupId) || null, [groups, activeGroupId]);
 
   const totalQrCount = useMemo(
     () => groups.reduce((sum, g) => sum + (g.scanned?.length || 0), 0),
@@ -2104,7 +1768,7 @@ export default function CreateCatchLog() {
 
   const allGroupsDone = useMemo(() => {
     if (!groups || groups.length === 0) return false;
-    return groups.every((g) => g.phase === "DONE" && !!g.fishId && (g.scanned?.length || 0) > 0);
+    return groups.every((g) => g.phase === "DONE");
   }, [groups]);
 
   /* ---------------- Group actions ---------------- */
@@ -2117,8 +1781,9 @@ export default function CreateCatchLog() {
       );
       return;
     }
-
-    const g = createFishGroup("");
+    const newIndex = groups.length;
+    const sid = generateSessionId(tripId || "SESSION", newIndex);
+    const g = createFishGroup("", sid);
     setGroups((prev) => [...prev, g]);
     setActiveGroupId(g.id);
   };
@@ -2133,13 +1798,15 @@ export default function CreateCatchLog() {
           setGroups((prev) => {
             const next = prev.filter((g) => g.id !== groupId);
             if (next.length === 0) {
-              const fresh = createFishGroup(initialQr);
+              const sid = generateSessionId(tripId || "SESSION", 0);
+              const fresh = createFishGroup(initialQr, sid);
               initGroupRef.current = fresh;
               setActiveGroupId(fresh.id);
               return [fresh];
             }
             if (activeGroupId === groupId) setActiveGroupId(next[0].id);
-            return next;
+            // Re-assign session IDs after removal
+            return next.map((g, idx) => ({ ...g, sessionId: generateSessionId(tripId || "SESSION", idx) }));
           });
         },
       },
@@ -2153,19 +1820,14 @@ export default function CreateCatchLog() {
   const addQrToGroup = (groupId: string, qr: string) => {
     const value = String(qr || "").trim();
     if (!value) return false;
-
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g;
         if (g.phase !== "SCAN") return g;
         if (g.scanned.some((x) => x.id === value)) return g;
-        return {
-          ...g,
-          scanned: [...g.scanned, { id: value, kind: classifyQr(value) }],
-        };
+        return { ...g, scanned: [...g.scanned, { id: value, kind: classifyQr(value) }] };
       }),
     );
-
     return true;
   };
 
@@ -2173,8 +1835,7 @@ export default function CreateCatchLog() {
     setGroups((prev) =>
       prev.map((g) => {
         if (g.id !== groupId) return g;
-        const next = g.scanned.filter((x) => x.id !== qrId);
-        return { ...g, scanned: next };
+        return { ...g, scanned: g.scanned.filter((x) => x.id !== qrId) };
       }),
     );
   };
@@ -2233,10 +1894,7 @@ export default function CreateCatchLog() {
 
   /* ---------------- Fish Tag Scan modal ---------------- */
   const openFishScan = () => {
-    if (!scanFishEnabled) {
-      Alert.alert("Sync Required", t.scanDisabledMsg);
-      return;
-    }
+    if (!scanFishEnabled) { Alert.alert("Sync Required", t.scanDisabledMsg); return; }
     setFishScanOpen(true);
   };
 
@@ -2244,92 +1902,58 @@ export default function CreateCatchLog() {
     const v = String(value || "").trim();
     if (!v) return;
     if (!fishScanCanScan) return;
-
     Vibration.vibrate(40);
-
     setFishScanCanScan(false);
     setFishScanOpen(false);
-
-    router.push({
-      pathname: "/catch-logs/details",
-      params: { crateId: v },
-    });
-
+    router.push({ pathname: "/catch-logs/details", params: { crateId: v } });
     setTimeout(() => setFishScanCanScan(true), 500);
   };
 
   /* ---------------- scan rules (SCAN stage only) ---------------- */
   const scanEnabledBase = !!selectedVesselDbId && !!tripId;
   const activeGroupCanScan =
-    !!activeGroup &&
-    activeGroup.phase === "SCAN" &&
-    !!activeGroup.fishId &&
-    scanEnabledBase &&
-    step === 2;
+    !!activeGroup && activeGroup.phase === "SCAN" && !!activeGroup.fishId && scanEnabledBase && step === 2;
 
   const onBarcodeScanned = (data: string) => {
     if (!activeGroupCanScan) return;
     if (!activeGroup) return;
-
     const value = String(data || "").trim();
     if (!value) return;
     if (!canScan) return;
-
     setCanScan(false);
     addQrToGroup(activeGroup.id, value);
-
     Vibration.vibrate(40);
-
     setTimeout(() => setCanScan(true), 350);
   };
 
   /* ---------------- location (step 2) ---------------- */
   const stopLocation = () => {
-    try {
-      locSubRef.current?.remove();
-    } catch {}
+    try { locSubRef.current?.remove(); } catch {}
     locSubRef.current = null;
   };
 
   const startLocation = async () => {
     setLocError(null);
     setLocLoading(true);
-
     try {
       const fg = await Location.requestForegroundPermissionsAsync();
-      if (fg.status !== "granted") {
-        setLiveLoc(null);
-        setLocError("Location permission denied");
-        return;
-      }
-
+      if (fg.status !== "granted") { setLiveLoc(null); setLocError("Location permission denied"); return; }
       const last = await Location.getLastKnownPositionAsync({});
       if (last?.coords) {
         setLiveLoc({
-          latitude: last.coords.latitude,
-          longitude: last.coords.longitude,
-          accuracy: last.coords.accuracy ?? null,
-          heading: last.coords.heading ?? null,
-          speed: last.coords.speed ?? null,
-          capturedAt: new Date(last.timestamp).toISOString(),
+          latitude: last.coords.latitude, longitude: last.coords.longitude,
+          accuracy: last.coords.accuracy ?? null, heading: last.coords.heading ?? null,
+          speed: last.coords.speed ?? null, capturedAt: new Date(last.timestamp).toISOString(),
         });
       }
-
       stopLocation();
       locSubRef.current = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.Balanced,
-          timeInterval: 2000,
-          distanceInterval: 2,
-        },
+        { accuracy: Location.Accuracy.Balanced, timeInterval: 2000, distanceInterval: 2 },
         (pos) => {
           const c = pos.coords;
           setLiveLoc({
-            latitude: c.latitude,
-            longitude: c.longitude,
-            accuracy: c.accuracy ?? null,
-            heading: c.heading ?? null,
-            speed: c.speed ?? null,
+            latitude: c.latitude, longitude: c.longitude, accuracy: c.accuracy ?? null,
+            heading: c.heading ?? null, speed: c.speed ?? null,
             capturedAt: new Date(pos.timestamp).toISOString(),
           });
         },
@@ -2345,18 +1969,11 @@ export default function CreateCatchLog() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      if (step !== 2) {
-        stopLocation();
-        return;
-      }
+      if (step !== 2) { stopLocation(); return; }
       await startLocation();
       if (!alive) stopLocation();
     })();
-
-    return () => {
-      alive = false;
-      if (step === 2) stopLocation();
-    };
+    return () => { alive = false; if (step === 2) stopLocation(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
@@ -2371,19 +1988,26 @@ export default function CreateCatchLog() {
     if (!validateStep1()) return false;
     if (!groups || groups.length === 0) return (Alert.alert(t.required, t.errNeedFishGroup), false);
 
+    // Fish is required
     const fishMissing = groups.some((g) => !g.fishId);
     if (fishMissing) return Alert.alert(t.required, t.errGroupFishMissing), false;
 
-    const qrMissing = groups.some((g) => (g.scanned?.length || 0) === 0);
-    if (qrMissing) return Alert.alert(t.required, t.errGroupQrMissing), false;
+    // Each group needs at least 1 QR OR 1 photo (not both required)
+    const noEvidenceMissing = groups.some(
+      (g) => (g.scanned?.length || 0) === 0 && (g.images?.length || 0) === 0,
+    );
+    if (noEvidenceMissing) {
+      Alert.alert(t.required, t.errGroupQrMissing);
+      return false;
+    }
 
     const notDone = groups.some((g) => g.phase !== "DONE");
     if (notDone) {
       Alert.alert(
         t.required,
         lang === "ta"
-          ? "ஒவ்வொரு Fish-உம் முடிக்க வேண்டும் (SCAN → (optional PHOTOS) → DONE)."
-          : "Finish each fish (SCAN → (optional PHOTOS) → DONE).",
+          ? "ஒவ்வொரு Fish-உம் முடிக்க வேண்டும் (DONE அழுத்தவும்)."
+          : "Finish each fish group (tap DONE).",
       );
       return false;
     }
@@ -2393,17 +2017,13 @@ export default function CreateCatchLog() {
 
   const nowPreview = useMemo(() => new Date(), [step, totalQrCount, tripId, selectedVesselDbId]);
 
-  /* ---------------- photo camera modal actions (group photos) ---------------- */
+  /* ---------------- photo camera ---------------- */
   const openPhotoCamera = async (groupId: string) => {
     try {
       if (!cameraPerm?.granted) {
         const res = await requestCameraPerm();
-        if (!res?.granted) {
-          Alert.alert("Permission", "Allow camera access to capture photos.");
-          return;
-        }
+        if (!res?.granted) { Alert.alert("Permission", "Allow camera access to capture photos."); return; }
       }
-
       await AsyncStorage.setItem(CAMERA_SESSION_KEY, "1");
       setPhotoTargetGroupId(groupId);
       setPhotoCamOpen(true);
@@ -2416,20 +2036,14 @@ export default function CreateCatchLog() {
     setPhotoCamOpen(false);
     setPhotoTargetGroupId(null);
     setTakingPhoto(false);
-    try {
-      await AsyncStorage.removeItem(CAMERA_SESSION_KEY);
-    } catch {}
+    try { await AsyncStorage.removeItem(CAMERA_SESSION_KEY); } catch {}
   };
 
   const takePhotoNow = async () => {
     if (!photoTargetGroupId) return;
     if (takingPhoto) return;
-
     const g = groups.find((x) => x.id === photoTargetGroupId);
-    if ((g?.images?.length || 0) >= 2) {
-      Alert.alert("Max", t.max2);
-      return;
-    }
+    if ((g?.images?.length || 0) >= 2) { Alert.alert("Max", t.max2); return; }
 
     setTakingPhoto(true);
     try {
@@ -2437,27 +2051,18 @@ export default function CreateCatchLog() {
       if (!ref?.takePictureAsync) throw new Error("Camera not ready");
 
       const now = new Date();
-
-      const pic = await ref.takePictureAsync({
-        quality: 0.85,
-        skipProcessing: true,
-      });
-
+      const pic = await ref.takePictureAsync({ quality: 0.85, skipProcessing: true });
       const rawUri = String(pic?.uri || "");
       if (!rawUri) throw new Error("No photo uri");
 
       let w = Number((pic as any)?.width || 0);
       let h = Number((pic as any)?.height || 0);
-      if (!w || !h) {
-        w = 1080;
-        h = 1920;
-      }
+      if (!w || !h) { w = 1080; h = 1920; }
       const MAX_SIDE = 1280;
       const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
       const outW = Math.max(480, Math.round(w * scale));
       const outH = Math.max(480, Math.round(h * scale));
 
-      // ✅ Build watermark lines (TOP-RIGHT): RootVerse + OwnerID + VesselName + DateTime + Location
       let ownerNumeric = Number(ownerId || 0);
       if (!ownerNumeric && resolvedUserId) {
         ownerNumeric = (await readOwnerCacheByUser(Number(resolvedUserId))) || 0;
@@ -2467,6 +2072,8 @@ export default function CreateCatchLog() {
         selectedVesselDbId && vessels?.length
           ? vessels.find((v: any) => vesselDbId(v) === selectedVesselDbId)
           : null;
+
+      const rvCode = String(selectedVesselCode || "").trim();
 
       const fromLabel = (() => {
         const parts = String(selectedVesselLabel || "").split("•");
@@ -2479,16 +2086,21 @@ export default function CreateCatchLog() {
         fromLabel ||
         (selectedVesselDbId ? `ID ${selectedVesselDbId}` : "");
 
+      // Find the group being photographed to get session ID
+      const targetGroup = groups.find((grp) => grp.id === photoTargetGroupId);
+      const sessionLabel = targetGroup?.sessionId || generateSessionId(tripId, 0);
+
+      // Updated watermark: Vessel ID, Trip Code, Session ID, DateTime, GPS
       const lines = [
         "RootVerse",
-        ownerNumeric ? `Owner ID: ${ownerNumeric}` : "Owner ID: —",
-        `Vessel: ${vName || "—"}`,
-        `Date/Time: ${fmtDateTime(now)}`,
+        `Vessel: ${rvCode || vName || "—"}`,
+        `Trip: ${tripId || "—"}`,
+        `Session: ${sessionLabel}`,
+        `Time: ${fmtDateTime(now)} UTC`,
         locText(liveLoc),
       ];
 
       let finalUri = rawUri;
-
       try {
         finalUri = await watermarkAsync(rawUri, outW, outH, lines);
       } catch (e: any) {
@@ -2515,7 +2127,6 @@ export default function CreateCatchLog() {
     }
 
     const now = new Date();
-
     const userId = Number(resolvedUserId);
     let ownerFinal: number | null = ownerId || (userId ? await readOwnerCacheByUser(userId) : null);
 
@@ -2523,7 +2134,6 @@ export default function CreateCatchLog() {
       const loaded = await loadOwnerFromLogin();
       ownerFinal = loaded?.id ?? null;
     }
-
     if (isOnline && !ownerFinal) return Alert.alert("Owner", "owner_id (numeric) not loaded");
 
     const foundVessel =
@@ -2538,13 +2148,10 @@ export default function CreateCatchLog() {
 
     const baseCommon: any = {
       tripId,
-
       vesselId: selectedVesselDbId,
       vessel_id: selectedVesselDbId,
-
       rvVesselId: rvCode,
       rvVesselCode: rvCode,
-
       ownerId: isOnline ? ownerFinal! : ownerFinal || 0,
       weightKg: 0,
       catchDate: fmtDate(now),
@@ -2554,14 +2161,32 @@ export default function CreateCatchLog() {
 
     const payloads: any[] = [];
     for (const g of groups) {
-      for (const q of g.scanned) {
+      const sessionId = g.sessionId || generateSessionId(tripId, groups.indexOf(g));
+
+      if ((g.scanned?.length || 0) > 0) {
+        // Normal path: one payload per QR
+        for (const q of g.scanned) {
+          payloads.push({
+            ...baseCommon,
+            catchSessionId: sessionId,
+            fishId: g.fishId!,
+            fishName: g.fishName || undefined,
+            linkedCrateId: q.id,
+            qrKind: q.kind,
+            images: g.images || [],
+          });
+        }
+      } else {
+        // Image-proof only path: no QR, one payload per group
         payloads.push({
           ...baseCommon,
+          catchSessionId: sessionId,
           fishId: g.fishId!,
           fishName: g.fishName || undefined,
-          linkedCrateId: q.id,
-          qrKind: q.kind,
+          linkedCrateId: null,
+          qrKind: null,
           images: g.images || [],
+          imageProofOnly: true,
         });
       }
     }
@@ -2570,7 +2195,6 @@ export default function CreateCatchLog() {
       for (const p of payloads) await enqueueCatchLog(p as any);
       const c = await getQueueCount();
       setPendingCount(c);
-
       Alert.alert(t.saved, t.offlineSaved);
       router.replace({
         pathname: "/catch-logs/details",
@@ -2584,39 +2208,26 @@ export default function CreateCatchLog() {
 
     for (let i = 0; i < payloads.length; i++) {
       const p = payloads[i];
-
       try {
         await dispatch(submitCatchLog(p as any)).unwrap();
         ok++;
       } catch (e: any) {
         const msg = String(e?.message || e);
         const m = msg.toLowerCase();
-
         const networkish =
-          m.includes("network") ||
-          m.includes("failed to fetch") ||
-          m.includes("timeout") ||
-          m.includes("socket") ||
-          m.includes("econn") ||
-          m.includes("offline");
+          m.includes("network") || m.includes("failed to fetch") || m.includes("timeout") ||
+          m.includes("socket") || m.includes("econn") || m.includes("offline");
 
         if (networkish) {
           const remaining = payloads.slice(i);
           for (const rp of remaining) await enqueueCatchLog(rp as any);
           queued += remaining.length;
-
           const c = await getQueueCount();
           setPendingCount(c);
-
           Alert.alert(t.saved, `${t.offlineSaved}\n\nUploaded: ${ok}\nQueued (offline): ${queued}`);
-
-          router.replace({
-            pathname: "/catch-logs/details",
-            params: { crateId: payloads[0]?.linkedCrateId || "" },
-          });
+          router.replace({ pathname: "/catch-logs/details", params: { crateId: payloads[0]?.linkedCrateId || "" } });
           return;
         }
-
         Alert.alert("submitCatchLog failed", msg);
         return;
       }
@@ -2624,13 +2235,8 @@ export default function CreateCatchLog() {
 
     const c = await getQueueCount();
     setPendingCount(c);
-
     Alert.alert(ok > 0 ? t.saved : "Done", `Uploaded: ${ok}\nQueued (offline): ${queued}`);
-
-    router.replace({
-      pathname: "/catch-logs/details",
-      params: { crateId: payloads[0]?.linkedCrateId || "" },
-    });
+    router.replace({ pathname: "/catch-logs/details", params: { crateId: payloads[0]?.linkedCrateId || "" } });
   };
 
   /* ---------------- UI helpers ---------------- */
@@ -2638,15 +2244,13 @@ export default function CreateCatchLog() {
   const photoTorchEnabled = photoTorchWanted && photoTorchArmed;
 
   const clearAll = () => {
-    const fresh = createFishGroup(initialQr);
-    initGroupRef.current = fresh;
-    setGroups([fresh]);
-    setActiveGroupId(fresh.id);
+    const sid = generateSessionId(tripId || "SESSION", 0);
+    const base = createFishGroup(initialQr, sid);
+    initGroupRef.current = base;
+    setGroups([base]);
+    setActiveGroupId(base.id);
 
-    if (lockTripSelection) {
-      setStep(2);
-      return;
-    }
+    if (lockTripSelection) { setStep(2); return; }
 
     setStep(1);
     setSelectedVesselDbId(null);
@@ -2657,73 +2261,39 @@ export default function CreateCatchLog() {
   };
 
   const goNext = () => {
-    if (step === 1) {
-      if (!validateStep1()) return;
-      setStep(2);
-      return;
-    }
-    if (step === 2) {
-      if (!validateStep2()) return;
-      setStep(3);
-      return;
-    }
-    if (step === 3) {
-      setStep(4);
-      return;
-    }
+    if (step === 1) { if (!validateStep1()) return; setStep(2); return; }
+    if (step === 2) { if (!validateStep2()) return; setStep(3); return; }
+    if (step === 3) { setStep(4); return; }
   };
 
   const goBack = () => {
     if (step === 1) return;
-
-    if (step === 2 && lockTripSelection) {
-      router.back();
-      return;
-    }
-
+    if (step === 2 && lockTripSelection) { router.back(); return; }
     setStep((s) => (s === 2 ? 1 : s === 3 ? 2 : 3));
   };
 
-  const phaseLabel = (p: GroupPhase) =>
-    p === "SCAN" ? t.phaseScan : p === "PHOTO" ? t.phasePhoto : t.phaseDone;
+  const phaseLabel = (p: GroupPhase) => {
+    if (p === "IMAGE_PROOF") return lang === "ta" ? "📷 PHOTO" : "📷 PHOTO";
+    if (p === "SCAN") return t.phaseScan;
+    if (p === "PHOTO") return t.phasePhoto;
+    return t.phaseDone;
+  };
 
-    /* ---------------- UI (SIMPLIFIED - ICON FIRST) ---------------- */
-
+  /* ---------------- SUB COMPONENTS ---------------- */
   function IconPill({
-    icon,
-    color,
-    bg,
-    text,
-  }: {
-    icon: any;
-    color: string;
-    bg: string;
-    text?: string;
-  }) {
+    icon, color, bg, text,
+  }: { icon: any; color: string; bg: string; text?: string }) {
     return (
       <View
         style={{
-          flexDirection: "row",
-          alignItems: "center",
-          paddingHorizontal: 12,
-          paddingVertical: 10,
-          borderRadius: 999,
-          backgroundColor: bg,
-          borderWidth: 1,
-          borderColor: "rgba(0,0,0,0.06)",
+          flexDirection: "row", alignItems: "center", paddingHorizontal: 12,
+          paddingVertical: 10, borderRadius: 999, backgroundColor: bg,
+          borderWidth: 1, borderColor: "rgba(0,0,0,0.06)",
         }}
       >
         <Ionicons name={icon} size={18} color={color} />
         {text ? (
-          <Text
-            style={{
-              marginLeft: 8,
-              fontWeight: "900",
-              color: "#111827",
-              fontSize: 12,
-            }}
-            numberOfLines={1}
-          >
+          <Text style={{ marginLeft: 8, fontWeight: "900", color: "#111827", fontSize: 12 }} numberOfLines={1}>
             {text}
           </Text>
         ) : null}
@@ -2731,29 +2301,15 @@ export default function CreateCatchLog() {
     );
   }
 
-  function StepDot({
-    active,
-    done,
-    icon,
-  }: {
-    active: boolean;
-    done: boolean;
-    icon: any;
-  }) {
+  function StepDot({ active, done, icon }: { active: boolean; done: boolean; icon: any }) {
     const bg = done ? "#ecfdf5" : active ? "#e0f2fe" : "#f3f4f6";
     const b = done ? "#10b981" : active ? "#0ea5e9" : "#cbd5e1";
     const c = done ? "#065f46" : active ? "#075985" : "#64748b";
     return (
       <View
         style={{
-          width: 46,
-          height: 46,
-          borderRadius: 18,
-          backgroundColor: bg,
-          borderWidth: 2,
-          borderColor: b,
-          alignItems: "center",
-          justifyContent: "center",
+          width: 46, height: 46, borderRadius: 18, backgroundColor: bg,
+          borderWidth: 2, borderColor: b, alignItems: "center", justifyContent: "center",
         }}
       >
         <Ionicons name={icon} size={22} color={c} />
@@ -2762,23 +2318,10 @@ export default function CreateCatchLog() {
   }
 
   function BigTile({
-    icon,
-    title,
-    subtitle,
-    onPress,
-    disabled,
-    rightIcon,
-    color,
-    bg,
+    icon, title, subtitle, onPress, disabled, rightIcon, color, bg,
   }: {
-    icon: any;
-    title: string;
-    subtitle?: string;
-    onPress: () => void;
-    disabled?: boolean;
-    rightIcon?: any;
-    color?: string;
-    bg?: string;
+    icon: any; title: string; subtitle?: string; onPress: () => void;
+    disabled?: boolean; rightIcon?: any; color?: string; bg?: string;
   }) {
     const _bg = bg || (disabled ? "#f3f4f6" : "white");
     const _opacity = disabled ? 0.55 : 1;
@@ -2795,44 +2338,25 @@ export default function CreateCatchLog() {
         <View style={{ flexDirection: "row", alignItems: "center" }}>
           <View
             style={{
-              width: 60,
-              height: 60,
-              borderRadius: 22,
-              backgroundColor: _iconBg,
-              alignItems: "center",
-              justifyContent: "center",
-              marginRight: 14,
+              width: 60, height: 60, borderRadius: 22, backgroundColor: _iconBg,
+              alignItems: "center", justifyContent: "center", marginRight: 14,
             }}
           >
             <Ionicons name={icon} size={30} color={_iconColor} />
           </View>
-
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text className={`text-[18px] font-extrabold ${UI.text}`} numberOfLines={1}>
-              {title}
-            </Text>
+            <Text className={`text-[18px] font-extrabold ${UI.text}`} numberOfLines={1}>{title}</Text>
             {subtitle ? (
-              <Text className={`mt-1 text-[12px] font-semibold ${UI.muted}`} numberOfLines={2}>
-                {subtitle}
-              </Text>
+              <Text className={`mt-1 text-[12px] font-semibold ${UI.muted}`} numberOfLines={2}>{subtitle}</Text>
             ) : null}
           </View>
-
           <Ionicons name={rightIcon || "chevron-forward"} size={26} color="#111827" />
         </View>
       </Pressable>
     );
   }
 
-  function QRChip({
-    id,
-    kind,
-    onRemove,
-  }: {
-    id: string;
-    kind: string;
-    onRemove: () => void;
-  }) {
+  function QRChip({ id, kind, onRemove }: { id: string; kind: string; onRemove: () => void }) {
     const k = String(kind || "").toUpperCase();
     const badge =
       k === "FISH" ? "fish-outline" : k === "CRATE" ? "cube-outline" : k === "VESSEL" ? "boat-outline" : "help-circle-outline";
@@ -2840,40 +2364,22 @@ export default function CreateCatchLog() {
     return (
       <View
         style={{
-          flexDirection: "row",
-          alignItems: "center",
-          paddingHorizontal: 12,
-          paddingVertical: 10,
-          borderRadius: 18,
-          borderWidth: 1,
-          borderColor: "#e5e7eb",
-          backgroundColor: "white",
-          marginBottom: 10,
+          flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10,
+          borderRadius: 18, borderWidth: 1, borderColor: "#e5e7eb", backgroundColor: "white", marginBottom: 10,
         }}
       >
         <View
           style={{
-            width: 34,
-            height: 34,
-            borderRadius: 14,
-            backgroundColor: "#f3f4f6",
-            alignItems: "center",
-            justifyContent: "center",
-            marginRight: 10,
+            width: 34, height: 34, borderRadius: 14, backgroundColor: "#f3f4f6",
+            alignItems: "center", justifyContent: "center", marginRight: 10,
           }}
         >
           <Ionicons name={badge as any} size={18} color="#111827" />
         </View>
-
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text className={`text-[14px] font-extrabold ${UI.text}`} numberOfLines={1}>
-            {id}
-          </Text>
-          <Text className={`text-[11px] font-semibold ${UI.muted}`} numberOfLines={1}>
-            {k}
-          </Text>
+          <Text className={`text-[14px] font-extrabold ${UI.text}`} numberOfLines={1}>{id}</Text>
+          <Text className={`text-[11px] font-semibold ${UI.muted}`} numberOfLines={1}>{k}</Text>
         </View>
-
         <Pressable onPress={onRemove} style={{ padding: 6 }} className="active:opacity-80">
           <Ionicons name="close-circle" size={26} color="#dc2626" />
         </Pressable>
@@ -2881,23 +2387,20 @@ export default function CreateCatchLog() {
     );
   }
 
-  const stepIcon = (n: 1 | 2 | 3 | 4) => {
-    if (n === 1) return "boat-outline";
-    if (n === 2) return "qr-code-outline";
-    if (n === 3) return "list-outline";
-    return "cloud-upload-outline";
-  };
-
   const stepTitle = (n: 1 | 2 | 3 | 4) => {
     if (n === 1) return lang === "ta" ? "படகு + Trip" : "Vessel + Trip";
-    if (n === 2) return lang === "ta" ? "மீன் + QR" : "Fish + QR";
+    if (n === 2) return lang === "ta" ? "மீன் + Photo + QR" : "Fish + Photo + QR";
     if (n === 3) return lang === "ta" ? "சரிபார்" : "Review";
     return lang === "ta" ? "சேமி" : "Save";
   };
 
+  /* ================================================================
+     RENDER
+  ================================================================ */
   return (
     <SafeAreaView className={`flex-1 ${UI.bg}`}>
-      {/* ✅ Photo Preview Modal */}
+
+      {/* ── Photo Preview Modal ── */}
       <Modal
         visible={!!imgPreviewUri}
         transparent
@@ -2918,7 +2421,6 @@ export default function CreateCatchLog() {
                 <Text className="text-white font-extrabold">{t.close}</Text>
               </Pressable>
             </View>
-
             <View style={{ height: 520, backgroundColor: "black" }}>
               {imgPreviewUri ? (
                 <Image source={{ uri: imgPreviewUri }} style={{ width: "100%", height: "100%" }} resizeMode="contain" />
@@ -2928,7 +2430,7 @@ export default function CreateCatchLog() {
         </View>
       </Modal>
 
-      {/* ✅ Fish Tag Scan Modal */}
+      {/* ── Fish Tag Scan Modal ── */}
       <Modal
         visible={fishScanOpen}
         transparent
@@ -2944,7 +2446,6 @@ export default function CreateCatchLog() {
                   {t.scanModalTitle}
                 </Text>
               </View>
-
               <Pressable
                 onPress={() => setFishScanOpen(false)}
                 className={`rounded-full border ${UI.border} bg-[#f3f4f6] px-4 py-2 active:opacity-80`}
@@ -2952,7 +2453,6 @@ export default function CreateCatchLog() {
                 <Ionicons name="close" size={18} color="#111827" />
               </Pressable>
             </View>
-
             <View className={`mt-3 overflow-hidden rounded-2xl border ${UI.border} bg-black`}>
               {!cameraPerm?.granted ? (
                 <View className="p-4">
@@ -2976,7 +2476,6 @@ export default function CreateCatchLog() {
                 </View>
               )}
             </View>
-
             <View style={{ height: 10 }} />
             <Text className={`text-xs ${UI.muted}`}>
               {lang === "ta" ? "QR-ஐ காட்டுங்கள். Auto scan ஆகும்." : "Show QR. It scans automatically."}
@@ -2985,7 +2484,7 @@ export default function CreateCatchLog() {
         </View>
       </Modal>
 
-      {/* ✅ Photo Camera Modal */}
+      {/* ── Photo Camera Modal ── */}
       <Modal visible={photoCamOpen} transparent animationType="fade" onRequestClose={closePhotoCamera}>
         <View className="flex-1 bg-black/70 justify-center px-3">
           <View className="bg-white rounded-3xl p-4">
@@ -2996,18 +2495,12 @@ export default function CreateCatchLog() {
                   {t.photoCamTitle}
                 </Text>
               </View>
-
               <Pressable
                 onPress={() => setPhotoTorchWanted((p) => !p)}
                 className={`mr-2 rounded-full border ${UI.border} bg-[#f3f4f6] px-3 py-2 active:opacity-80`}
               >
-                <Ionicons
-                  name={photoTorchWanted ? "flashlight" : "flashlight-outline"}
-                  size={18}
-                  color="#111827"
-                />
+                <Ionicons name={photoTorchWanted ? "flashlight" : "flashlight-outline"} size={18} color="#111827" />
               </Pressable>
-
               <Pressable
                 onPress={closePhotoCamera}
                 className={`rounded-full border ${UI.border} bg-[#f3f4f6] px-3 py-2 active:opacity-80`}
@@ -3015,7 +2508,6 @@ export default function CreateCatchLog() {
                 <Ionicons name="close" size={18} color="#111827" />
               </Pressable>
             </View>
-
             <View className={`mt-3 overflow-hidden rounded-2xl border ${UI.border} bg-black`}>
               {!cameraPerm?.granted ? (
                 <View className="p-4">
@@ -3030,7 +2522,6 @@ export default function CreateCatchLog() {
                 </View>
               )}
             </View>
-
             <View className="mt-3">
               <PrimaryBtn
                 label={takingPhoto ? (lang === "ta" ? "எடுக்கிறது..." : "Capturing...") : t.takePhoto}
@@ -3045,26 +2536,25 @@ export default function CreateCatchLog() {
         </View>
       </Modal>
 
-      {/* CONTENT */}
+      {/* ================================================================
+          MAIN SCROLL CONTENT
+      ================================================================ */}
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingBottom: 18 + (insets.bottom || 0) + 110 }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* TOP BAR - ICON FIRST */}
+        {/* ── TOP BAR ── */}
         <View className="px-4 pt-3">
           <Card className="p-4">
             <View style={{ flexDirection: "row", alignItems: "center" }}>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text className={`text-2xl font-extrabold ${UI.text}`} numberOfLines={1}>
-                  {t.title}
-                </Text>
+                <Text className={`text-2xl font-extrabold ${UI.text}`} numberOfLines={1}>{t.title}</Text>
                 <Text className={`mt-1 text-sm font-semibold ${UI.muted}`} numberOfLines={1}>
                   {stepTitle(step)}
                 </Text>
               </View>
-
               <Pressable
                 onPress={() => setLang((p) => (p === "ta" ? "en" : "ta"))}
                 className={`rounded-full border ${UI.border} bg-white px-3 py-2 active:opacity-80`}
@@ -3102,17 +2592,12 @@ export default function CreateCatchLog() {
                 bg={syncState === "SYNCED" ? "#ecfdf5" : syncState === "SYNCING" ? "#e0f2fe" : "#fffbeb"}
                 text={syncText}
               />
-              <IconPill
-                icon="layers-outline"
-                color="#111827"
-                bg="#f3f4f6"
-                text={`${pendingCount}`}
-              />
+              <IconPill icon="layers-outline" color="#111827" bg="#f3f4f6" text={`${pendingCount}`} />
             </View>
 
             <View style={{ height: 12 }} />
 
-            {/* Big quick buttons */}
+            {/* Quick action buttons */}
             <View style={{ flexDirection: "row", gap: 10 }}>
               <View style={{ flex: 1 }}>
                 <Pressable
@@ -3128,7 +2613,6 @@ export default function CreateCatchLog() {
                   </View>
                 </Pressable>
               </View>
-
               <View style={{ flex: 1 }}>
                 <Pressable
                   onPress={openFishScan}
@@ -3138,9 +2622,7 @@ export default function CreateCatchLog() {
                 >
                   <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center" }}>
                     <Ionicons name="qr-code-outline" size={20} color="white" />
-                    <Text className="ml-2 text-white font-extrabold" numberOfLines={1}>
-                      {lang === "ta" ? "Scan" : "Scan"}
-                    </Text>
+                    <Text className="ml-2 text-white font-extrabold" numberOfLines={1}>Scan</Text>
                   </View>
                 </Pressable>
               </View>
@@ -3151,7 +2633,9 @@ export default function CreateCatchLog() {
           </Card>
         </View>
 
-        {/* STEP 1 - BIG ICON TILES */}
+        {/* ================================================================
+            STEP 1 — Vessel + Trip
+        ================================================================ */}
         {step === 1 ? (
           <View className="px-4 mt-4">
             <Card className="p-4">
@@ -3195,9 +2679,12 @@ export default function CreateCatchLog() {
           </View>
         ) : null}
 
-        {/* STEP 2 - ONE CLEAR AREA: PICK FISH → SCAN → DONE → PHOTO OPTIONAL */}
+        {/* ================================================================
+            STEP 2 — Fish + Photo + QR
+        ================================================================ */}
         {step === 2 ? (
           <View className="px-4 mt-4">
+
             {/* Locked Trip info */}
             {lockTripSelection ? (
               <Card className="p-4">
@@ -3208,12 +2695,8 @@ export default function CreateCatchLog() {
                       {lang === "ta" ? "Trip lock" : "Trip locked"}
                     </Text>
                   </View>
-
                   <Pressable
-                    onPress={() => {
-                      setLockTripSelection(false);
-                      setStep(1);
-                    }}
+                    onPress={() => { setLockTripSelection(false); setStep(1); }}
                     className="rounded-full px-4 py-2 active:opacity-80"
                     style={{ backgroundColor: "#fee2e2" }}
                   >
@@ -3224,18 +2707,19 @@ export default function CreateCatchLog() {
                 <View style={{ height: 12 }} />
 
                 <View className="rounded-2xl border border-[#e5e7eb] bg-[#f9fafb] px-4 py-3">
-                  <Text className={`text-xs font-extrabold ${UI.muted}`}>{lang === "ta" ? "Vessel" : "Vessel"}</Text>
+                  <Text className={`text-xs font-extrabold ${UI.muted}`}>
+                    {lang === "ta" ? "Vessel" : "Vessel"}
+                  </Text>
                   <Text className={`mt-1 text-base font-extrabold ${UI.text}`} numberOfLines={2}>
                     {selectedVesselLabel || (prefillLoading ? t.lockedLoading : "—")}
                   </Text>
-
                   <View style={{ height: 10 }} />
-
-                  <Text className={`text-xs font-extrabold ${UI.muted}`}>{lang === "ta" ? "Trip" : "Trip"}</Text>
+                  <Text className={`text-xs font-extrabold ${UI.muted}`}>
+                    {lang === "ta" ? "Trip" : "Trip"}
+                  </Text>
                   <Text className={`mt-1 text-base font-extrabold ${UI.text}`} numberOfLines={2}>
                     {tripLabelText || routeTripParam || (prefillLoading ? t.lockedLoading : "—")}
                   </Text>
-
                   {!selectedVesselDbId || !tripId ? (
                     <Text className="mt-3 text-sm font-extrabold" style={{ color: UI.warn }}>
                       {prefillLoading ? t.lockedLoading : t.lockedMissing}
@@ -3247,11 +2731,7 @@ export default function CreateCatchLog() {
               <Card className="p-4">
                 <View style={{ flexDirection: "row", gap: 10 }}>
                   <View style={{ flex: 1 }}>
-                    <GhostBtn
-                      label={lang === "ta" ? "Vessel" : "Vessel"}
-                      onPress={() => setVesselPickerOpen(true)}
-                      icon="boat-outline"
-                    />
+                    <GhostBtn label={lang === "ta" ? "Vessel" : "Vessel"} onPress={() => setVesselPickerOpen(true)} icon="boat-outline" />
                   </View>
                   <View style={{ flex: 1 }}>
                     <GhostBtn
@@ -3262,7 +2742,6 @@ export default function CreateCatchLog() {
                     />
                   </View>
                 </View>
-
                 <View style={{ height: 10 }} />
                 <Text className={`text-xs ${UI.muted}`} numberOfLines={2}>
                   {selectedVesselLabel ? `🛥 ${selectedVesselLabel}` : "🛥 —"}{"\n"}
@@ -3273,7 +2752,7 @@ export default function CreateCatchLog() {
 
             <View style={{ height: 12 }} />
 
-            {/* Groups - simplified */}
+            {/* Groups panel */}
             <Card className="p-4">
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                 <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -3282,7 +2761,6 @@ export default function CreateCatchLog() {
                     {lang === "ta" ? "குழுக்கள்" : "Groups"}
                   </Text>
                 </View>
-
                 <Pressable
                   onPress={addGroup}
                   className="rounded-full px-4 py-2 active:opacity-80"
@@ -3294,25 +2772,26 @@ export default function CreateCatchLog() {
 
               <View style={{ height: 10 }} />
 
-              {/* Active group selector - big buttons */}
+              {/* Group tab selector */}
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 <View style={{ flexDirection: "row", gap: 10, paddingVertical: 4 }}>
                   {groups.map((g, idx) => {
                     const active = g.id === activeGroupId;
                     const bg = active ? "#e0f2fe" : "white";
                     const br = active ? "#93c5fd" : "#e5e7eb";
+                    const phaseColor =
+                      g.phase === "DONE"
+                        ? UI.success
+                        : g.phase === "PHOTO" || g.phase === "IMAGE_PROOF"
+                        ? UI.accent
+                        : UI.warn;
                     return (
                       <Pressable
                         key={g.id}
                         onPress={() => setActiveGroupId(g.id)}
                         style={{
-                          paddingHorizontal: 14,
-                          paddingVertical: 12,
-                          borderRadius: 16,
-                          borderWidth: 2,
-                          borderColor: br,
-                          backgroundColor: bg,
-                          minWidth: 120,
+                          paddingHorizontal: 14, paddingVertical: 12, borderRadius: 16,
+                          borderWidth: 2, borderColor: br, backgroundColor: bg, minWidth: 120,
                         }}
                         className="active:opacity-90"
                       >
@@ -3322,7 +2801,7 @@ export default function CreateCatchLog() {
                         <Text className={`mt-1 text-[11px] font-semibold ${UI.muted}`} numberOfLines={1}>
                           QR {g.scanned?.length || 0} • 📷 {g.images?.length || 0}
                         </Text>
-                        <Text className={`mt-1 text-[11px] font-extrabold`} style={{ color: g.phase === "DONE" ? UI.success : g.phase === "PHOTO" ? UI.accent : UI.warn }}>
+                        <Text className="mt-1 text-[11px] font-extrabold" style={{ color: phaseColor }}>
                           {phaseLabel(g.phase)}
                         </Text>
                       </Pressable>
@@ -3333,14 +2812,14 @@ export default function CreateCatchLog() {
 
               <View style={{ height: 12 }} />
 
-              {/* Current group main actions - very clear */}
+              {/* Active group content */}
               {activeGroup ? (
                 <View>
-                  {/* 1) Pick fish */}
+                  {/* Pick Fish (always visible) */}
                   <BigTile
                     icon="fish-outline"
                     title={activeGroup.fishName || (lang === "ta" ? "மீன் தேர்வு" : "Pick Fish")}
-                    subtitle={lang === "ta" ? "மீன் படத்தை தேர்வு செய்யுங்கள்" : "Choose fish picture"}
+                    subtitle={lang === "ta" ? "மீன் படத்தை தேர்வு செய்யுங்கள்" : "Choose fish species"}
                     onPress={() => {
                       setFishPickGroupId(activeGroup.id);
                       setFishPickerOpen(true);
@@ -3349,24 +2828,178 @@ export default function CreateCatchLog() {
 
                   <View style={{ height: 12 }} />
 
-                  {/* 2) Scan box */}
+                  {/* ═══ IMAGE_PROOF phase ═══ */}
+                  {activeGroup.phase === "IMAGE_PROOF" ? (
+                    <Card className="p-4">
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                        <View style={{ flexDirection: "row", alignItems: "center" }}>
+                          <Ionicons name="camera-outline" size={20} color="#111827" />
+                          <Text className={`ml-2 text-base font-extrabold ${UI.text}`}>
+                            {lang === "ta" ? "புகைப்படம் எடு" : "Capture Photo Proof"}
+                          </Text>
+                        </View>
+                        <IconPill
+                          icon="camera-outline"
+                          color="#111827"
+                          bg="#f3f4f6"
+                          text={`${activeGroup.images?.length || 0}/2`}
+                        />
+                      </View>
+
+                      {/* Session ID badge */}
+                      <View style={{ marginTop: 10, backgroundColor: "#eff6ff", borderRadius: 12, padding: 10 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center" }}>
+                          <Ionicons name="id-card-outline" size={16} color="#1d4ed8" />
+                          <Text style={{ marginLeft: 8, fontSize: 12, fontWeight: "800", color: "#1d4ed8" }}>
+                            {lang === "ta" ? "Session ID:" : "Session ID:"}
+                          </Text>
+                          <Text
+                            style={{ marginLeft: 6, fontSize: 12, fontWeight: "700", color: "#1e40af", flex: 1 }}
+                            numberOfLines={1}
+                          >
+                            {activeGroup.sessionId || "—"}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <Text className={`mt-2 text-xs ${UI.muted}`}>
+                        {lang === "ta"
+                          ? "கடலில் QR இல்லாவிட்டாலும் Photo எடுக்கலாம். QR பிறகு சேர்க்கலாம்."
+                          : "Photo alone is valid proof. QR can be scanned later on shore."}
+                      </Text>
+
+                      <View style={{ height: 12 }} />
+
+                      <PrimaryBtn
+                        label={lang === "ta" ? "📷 Photo எடு" : "📷 Take Photo"}
+                        onPress={() => openPhotoCamera(activeGroup.id)}
+                        icon="camera-outline"
+                        color={UI.accent}
+                      />
+
+                      {/* Captured images */}
+                      {(activeGroup.images?.length || 0) > 0 ? (
+                        <View style={{ marginTop: 12 }}>
+                          <View style={{ flexDirection: "row", gap: 10 }}>
+                            {(activeGroup.images || []).map((u) => (
+                              <View key={u} style={{ flex: 1 }}>
+                                <View className={`overflow-hidden rounded-2xl border ${UI.border} bg-white`}>
+                                  <Pressable onPress={() => setImgPreviewUri(u)} className="active:opacity-95">
+                                    <Image source={{ uri: u }} style={{ width: "100%", height: 150 }} resizeMode="cover" />
+                                  </Pressable>
+                                  <Pressable
+                                    onPress={() => removeImageFromGroup(activeGroup.id, u)}
+                                    className="px-3 py-2 active:opacity-80"
+                                    style={{ backgroundColor: "#fff1f2" }}
+                                  >
+                                    <Text className="text-center text-sm font-extrabold" style={{ color: "#be123c" }}>
+                                      {lang === "ta" ? "நீக்கு" : "Remove"}
+                                    </Text>
+                                  </Pressable>
+                                </View>
+                              </View>
+                            ))}
+                            {(activeGroup.images?.length || 0) === 1 ? <View style={{ flex: 1 }} /> : null}
+                          </View>
+                        </View>
+                      ) : null}
+
+                      <View style={{ height: 14 }} />
+
+                      <View style={{ flexDirection: "row", gap: 10 }}>
+                        {/* Optional: go to QR scan */}
+                        <View style={{ flex: 1 }}>
+                          <GhostBtn
+                            label={lang === "ta" ? "QR Scan →" : "Scan QR →"}
+                            onPress={() => {
+                              setGroups((prev) =>
+                                prev.map((g) => (g.id === activeGroup.id ? { ...g, phase: "SCAN" } : g)),
+                              );
+                            }}
+                            icon="qr-code-outline"
+                          />
+                        </View>
+                        {/* Finish with photo proof only */}
+                        <View style={{ flex: 1 }}>
+                          <PrimaryBtn
+                            label="DONE"
+                            disabled={(activeGroup.images?.length || 0) === 0 || !activeGroup.fishId}
+                            onPress={() => {
+                              if (!activeGroup.fishId) {
+                                Alert.alert(t.required, t.groupNeedsFish);
+                                return;
+                              }
+                              if ((activeGroup.images?.length || 0) === 0) {
+                                Alert.alert(
+                                  t.required,
+                                  lang === "ta"
+                                    ? "குறைந்தது 1 photo தேவை."
+                                    : "At least 1 photo is required.",
+                                );
+                                return;
+                              }
+                              setGroups((prev) =>
+                                prev.map((g) =>
+                                  g.id === activeGroup.id ? { ...g, phase: "DONE" } : g,
+                                ),
+                              );
+                            }}
+                            icon="checkmark-circle-outline"
+                            color={UI.success}
+                          />
+                        </View>
+                      </View>
+
+                      <View style={{ height: 12 }} />
+
+                      <Pressable
+                        onPress={() => removeGroup(activeGroup.id)}
+                        className="rounded-2xl px-4 py-4 active:opacity-80"
+                        style={{ backgroundColor: "#fee2e2" }}
+                      >
+                        <View className="flex-row items-center justify-center">
+                          <Ionicons name="trash-outline" size={20} color="#991b1b" />
+                          <Text className="ml-2 text-base font-extrabold" style={{ color: "#991b1b" }}>
+                            {lang === "ta" ? "Group Delete" : "Delete Group"}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    </Card>
+                  ) : null}
+
+                  {/* ═══ SCAN phase ═══ */}
                   {activeGroup.phase === "SCAN" ? (
                     <View>
                       <Card className="p-4">
                         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                           <View style={{ flexDirection: "row", alignItems: "center" }}>
                             <Ionicons name="qr-code-outline" size={20} color="#111827" />
-                            <Text className={`ml-2 text-base font-extrabold ${UI.text}`}>
-                              {lang === "ta" ? "QR Scan" : "QR Scan"}
-                            </Text>
+                            <Text className={`ml-2 text-base font-extrabold ${UI.text}`}>QR Scan</Text>
                           </View>
-
                           <IconPill
                             icon={activeGroupCanScan ? "checkmark-circle-outline" : "alert-circle-outline"}
                             color={activeGroupCanScan ? UI.success : UI.warn}
                             bg={activeGroupCanScan ? "#ecfdf5" : "#fffbeb"}
-                            text={activeGroupCanScan ? (lang === "ta" ? "Ready" : "Ready") : (lang === "ta" ? "Not ready" : "Not ready")}
+                            text={activeGroupCanScan
+                              ? (lang === "ta" ? "Ready" : "Ready")
+                              : (lang === "ta" ? "Not ready" : "Not ready")}
                           />
+                        </View>
+
+                        {/* Session ID badge */}
+                        <View style={{ marginTop: 10, backgroundColor: "#eff6ff", borderRadius: 12, padding: 10 }}>
+                          <View style={{ flexDirection: "row", alignItems: "center" }}>
+                            <Ionicons name="id-card-outline" size={16} color="#1d4ed8" />
+                            <Text style={{ marginLeft: 8, fontSize: 12, fontWeight: "800", color: "#1d4ed8" }}>
+                              Session ID:
+                            </Text>
+                            <Text
+                              style={{ marginLeft: 6, fontSize: 12, fontWeight: "700", color: "#1e40af", flex: 1 }}
+                              numberOfLines={1}
+                            >
+                              {activeGroup.sessionId || "—"}
+                            </Text>
+                          </View>
                         </View>
 
                         <Text className={`mt-2 text-xs ${UI.muted}`}>
@@ -3401,6 +3034,19 @@ export default function CreateCatchLog() {
                         <View style={{ flexDirection: "row", gap: 10 }}>
                           <View style={{ flex: 1 }}>
                             <GhostBtn
+                              label={lang === "ta" ? "← Photo" : "← Photo"}
+                              onPress={() => {
+                                setGroups((prev) =>
+                                  prev.map((g) =>
+                                    g.id === activeGroup.id ? { ...g, phase: "IMAGE_PROOF" } : g,
+                                  ),
+                                );
+                              }}
+                              icon="camera-outline"
+                            />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <GhostBtn
                               label={lang === "ta" ? "Clear" : "Clear"}
                               onPress={() => clearGroupQrs(activeGroup.id)}
                               icon="trash-outline"
@@ -3408,15 +3054,11 @@ export default function CreateCatchLog() {
                           </View>
                           <View style={{ flex: 1.2 }}>
                             <PrimaryBtn
-                              label={lang === "ta" ? "DONE" : "DONE"}
+                              label="DONE"
                               onPress={() => {
-                                if (!activeGroup.fishId) {
-                                  Alert.alert(t.required, t.groupNeedsFish);
-                                  return;
-                                }
+                                if (!activeGroup.fishId) { Alert.alert(t.required, t.groupNeedsFish); return; }
                                 if ((activeGroup.scanned?.length || 0) === 0) {
-                                  Alert.alert(t.required, t.errGroupQrMissing);
-                                  return;
+                                  Alert.alert(t.required, t.errGroupQrMissing); return;
                                 }
                                 startPhotoStage(activeGroup.id);
                               }}
@@ -3429,7 +3071,7 @@ export default function CreateCatchLog() {
 
                       <View style={{ height: 12 }} />
 
-                      {/* Scanned QRs list - chips */}
+                      {/* Scanned QRs */}
                       <Card className="p-4">
                         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                           <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -3481,7 +3123,7 @@ export default function CreateCatchLog() {
                     </View>
                   ) : null}
 
-                  {/* 3) PHOTO stage */}
+                  {/* ═══ PHOTO phase ═══ */}
                   {activeGroup.phase === "PHOTO" ? (
                     <Card className="p-4">
                       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
@@ -3547,7 +3189,7 @@ export default function CreateCatchLog() {
                       <View style={{ height: 12 }} />
 
                       <PrimaryBtn
-                        label={lang === "ta" ? "DONE" : "DONE"}
+                        label="DONE"
                         onPress={() => finishFishGroup(activeGroup.id)}
                         icon="checkmark-outline"
                         color={UI.success}
@@ -3555,7 +3197,7 @@ export default function CreateCatchLog() {
                     </Card>
                   ) : null}
 
-                  {/* DONE stage */}
+                  {/* ═══ DONE state ═══ */}
                   {activeGroup.phase === "DONE" ? (
                     <View className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4">
                       <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -3565,14 +3207,23 @@ export default function CreateCatchLog() {
                         </Text>
                       </View>
                       <Text className="mt-1 text-sm text-emerald-800">
-                        {lang === "ta" ? "+ அழுத்தி அடுத்த மீன்" : "Tap + for next fish"}
+                        {lang === "ta"
+                          ? "+ அழுத்தி அடுத்த மீன் சேர்க்கலாம்"
+                          : "Tap + to add the next fish group"}
                       </Text>
+                      {/* Show session id in done state */}
+                      <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center" }}>
+                        <Ionicons name="id-card-outline" size={14} color="#065f46" />
+                        <Text className="ml-2 text-emerald-800 text-xs font-bold" numberOfLines={1}>
+                          {activeGroup.sessionId || "—"}
+                        </Text>
+                      </View>
                     </View>
                   ) : null}
 
                   <View style={{ height: 12 }} />
 
-                  {/* Auto Date/Time + Location (icon) */}
+                  {/* Auto Date/Time + Location */}
                   <Card className="p-4">
                     <View style={{ flexDirection: "row", alignItems: "center" }}>
                       <Ionicons name="time-outline" size={20} color="#111827" />
@@ -3611,7 +3262,9 @@ export default function CreateCatchLog() {
           </View>
         ) : null}
 
-        {/* STEP 3 - SIMPLE REVIEW */}
+        {/* ================================================================
+            STEP 3 — Review
+        ================================================================ */}
         {step === 3 ? (
           <View className="px-4 mt-4">
             <Card className="p-4">
@@ -3641,7 +3294,7 @@ export default function CreateCatchLog() {
 
                 <View style={{ flexDirection: "row", alignItems: "center" }}>
                   <Ionicons name="qr-code-outline" size={18} color="#111827" />
-                  <Text className={`ml-2 text-base font-extrabold ${UI.text}`}>{totalQrCount}</Text>
+                  <Text className={`ml-2 text-base font-extrabold ${UI.text}`}>{totalQrCount} QR</Text>
                 </View>
               </View>
 
@@ -3658,13 +3311,34 @@ export default function CreateCatchLog() {
                   <Text className={`mt-1 text-sm ${UI.muted}`}>
                     QR: {g.scanned?.length || 0} • 📷 {g.images?.length || 0} • {phaseLabel(g.phase)}
                   </Text>
+                  <Text className={`mt-1 text-xs ${UI.muted}`} numberOfLines={1}>
+                    {g.sessionId || "—"}
+                  </Text>
+                  {/* Image proof only badge */}
+                  {(g.scanned?.length || 0) === 0 && (g.images?.length || 0) > 0 ? (
+                    <View style={{ marginTop: 6, flexDirection: "row", alignItems: "center" }}>
+                      <View
+                        style={{
+                          backgroundColor: "#eff6ff", borderRadius: 8, paddingHorizontal: 8,
+                          paddingVertical: 3, flexDirection: "row", alignItems: "center",
+                        }}
+                      >
+                        <Ionicons name="camera-outline" size={12} color="#1d4ed8" />
+                        <Text style={{ marginLeft: 4, fontSize: 11, fontWeight: "800", color: "#1d4ed8" }}>
+                          {lang === "ta" ? "Photo Proof Only" : "Photo Proof Only"}
+                        </Text>
+                      </View>
+                    </View>
+                  ) : null}
                 </View>
               ))}
             </Card>
           </View>
         ) : null}
 
-        {/* STEP 4 - ONE BIG SAVE BUTTON */}
+        {/* ================================================================
+            STEP 4 — Save
+        ================================================================ */}
         {step === 4 ? (
           <View className="px-4 mt-4">
             <Card className="p-4">
@@ -3695,7 +3369,7 @@ export default function CreateCatchLog() {
         ) : null}
       </ScrollView>
 
-      {/* ✅ Bottom navigation bar (big + fixed) */}
+      {/* ── Bottom navigation bar ── */}
       <View
         style={{
           position: "absolute",
@@ -3714,7 +3388,6 @@ export default function CreateCatchLog() {
           <View style={{ flex: 1 }}>
             <GhostBtn label={t.back} onPress={goBack} disabled={step === 1} icon="arrow-back-outline" />
           </View>
-
           {step < 4 ? (
             <View style={{ flex: 1.3 }}>
               <PrimaryBtn
@@ -3739,7 +3412,7 @@ export default function CreateCatchLog() {
         </View>
       </View>
 
-      {/* ✅ FULL SCREEN PICKERS (unchanged) */}
+      {/* ── Full Screen Pickers ── */}
       <FullScreenPickerModal
         visible={vesselPickerOpen}
         title={t.chooseVessel}
@@ -3755,11 +3428,9 @@ export default function CreateCatchLog() {
         onConfirm={(item) => {
           const raw = (item as any)?._raw;
           const db = Number(item.key || 0);
-
           setSelectedVesselDbId(db || null);
           setSelectedVesselLabel(vesselLabel(raw));
           setSelectedVesselCode(vesselCode(raw));
-
           setVesselPickerOpen(false);
         }}
       />
@@ -3779,10 +3450,8 @@ export default function CreateCatchLog() {
         onConfirm={(item) => {
           const raw = (item as any)?._raw;
           const key = String(item.key || "");
-
           setTripId(key);
           setTripLabelText(tripLabel(raw));
-
           setTripPickerOpen(false);
         }}
       />
@@ -3800,37 +3469,27 @@ export default function CreateCatchLog() {
         searchPlaceholder="Search fish (e.g. tuna)"
         confirmLabel="Next"
         insetsBottom={insets.bottom}
-        onClose={() => {
-          setFishPickerOpen(false);
-          setFishPickGroupId(null);
-        }}
+        onClose={() => { setFishPickerOpen(false); setFishPickGroupId(null); }}
         onConfirm={(item) => {
           const gid = fishPickGroupId;
           if (!gid) return;
-
           const fid = Number(item.key || 0);
           const name = String(item.label || "");
           if (!fid || !name) return;
-
           setGroupFish(gid, fid, name);
-
           setFishPickerOpen(false);
           setFishPickGroupId(null);
         }}
       />
 
-      {/* ✅ OFFSCREEN WATERMARK VIEW (TOP-RIGHT) - unchanged */}
+      {/* ── Offscreen Watermark Compositor ── */}
       {wmJob ? (
         <View style={{ position: "absolute", left: -10000, top: -10000 }}>
           <View
             ref={(r) => (wmViewRef.current = r)}
             collapsable={false}
             onLayout={() => setWmLayoutReady(true)}
-            style={{
-              width: wmJob.outW,
-              height: wmJob.outH,
-              backgroundColor: "black",
-            }}
+            style={{ width: wmJob.outW, height: wmJob.outH, backgroundColor: "black" }}
           >
             <Image
               source={{ uri: wmJob.srcUri }}
@@ -3839,7 +3498,6 @@ export default function CreateCatchLog() {
               onLoad={() => setWmImgLoaded(true)}
               onError={() => setWmImgLoaded(true)}
             />
-
             <View
               style={{
                 position: "absolute",
@@ -3848,10 +3506,10 @@ export default function CreateCatchLog() {
                 maxWidth: wmJob.outW * 0.78,
                 paddingHorizontal: 12,
                 paddingVertical: 10,
-                backgroundColor: "rgba(0,0,0,0.55)",
+                backgroundColor: "rgba(0,0,0,0.60)",
                 borderRadius: 14,
                 borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.12)",
+                borderColor: "rgba(255,255,255,0.15)",
               }}
             >
               {(wmJob.lines || []).map((ln, idx) => (
@@ -3859,7 +3517,7 @@ export default function CreateCatchLog() {
                   key={`${idx}_${ln}`}
                   style={{
                     color: "white",
-                    fontWeight: idx === 0 ? "900" : idx === 1 ? "800" : "700",
+                    fontWeight: idx === 0 ? "900" : idx <= 2 ? "800" : "700",
                     fontSize:
                       idx === 0
                         ? Math.max(18, Math.round(wmJob.outW * 0.018))

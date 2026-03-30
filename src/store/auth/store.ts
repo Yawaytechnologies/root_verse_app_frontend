@@ -31,6 +31,7 @@ import vesselsReducer from "../../services/wild/vessels/vessel.slice";
 
 // ---- ui ----
 import themeReducer from "../theme.slice";
+import centreCrateReducer from "../../services/centre/centreCrate.slice";
 
 const appReducer = combineReducers({
   // features
@@ -65,6 +66,7 @@ const appReducer = combineReducers({
   // ui
   theme: themeReducer,
     vessels: vesselsReducer,
+    centreCrate: centreCrateReducer,
 });
 
 const rootReducer = (state: any, action: any) => {
