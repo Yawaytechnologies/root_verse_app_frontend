@@ -16,6 +16,7 @@ export type MeResponse = {
   username: string | null;
   phone_no: string;
   rootverse_type: RootverseType;
+  role?: string;
   status?: string;
   verification_status?: string;
   address?: string | null;

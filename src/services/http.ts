@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 
 export const API_BASE = (
@@ -11,14 +12,38 @@ function timeout(ms: number) {
   );
 }
 
+const AUTH_TOKEN_KEY = "auth_token";
+
+async function withAuthHeaders(init?: RequestInit): Promise<RequestInit> {
+  const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY).catch(() => null);
+  const headers = new Headers(init?.headers || {});
+
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "application/json");
+  }
+
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  return {
+    ...init,
+    headers,
+  };
+}
+
 export async function httpJson<T>(
   path: string,
   init?: RequestInit,
   ms = 15000
 ): Promise<T> {
   const url = `${API_BASE}${path}`;
+  const requestInit = await withAuthHeaders(init);
 
-  const res = (await Promise.race([fetch(url, init), timeout(ms)])) as Response;
+  const res = (await Promise.race([
+    fetch(url, requestInit),
+    timeout(ms),
+  ])) as Response;
 
   const text = await res.text();
   let data: any = null;
@@ -43,9 +68,10 @@ export async function httpPutForm<T>(
   ms = 20000
 ): Promise<T> {
   const url = `${API_BASE}${path}`;
+  const requestInit = await withAuthHeaders({ method: "PUT", body: form });
 
   const res = (await Promise.race([
-    fetch(url, { method: "PUT", body: form }),
+    fetch(url, requestInit),
     timeout(ms),
   ])) as Response;
 

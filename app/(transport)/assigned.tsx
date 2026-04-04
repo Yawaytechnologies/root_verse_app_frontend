@@ -1,19 +1,31 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useDispatch, useSelector } from "react-redux";
 
 import Screen from "../../src/components/centre/Screen";
 import {
   formatDisplayDate,
   formatStatus,
 } from "../../src/data/transport/dummyTransportData";
-import { useTransport } from "../../src/context/transport/TransportContext";
-import { TransportCrate } from "../../src/types/transport";
+import {
+  fetchAssignedCrates,
+  selectAssignedCrates,
+  selectTransportSelectedDate,
+} from "../../src/services/transport/transportSlice";
+import { TransportCrate } from "../../src/services/transport/transportService";
 
 export default function AssignedScreen() {
-  const { assignedCrates, selectedDate } = useTransport();
+  const dispatch = useDispatch<any>();
+  const assignedCrates = useSelector(selectAssignedCrates);
+  const selectedDate = useSelector(selectTransportSelectedDate);
+
   const [selectedCrate, setSelectedCrate] = useState<TransportCrate | null>(null);
+
+  useEffect(() => {
+    dispatch(fetchAssignedCrates(selectedDate ? { date: selectedDate } : undefined));
+  }, [dispatch, selectedDate]);
 
   return (
     <Screen>
@@ -29,15 +41,18 @@ export default function AssignedScreen() {
         </View>
 
         <Text className="mb-5 text-[14px] font-semibold text-slate-400">
-          {formatDisplayDate(selectedDate)}
+          {selectedDate ? formatDisplayDate(selectedDate) : "-"}
         </Text>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 24 }}
+        >
           {assignedCrates.length === 0 ? (
             <EmptyState text="No crates assigned to this transport for the selected date." />
           ) : (
             <View className="gap-3">
-              {assignedCrates.map((item) => (
+              {assignedCrates.map((item: TransportCrate) => (
                 <Pressable
                   key={item.id}
                   onPress={() => setSelectedCrate(item)}
@@ -49,10 +64,10 @@ export default function AssignedScreen() {
                         {item.id}
                       </Text>
                       <Text className="mt-1 text-[13px] text-slate-400">
-                        {item.collectionCentre} → {item.destination}
+                        {item.collectionCentre || "-"} → {item.destination || "-"}
                       </Text>
                       <Text className="mt-1 text-[12px] text-slate-500">
-                        Schedule: {item.scheduledTime}
+                        Schedule: {item.scheduledTime || "-"}
                       </Text>
                     </View>
 
@@ -102,14 +117,29 @@ function DetailModal({
 
           <ScrollView showsVerticalScrollIndicator={false}>
             <View className="rounded-[24px] border border-slate-700 bg-[#0b172b] p-4">
-              <DetailRow label="Crate ID" value={crate.id} />
-              <DetailRow label="Status" value={formatStatus(crate.status)} />
-              <DetailRow label="Collection Centre" value={crate.collectionCentre} />
-              <DetailRow label="Destination" value={crate.destination} />
-              <DetailRow label="Scheduled Time" value={crate.scheduledTime} />
-              <DetailRow label="Vehicle" value={crate.assignedVehicleNo || "-"} />
-              <DetailRow label="Quality" value={crate.qualityGrade || "-"} />
-              <DetailRow label="Fish Tags" value={crate.fishTags?.join(", ") || "-"} />
+              <DetailRow label="Crate ID" value={crate.id || "-"} />
+              <DetailRow label="Status" value={formatStatus(crate.status || "-")} />
+              <DetailRow
+                label="Collection Centre"
+                value={crate.collectionCentre || "-"}
+              />
+              <DetailRow label="Destination" value={crate.destination || "-"} />
+              <DetailRow
+                label="Scheduled Time"
+                value={crate.scheduledTime || "-"}
+              />
+              <DetailRow
+                label="Vehicle"
+                value={crate.assignedVehicleNo || "-"}
+              />
+              <DetailRow
+                label="Quality"
+                value={crate.qualityGrade || "-"}
+              />
+              <DetailRow
+                label="Fish Tags"
+                value={crate.fishTags?.join(", ") || "-"}
+              />
               <DetailRow label="Notes" value={crate.notes || "-"} />
 
               <Pressable

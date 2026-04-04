@@ -1,258 +1,164 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
-import {
-  fetchCountriesApi, // ✅ NEW
-  fetchDistrictsByStateApi,
-  fetchLocationsByDistrictApi,
-  fetchStatesApi,
-  fetchStatesByCountryApi, // ✅ NEW
-  type CountryItem, // ✅ NEW
-  type DistrictItem,
-  type LocationItem,
-  type StateItem,
-} from "../../services/auth/location.api";
+import { ENV } from "../../config/env";
 
-type LocationState = {
-  // ✅ NEW: countries
-  countries: CountryItem[];
-  countriesLoading: boolean;
-  countriesError: string | null;
+export const TOKEN_KEY = "auth_token"; // ✅ MUST match me.slice.ts
 
-  // states (UI reads from this)
-  states: StateItem[];
-  statesLoading: boolean;
-  statesError: string | null;
+type ApprovalStatus = "APPROVED" | "PENDING_APPROVAL" | "REJECTED";
 
-  // optional cache per country (useful)
-  statesByCountryId: Record<number, StateItem[]>;
-  statesLoadingByCountryId: Record<number, boolean>;
-  statesErrorByCountryId: Record<number, string | null>;
+export type RootverseType =
+  | "WILD_CAPTURE"
+  | "AQUACULTURE"
+  | "MARICULTURE"
+  | "QUALITY_CHECKER"
+  | "COLLECTION_CENTRE_OPERATOR"
+  | "TRANSPORT_OPERATOR";
 
-  districtsByStateId: Record<number, DistrictItem[]>;
-  districtsLoadingByStateId: Record<number, boolean>;
-  districtsErrorByStateId: Record<number, string | null>;
-
-  locationsByDistrictId: Record<number, LocationItem[]>;
-  locationsLoadingByDistrictId: Record<number, boolean>;
-  locationsErrorByDistrictId: Record<number, string | null>;
+type LoginRes = {
+  token?: string;
+  access_token?: string;
+  message?: string;
+  status?: ApprovalStatus;
+  rootverse_type?: RootverseType;
+  user?: {
+    status?: ApprovalStatus;
+    rootverse_type?: RootverseType;
+    [key: string]: any;
+  };
+  data?: any; // some backends wrap here
+  [key: string]: any;
 };
 
-const initialState: LocationState = {
-  // ✅ NEW
-  countries: [],
-  countriesLoading: false,
-  countriesError: null,
-
-  states: [],
-  statesLoading: false,
-  statesError: null,
-
-  // ✅ NEW
-  statesByCountryId: {},
-  statesLoadingByCountryId: {},
-  statesErrorByCountryId: {},
-
-  districtsByStateId: {},
-  districtsLoadingByStateId: {},
-  districtsErrorByStateId: {},
-
-  locationsByDistrictId: {},
-  locationsLoadingByDistrictId: {},
-  locationsErrorByDistrictId: {},
+type LoginState = {
+  loading: boolean;
+  error: string | null;
+  token: string | null;
+  status: ApprovalStatus | null;
+  rootverse_type: RootverseType | null;
 };
 
-// ✅ NEW: Countries
-export const fetchCountries = createAsyncThunk<
-  CountryItem[],
-  void,
+const initialState: LoginState = {
+  loading: false,
+  error: null,
+  token: null,
+  status: null,
+  rootverse_type: null,
+};
+
+/* ------------------------------------------- */
+
+function pickToken(payload: any): string | null {
+  const token =
+    payload?.token ||
+    payload?.access_token ||
+    payload?.data?.token ||
+    payload?.data?.access_token ||
+    payload?.data?.jwt ||
+    payload?.jwt ||
+    payload?.data?.data?.token ||
+    payload?.data?.data?.access_token;
+
+  return typeof token === "string" && token.length > 0 ? token : null;
+}
+
+export const loginWithPhone = createAsyncThunk<
+  {
+    token: string;
+    status: ApprovalStatus | null;
+    rootverse_type: RootverseType | null;
+    user?: any;
+  },
+  string,
   { rejectValue: string }
->("location/fetchCountries", async (_, thunkAPI) => {
+>("login/withPhone", async (phone_no, { rejectWithValue }) => {
   try {
-    return await fetchCountriesApi();
+    const cleanPhone = String(phone_no || "").trim();
+
+    const res = await fetch(`${ENV.API_BASE}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ phone_no: cleanPhone }),
+    });
+
+    const text = await res.text();
+    let data: any = {};
+
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      return rejectWithValue("LOGIN_NOT_JSON");
+    }
+
+    if (!res.ok) {
+      return rejectWithValue(data?.error || data?.message || "Login failed");
+    }
+
+    const token = pickToken(data);
+    if (!token) {
+      console.log("LOGIN_RESPONSE_NO_TOKEN =>", data);
+      return rejectWithValue("NO_TOKEN");
+    }
+
+    // ✅ save token for fetchMe()
+    await AsyncStorage.setItem(TOKEN_KEY, token);
+
+    const status: ApprovalStatus | null =
+      data?.status ?? data?.user?.status ?? null;
+
+    const rootverse_type: RootverseType | null =
+      data?.rootverse_type ?? data?.user?.rootverse_type ?? null;
+
+    return {
+      token,
+      status,
+      rootverse_type,
+      user: data?.user ?? data?.data?.user ?? null,
+    };
   } catch (e: any) {
-    return thunkAPI.rejectWithValue(e?.message ?? "Failed to load countries");
+    return rejectWithValue(e?.message || "Network error");
   }
 });
 
-// ✅ Keep existing (old usage)
-export const fetchStates = createAsyncThunk<
-  StateItem[],
-  void,
-  { rejectValue: string }
->("location/fetchStates", async (_, thunkAPI) => {
-  try {
-    return await fetchStatesApi();
-  } catch (e: any) {
-    return thunkAPI.rejectWithValue(e?.message ?? "Failed to load states");
-  }
-});
-
-// ✅ NEW: States by Country
-export const fetchStatesByCountry = createAsyncThunk<
-  { countryId: number; states: StateItem[] },
-  { countryId: number },
-  { rejectValue: string }
->("location/fetchStatesByCountry", async ({ countryId }, thunkAPI) => {
-  try {
-    const states = await fetchStatesByCountryApi(countryId);
-    return { countryId, states };
-  } catch (e: any) {
-    return thunkAPI.rejectWithValue(e?.message ?? "Failed to load states");
-  }
-});
-
-export const fetchDistrictsByState = createAsyncThunk<
-  { stateId: number; districts: DistrictItem[] },
-  { stateId: number },
-  { rejectValue: string }
->("location/fetchDistrictsByState", async ({ stateId }, thunkAPI) => {
-  try {
-    const districts = await fetchDistrictsByStateApi(stateId);
-    return { stateId, districts };
-  } catch (e: any) {
-    return thunkAPI.rejectWithValue(e?.message ?? "Failed to load districts");
-  }
-});
-
-export const fetchLocationsByDistrict = createAsyncThunk<
-  { districtId: number; locations: LocationItem[] },
-  { districtId: number },
-  { rejectValue: string }
->("location/fetchLocationsByDistrict", async ({ districtId }, thunkAPI) => {
-  try {
-    const locations = await fetchLocationsByDistrictApi(districtId);
-    return { districtId, locations };
-  } catch (e: any) {
-    return thunkAPI.rejectWithValue(e?.message ?? "Failed to load locations");
-  }
-});
-
-const locationSlice = createSlice({
-  name: "location",
+const loginSlice = createSlice({
+  name: "login",
   initialState,
   reducers: {
-    clearLocationErrors(state) {
-      state.countriesError = null; // ✅ NEW
-      state.statesError = null;
-
-      state.statesErrorByCountryId = {}; // ✅ NEW
-
-      state.districtsErrorByStateId = {};
-      state.locationsErrorByDistrictId = {};
+    clearLoginError(state) {
+      state.error = null;
+    },
+    logout(state) {
+      state.token = null;
+      state.status = null;
+      state.rootverse_type = null;
+      state.error = null;
+      state.loading = false;
+      AsyncStorage.removeItem(TOKEN_KEY);
     },
   },
-  extraReducers: (builder) => {
-    // ✅ Countries
-    builder
-      .addCase(fetchCountries.pending, (state) => {
-        state.countriesLoading = true;
-        state.countriesError = null;
-      })
-      .addCase(fetchCountries.fulfilled, (state, action) => {
-        state.countriesLoading = false;
-        state.countries = action.payload;
-      })
-      .addCase(fetchCountries.rejected, (state, action) => {
-        state.countriesLoading = false;
-        state.countriesError =
-          (action.payload as string) ||
-          action.error.message ||
-          "Failed to load countries";
-      });
+  extraReducers: (b) => {
+    b.addCase(loginWithPhone.pending, (s) => {
+      s.loading = true;
+      s.error = null;
+      s.status = null;
+      s.rootverse_type = null;
+    });
 
-    // ✅ States (old all-states)
-    builder
-      .addCase(fetchStates.pending, (state) => {
-        state.statesLoading = true;
-        state.statesError = null;
-      })
-      .addCase(fetchStates.fulfilled, (state, action) => {
-        state.statesLoading = false;
-        state.states = action.payload;
-      })
-      .addCase(fetchStates.rejected, (state, action) => {
-        state.statesLoading = false;
-        state.statesError =
-          (action.payload as string) ||
-          action.error.message ||
-          "Failed to load states";
-      });
+    b.addCase(loginWithPhone.fulfilled, (s, a) => {
+      s.loading = false;
+      s.token = a.payload.token;
+      s.status = a.payload.status;
+      s.rootverse_type = a.payload.rootverse_type;
+    });
 
-    // ✅ States by Country (new)
-    builder
-      .addCase(fetchStatesByCountry.pending, (state, action) => {
-        const cid = action.meta.arg.countryId;
-        state.statesLoading = true; // UI uses this
-        state.statesError = null;
-
-        state.statesLoadingByCountryId[cid] = true;
-        state.statesErrorByCountryId[cid] = null;
-      })
-      .addCase(fetchStatesByCountry.fulfilled, (state, action) => {
-        const { countryId, states: st } = action.payload;
-
-        state.statesLoading = false;
-        state.states = st; // ✅ IMPORTANT: UI reads from "states"
-
-        state.statesLoadingByCountryId[countryId] = false;
-        state.statesByCountryId[countryId] = st;
-      })
-      .addCase(fetchStatesByCountry.rejected, (state, action) => {
-        const cid = action.meta.arg.countryId;
-
-        state.statesLoading = false;
-        const msg =
-          (action.payload as string) ||
-          action.error.message ||
-          "Failed to load states";
-        state.statesError = msg;
-
-        state.statesLoadingByCountryId[cid] = false;
-        state.statesErrorByCountryId[cid] = msg;
-      });
-
-    // ✅ Districts
-    builder
-      .addCase(fetchDistrictsByState.pending, (state, action) => {
-        const sid = action.meta.arg.stateId;
-        state.districtsLoadingByStateId[sid] = true;
-        state.districtsErrorByStateId[sid] = null;
-      })
-      .addCase(fetchDistrictsByState.fulfilled, (state, action) => {
-        const { stateId, districts } = action.payload;
-        state.districtsLoadingByStateId[stateId] = false;
-        state.districtsByStateId[stateId] = districts;
-      })
-      .addCase(fetchDistrictsByState.rejected, (state, action) => {
-        const sid = action.meta.arg.stateId;
-        state.districtsLoadingByStateId[sid] = false;
-        state.districtsErrorByStateId[sid] =
-          (action.payload as string) ||
-          action.error.message ||
-          "Failed to load districts";
-      });
-
-    // ✅ Locations
-    builder
-      .addCase(fetchLocationsByDistrict.pending, (state, action) => {
-        const did = action.meta.arg.districtId;
-        state.locationsLoadingByDistrictId[did] = true;
-        state.locationsErrorByDistrictId[did] = null;
-      })
-      .addCase(fetchLocationsByDistrict.fulfilled, (state, action) => {
-        const { districtId, locations } = action.payload;
-        state.locationsLoadingByDistrictId[districtId] = false;
-        state.locationsByDistrictId[districtId] = locations;
-      })
-      .addCase(fetchLocationsByDistrict.rejected, (state, action) => {
-        const did = action.meta.arg.districtId;
-        state.locationsLoadingByDistrictId[did] = false;
-        state.locationsErrorByDistrictId[did] =
-          (action.payload as string) ||
-          action.error.message ||
-          "Failed to load locations";
-      });
+    b.addCase(loginWithPhone.rejected, (s, a) => {
+      s.loading = false;
+      s.error = a.payload || "Login failed";
+    });
   },
 });
 
-export const { clearLocationErrors } = locationSlice.actions;
-export default locationSlice.reducer;
+export const { clearLoginError, logout } = loginSlice.actions;
+export default loginSlice.reducer;

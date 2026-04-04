@@ -2,10 +2,20 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import { ENV } from "../../config/env";
 
+export const PHONE_KEY = "auth_phone_no";
+
 export const TOKEN_KEY = "auth_token"; // ✅ MUST match me.slice.ts
 
 type ApprovalStatus = "APPROVED" | "PENDING_APPROVAL" | "REJECTED";
-export type RootverseType = "WILD_CAPTURE" | "AQUACULTURE" | "MARICULTURE" | "QUALITY_CHECKER";
+export type RootverseType =
+  | "OWNER"
+  | "CRATE_PACKER"
+  | "WILD_CAPTURE"
+  | "AQUACULTURE"
+  | "MARICULTURE"
+  | "QUALITY_CHECKER"
+  | "COLLECTION_CENTRE_OPERATOR"
+  | "TRANSPORT_OPERATOR";
 
 type LoginRes = {
   token?: string;
@@ -13,9 +23,11 @@ type LoginRes = {
   message?: string;
   status?: ApprovalStatus;
   rootverse_type?: RootverseType;
+  role?: RootverseType | string;
   user?: {
     status?: ApprovalStatus;
     rootverse_type?: RootverseType;
+    role?: RootverseType | string;
     [key: string]: any;
   };
   data?: any; // some backends wrap here
@@ -91,10 +103,19 @@ export const loginWithPhone = createAsyncThunk<
 
     // ✅ save token for fetchMe()
     await AsyncStorage.setItem(TOKEN_KEY, token);
+    await AsyncStorage.setItem(PHONE_KEY, cleanPhone);
 
     const status: ApprovalStatus | null = data?.status ?? data?.user?.status ?? null;
     const rootverse_type: RootverseType | null =
-      data?.rootverse_type ?? data?.user?.rootverse_type ?? null;
+      data?.rootverse_type ??
+      data?.role ??
+      data?.user?.rootverse_type ??
+      data?.user?.role ??
+      data?.data?.rootverse_type ??
+      data?.data?.role ??
+      data?.data?.user?.rootverse_type ??
+      data?.data?.user?.role ??
+      null;
 
     return { token, status, rootverse_type, user: data?.user ?? data?.data?.user ?? null };
   } catch (e: any) {
@@ -116,6 +137,7 @@ const loginSlice = createSlice({
       state.error = null;
       state.loading = false;
       AsyncStorage.removeItem(TOKEN_KEY);
+      AsyncStorage.removeItem(PHONE_KEY);
     },
   },
   extraReducers: (b) => {

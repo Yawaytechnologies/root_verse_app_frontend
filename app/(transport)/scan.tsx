@@ -1,15 +1,29 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useDispatch, useSelector } from "react-redux";
 
 import Screen from "../../src/components/centre/Screen";
-import { useTransport } from "../../src/context/transport/TransportContext";
+import {
+  clearLastScanResult,
+  fetchAssignedCrates,
+  scanPickupCrate,
+  selectAssignedCrates,
+  selectLastScanMessage,
+  selectScanPickupError,
+  selectTransportSelectedDate,
+} from "../../src/services/transport/transportSlice";
 
 type BannerType = "success" | "error" | "info";
 
 export default function TransportScanScreen() {
-  const { assignedCrates, allScheduledNotMine, scanCrate } = useTransport();
+  const dispatch = useDispatch<any>();
+
+  const assignedCrates = useSelector(selectAssignedCrates);
+  const selectedDate = useSelector(selectTransportSelectedDate);
+  const scanError = useSelector(selectScanPickupError);
+  const lastScanMessage = useSelector(selectLastScanMessage);
 
   const [qrValue, setQrValue] = useState("");
   const [bannerType, setBannerType] = useState<BannerType>("info");
@@ -17,23 +31,41 @@ export default function TransportScanScreen() {
     "Scan crate QR to verify transport assignment."
   );
 
-  const handleScan = (crateId: string) => {
-    const result = scanCrate(crateId);
+  useEffect(() => {
+    dispatch(fetchAssignedCrates(selectedDate ? { date: selectedDate } : undefined));
+  }, [dispatch, selectedDate]);
 
-    setBannerType(result.ok ? "success" : "error");
-    setBannerText(result.message);
-
-    if (result.ok) {
-      Alert.alert("Success", result.message, [
+  useEffect(() => {
+    if (scanError) {
+      setBannerType("error");
+      setBannerText(scanError);
+      Alert.alert("Scan Failed", scanError);
+    } else if (lastScanMessage) {
+      setBannerType("success");
+      setBannerText(lastScanMessage);
+      Alert.alert("Success", lastScanMessage, [
         {
           text: "Go to In Transit",
           onPress: () => router.push("/(transport)/in-transit"),
         },
-        { text: "OK" },
+        {
+          text: "OK",
+          onPress: () => dispatch(clearLastScanResult()),
+        },
       ]);
-    } else {
-      Alert.alert("Scan Failed", result.message);
     }
+  }, [scanError, lastScanMessage, dispatch]);
+
+  const handleScan = async (crateId: string) => {
+    if (!crateId?.trim()) {
+      setBannerType("error");
+      setBannerText("Please enter crate QR ID");
+      Alert.alert("Scan Failed", "Please enter crate QR ID");
+      return;
+    }
+
+    await dispatch(scanPickupCrate({ crate_id: crateId.trim() }));
+    setQrValue("");
   };
 
   return (
@@ -49,7 +81,10 @@ export default function TransportScanScreen() {
           </Pressable>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 24 }}
+        >
           <View className="rounded-[28px] border border-slate-800 bg-[#0b172b] p-4">
             <View
               className={`rounded-[18px] px-4 py-3 ${
@@ -79,7 +114,7 @@ export default function TransportScanScreen() {
                 Align QR inside the scan box
               </Text>
               <Text className="mt-2 text-center text-[13px] text-slate-500">
-                This screen uses dummy buttons and manual QR text for now
+                Manual QR input is connected to pickup scan API
               </Text>
             </View>
 
@@ -106,7 +141,7 @@ export default function TransportScanScreen() {
             </Pressable>
 
             <Text className="mt-6 mb-3 text-[15px] font-extrabold text-white">
-              Demo Valid Assigned QR
+              Demo Assigned QR
             </Text>
 
             <View className="gap-3">
@@ -117,7 +152,7 @@ export default function TransportScanScreen() {
                   </Text>
                 </View>
               ) : (
-                assignedCrates.map((item) => (
+                assignedCrates.map((item: any) => (
                   <Pressable
                     key={item.id}
                     onPress={() => handleScan(item.id)}
@@ -129,33 +164,6 @@ export default function TransportScanScreen() {
                   </Pressable>
                 ))
               )}
-            </View>
-
-            <Text className="mt-6 mb-3 text-[15px] font-extrabold text-white">
-              Demo Invalid / Not Assigned To Me
-            </Text>
-
-            <View className="gap-3">
-              {allScheduledNotMine.slice(0, 2).map((item) => (
-                <Pressable
-                  key={item.id}
-                  onPress={() => handleScan(item.id)}
-                  className="items-center rounded-[20px] bg-[#7f1d1d] py-4"
-                >
-                  <Text className="text-[15px] font-extrabold text-white">
-                    Scan {item.id}
-                  </Text>
-                </Pressable>
-              ))}
-
-              <Pressable
-                onPress={() => handleScan("RV-CRATE-UNKNOWN")}
-                className="items-center rounded-[20px] bg-[#3f3f46] py-4"
-              >
-                <Text className="text-[15px] font-extrabold text-white">
-                  Scan Unknown QR
-                </Text>
-              </Pressable>
             </View>
           </View>
         </ScrollView>

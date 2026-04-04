@@ -1,7 +1,8 @@
-import React from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import React, { useEffect } from "react";
+import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useDispatch, useSelector } from "react-redux";
 
 import Screen from "../../src/components/centre/Screen";
 import {
@@ -9,17 +10,90 @@ import {
   formatShortDay,
   getLastNDays,
 } from "../../src/data/transport/dummyTransportData";
-import { useTransport } from "../../src/context/transport/TransportContext";
+import {
+  fetchTransportDashboard,
+  selectAssignedCrates,
+  selectCurrentTransport,
+  selectCurrentTransportOperator,
+  selectInTransitCrates,
+  selectTransportSelectedDate,
+  selectTransportStats,
+  fetchLoggedInTransportOperatorThunk,
+  setSelectedTransportDate,
+} from "../../src/services/transport/transportSlice";
+
+import { logoutSession } from "../../src/store/auth/authSession.slice";
+import { clearMe } from "../../src/store/auth/me.slice";
 
 export default function TransportDashboard() {
-  const {
-    currentTransport,
-    selectedDate,
-    setSelectedDate,
-    assignedCrates,
-    inTransitCrates,
-    stats,
-  } = useTransport();
+  const dispatch = useDispatch<any>();
+  const [logoutLoading, setLogoutLoading] = React.useState(false);
+
+  const currentTransport = useSelector(selectCurrentTransport);
+  const currentTransportOperator = useSelector(selectCurrentTransportOperator);
+  const selectedDate = useSelector(selectTransportSelectedDate);
+  const assignedCrates = useSelector(selectAssignedCrates);
+  const inTransitCrates = useSelector(selectInTransitCrates);
+  const stats = useSelector(selectTransportStats);
+  useEffect(() => {
+    if (!selectedDate) {
+      const today = getLastNDays(1)[0];
+      dispatch(setSelectedTransportDate(today));
+      return;
+    }
+
+    dispatch(fetchTransportDashboard({ date: selectedDate }));
+  }, [dispatch, selectedDate]);
+
+  useEffect(() => {
+    dispatch(fetchLoggedInTransportOperatorThunk());
+  }, [dispatch]);
+
+  const last4Days = getLastNDays(4);
+  const activeDate = selectedDate || last4Days[0];
+
+  const transportName =
+    currentTransportOperator?.full_name ||
+    currentTransport?.name ||
+    "Transport User";
+
+  const transportCode =
+    currentTransportOperator?.user_id || currentTransport?.id || "-";
+
+  const vehicleNo =
+    currentTransport?.vehicleNo ||
+    currentTransport?.vehicle_no ||
+    currentTransportOperator?.vehicleNo ||
+    currentTransportOperator?.vehicle_no ||
+    "-";
+
+  const routeName =
+    currentTransport?.route ||
+    currentTransport?.routeName ||
+    currentTransport?.route_name ||
+    currentTransportOperator?.route_name ||
+    currentTransportOperator?.routeName ||
+    "-";
+
+  const handleLogout = () => {
+    Alert.alert("Logout", "Are you sure you want to logout?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            setLogoutLoading(true);
+            await dispatch(logoutSession()).unwrap();
+            dispatch(clearMe());
+            router.replace("/(auth)/login");
+          } finally {
+            setLogoutLoading(false);
+          }
+        },
+      },
+    ]);
+  };
 
   return (
     <Screen>
@@ -29,44 +103,68 @@ export default function TransportDashboard() {
           contentContainerStyle={{ paddingBottom: 32 }}
         >
           <View className="bg-[#071a35] px-5 pt-4 pb-6">
-            <View className="flex-row items-center">
-              <View className="h-16 w-16 items-center justify-center rounded-2xl border border-[#1e90ff] bg-[#0d274a]">
-                <MaterialCommunityIcons
-                  name="truck-fast-outline"
-                  size={30}
-                  color="#ffffff"
-                />
+            <View className="flex-row items-start justify-between">
+              <View className="flex-row items-center flex-1 pr-3">
+                <View className="h-16 w-16 items-center justify-center rounded-2xl border border-[#1e90ff] bg-[#0d274a]">
+                  <MaterialCommunityIcons
+                    name="truck-fast-outline"
+                    size={30}
+                    color="#ffffff"
+                  />
+                </View>
+
+                <View className="ml-3 flex-1">
+                  <Text className="text-[24px] font-extrabold text-white">
+                    Transport Dashboard
+                  </Text>
+                  <Text className="mt-1 text-[15px] font-semibold text-slate-400">
+                    Pickup & Transit Control
+                  </Text>
+                </View>
               </View>
 
-              <View className="ml-3 flex-1">
-                <Text className="text-[24px] font-extrabold text-white">
-                  Transport Dashboard
+              <Pressable
+                onPress={handleLogout}
+                disabled={logoutLoading}
+                className="rounded-[16px] border border-red-400 bg-red-500/15 px-4 py-3"
+              >
+                <Text className="text-[13px] font-extrabold text-red-300">
+                  {logoutLoading ? "Logging out..." : "Logout"}
                 </Text>
-                <Text className="mt-1 text-[15px] font-semibold text-slate-400">
-                  Pickup & Transit Control
-                </Text>
-              </View>
+              </Pressable>
             </View>
           </View>
 
           <View className="bg-[#16b8b2] px-5 py-6">
             <Text className="text-[28px] font-extrabold text-white">
-              {currentTransport.name}
+              {transportName}
             </Text>
             <Text className="mt-2 text-[15px] font-bold text-white/90">
-              Vehicle: {currentTransport.vehicleNo}
+              Vehicle: {vehicleNo}
             </Text>
             <Text className="mt-1 text-[15px] font-bold text-white/90">
-              ID: {currentTransport.id}
+              ID: {transportCode}
             </Text>
             <Text className="mt-1 text-[14px] font-semibold text-white/90">
-              Route: {currentTransport.route}
+              Route: {routeName}
             </Text>
 
             <View className="mt-5 flex-row gap-4">
-              <StatCard label="My Total" value={stats.totalMyCrates} bgClass="bg-[#2d8cff]" />
-              <StatCard label="Assigned" value={stats.assigned} bgClass="bg-[#12c48b]" />
-              <StatCard label="Transit" value={stats.inTransit} bgClass="bg-[#f1ab19]" />
+              <StatCard
+                label="My Total"
+                value={stats?.totalMyCrates || 0}
+                bgClass="bg-[#2d8cff]"
+              />
+              <StatCard
+                label="Assigned"
+                value={stats?.assigned || 0}
+                bgClass="bg-[#12c48b]"
+              />
+              <StatCard
+                label="Transit"
+                value={stats?.inTransit || 0}
+                bgClass="bg-[#f1ab19]"
+              />
             </View>
           </View>
 
@@ -76,12 +174,12 @@ export default function TransportDashboard() {
             </Text>
 
             <View className="flex-row gap-3">
-              {getLastNDays(4).map((dateKey) => {
-                const active = dateKey === selectedDate;
+              {last4Days.map((dateKey) => {
+                const active = dateKey === activeDate;
                 return (
                   <Pressable
                     key={dateKey}
-                    onPress={() => setSelectedDate(dateKey)}
+                    onPress={() => dispatch(setSelectedTransportDate(dateKey))}
                     className={`flex-1 rounded-[18px] border px-3 py-3 ${
                       active
                         ? "border-[#2d8cff] bg-[#14325a]"
@@ -108,7 +206,7 @@ export default function TransportDashboard() {
             </View>
 
             <Text className="mt-3 text-[14px] font-bold text-slate-300">
-              Selected: {formatDisplayDate(selectedDate)}
+              Selected: {formatDisplayDate(activeDate)}
             </Text>
           </View>
 
@@ -140,20 +238,20 @@ export default function TransportDashboard() {
 
             <View className="rounded-[24px] border border-slate-800 bg-[#0b172b] p-4">
               <Text className="text-[16px] font-bold text-white">
-                Assigned Now: {assignedCrates.length}
+                Assigned Now: {assignedCrates?.length || 0}
               </Text>
               <Text className="mt-2 text-[13px] text-slate-400">
-                {assignedCrates.length > 0
-                  ? assignedCrates.map((item) => item.id).join(", ")
+                {assignedCrates?.length > 0
+                  ? assignedCrates.map((item: any) => item.id).join(", ")
                   : "No assigned crates for this date."}
               </Text>
 
               <Text className="mt-5 text-[16px] font-bold text-white">
-                In Transit Now: {inTransitCrates.length}
+                In Transit Now: {inTransitCrates?.length || 0}
               </Text>
               <Text className="mt-2 text-[13px] text-slate-400">
-                {inTransitCrates.length > 0
-                  ? inTransitCrates.map((item) => item.id).join(", ")
+                {inTransitCrates?.length > 0
+                  ? inTransitCrates.map((item: any) => item.id).join(", ")
                   : "No crates in transit for this date."}
               </Text>
             </View>

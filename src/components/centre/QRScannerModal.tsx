@@ -8,7 +8,7 @@ import {
   View,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 
 type Props = {
   open: boolean;
@@ -17,7 +17,7 @@ type Props = {
   title?: string;
 };
 
-const BOX_SIZE = 270;
+const BOX_SIZE = 260;
 
 export default function QRScannerModal({
   open,
@@ -54,9 +54,7 @@ export default function QRScannerModal({
   };
 
   const handleScan = (data: string) => {
-    if (!data?.trim()) return;
-    if (locked) return;
-    if (!cameraReady) return;
+    if (!data?.trim() || locked || !cameraReady) return;
 
     setLocked(true);
     onScanned(data.trim());
@@ -80,46 +78,61 @@ export default function QRScannerModal({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <View className="flex-1 bg-black">
-        {/* Top bar */}
-        <View className="px-4 pt-14 pb-4 flex-row items-center justify-between bg-black">
-          <Text className="text-white font-semibold text-base">{title}</Text>
+      <View className="flex-1 bg-[#020817]">
+        <View className="px-5 pb-4 pt-14">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-row items-center">
+              <View className="h-12 w-12 items-center justify-center rounded-2xl bg-cyan-500/20">
+                <MaterialCommunityIcons
+                  name="qrcode-scan"
+                  size={24}
+                  color="#22d3ee"
+                />
+              </View>
 
-          <Pressable
-            onPress={onClose}
-            className="h-10 px-4 rounded-2xl items-center justify-center bg-white/10 border border-white/15"
-          >
-            <Text className="text-white font-medium">Close</Text>
-          </Pressable>
+              <View className="ml-3">
+                <Text className="text-lg font-extrabold text-white">{title}</Text>
+                <Text className="mt-1 text-xs text-slate-400">
+                  Hold the crate QR inside the blue frame
+                </Text>
+              </View>
+            </View>
+
+            <Pressable
+              onPress={onClose}
+              className="h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5"
+            >
+              <Ionicons name="close" size={20} color="#fff" />
+            </Pressable>
+          </View>
         </View>
 
-        {/* Camera area */}
-        <View className="flex-1 relative">
+        <View className="relative flex-1">
           {!permission ? (
             <View className="flex-1 items-center justify-center px-6">
               <ActivityIndicator size="large" color="#ffffff" />
-              <Text className="text-white/80 text-center mt-4">
+              <Text className="mt-4 text-center text-white/80">
                 Checking camera permission...
               </Text>
             </View>
           ) : !permission.granted ? (
             <View className="flex-1 items-center justify-center px-6">
-              <View className="w-16 h-16 rounded-full bg-white/10 items-center justify-center mb-4">
+              <View className="mb-4 h-16 w-16 items-center justify-center rounded-full bg-white/10">
                 <Ionicons name="camera-outline" size={28} color="#fff" />
               </View>
 
-              <Text className="text-white text-center text-base font-semibold">
+              <Text className="text-center text-base font-semibold text-white">
                 Camera permission required
               </Text>
-              <Text className="text-white/70 text-center mt-2">
+              <Text className="mt-2 text-center text-white/70">
                 Allow camera access to scan crate QR codes.
               </Text>
 
               <Pressable
                 onPress={handleRequestPermission}
-                className="mt-6 px-5 py-3 bg-white rounded-2xl"
+                className="mt-6 rounded-2xl bg-cyan-400 px-5 py-3"
               >
-                <Text className="text-black font-semibold">Allow Camera</Text>
+                <Text className="font-semibold text-slate-950">Allow Camera</Text>
               </Pressable>
             </View>
           ) : (
@@ -135,55 +148,48 @@ export default function QRScannerModal({
                 onMountError={handleMountError}
               />
 
-              {/* Proper cutout overlay */}
-              <View className="absolute inset-0 pointer-events-none">
-                {/* Top shade */}
-                <View className="flex-1 bg-black/55" />
+              <View className="pointer-events-none absolute inset-0">
+                <View className="flex-1 bg-black/60" />
 
-                {/* Middle row */}
                 <View className="flex-row items-center">
-                  <View className="flex-1 bg-black/55 h-[270px]" />
+                  <View className="h-[260px] flex-1 bg-black/60" />
 
-                  {/* Transparent scan box */}
                   <View
                     style={{ width: BOX_SIZE, height: BOX_SIZE }}
                     className="relative"
                   >
-                    {/* White border */}
-                    <View className="absolute inset-0 border-2 border-white rounded-[28px]" />
+                    <View className="absolute inset-0 rounded-[30px] border border-cyan-300/40 bg-transparent" />
+                    <View className="absolute inset-x-6 top-1/2 h-[2px] -translate-y-1/2 bg-cyan-400/60" />
 
-                    {/* Corner markers */}
-                    <View className="absolute top-0 left-0 w-10 h-10 border-t-4 border-l-4 border-cyan-400 rounded-tl-2xl" />
-                    <View className="absolute top-0 right-0 w-10 h-10 border-t-4 border-r-4 border-cyan-400 rounded-tr-2xl" />
-                    <View className="absolute bottom-0 left-0 w-10 h-10 border-b-4 border-l-4 border-cyan-400 rounded-bl-2xl" />
-                    <View className="absolute bottom-0 right-0 w-10 h-10 border-b-4 border-r-4 border-cyan-400 rounded-br-2xl" />
+                    <View className="absolute left-0 top-0 h-12 w-12 rounded-tl-[28px] border-l-4 border-t-4 border-cyan-400" />
+                    <View className="absolute right-0 top-0 h-12 w-12 rounded-tr-[28px] border-r-4 border-t-4 border-cyan-400" />
+                    <View className="absolute bottom-0 left-0 h-12 w-12 rounded-bl-[28px] border-b-4 border-l-4 border-cyan-400" />
+                    <View className="absolute bottom-0 right-0 h-12 w-12 rounded-br-[28px] border-b-4 border-r-4 border-cyan-400" />
                   </View>
 
-                  <View className="flex-1 bg-black/55 h-[270px]" />
+                  <View className="h-[260px] flex-1 bg-black/60" />
                 </View>
 
-                {/* Bottom shade */}
-                <View className="flex-1 bg-black/55" />
+                <View className="flex-1 bg-black/60" />
               </View>
 
               {!cameraReady && (
                 <View className="absolute inset-0 items-center justify-center bg-black">
                   <ActivityIndicator size="large" color="#ffffff" />
-                  <Text className="text-white/80 mt-4">Starting camera...</Text>
+                  <Text className="mt-4 text-white/80">Starting camera...</Text>
                 </View>
               )}
             </>
           )}
         </View>
 
-        {/* Bottom help */}
-        <View className="absolute left-0 right-0 bottom-0 p-4">
-          <View className="bg-black/55 border border-white/10 rounded-2xl p-4">
-            <Text className="text-white text-center font-medium">
-              Align the crate QR inside the frame
+        <View className="absolute bottom-0 left-0 right-0 p-5">
+          <View className="rounded-[24px] border border-white/10 bg-slate-950/70 p-4">
+            <Text className="text-center font-bold text-white">
+              Automatic scan is enabled
             </Text>
-            <Text className="text-white/70 text-center text-xs mt-1">
-              Scan will trigger automatically once detected
+            <Text className="mt-1 text-center text-xs text-slate-400">
+              Once detected, crate details will load immediately
             </Text>
           </View>
         </View>

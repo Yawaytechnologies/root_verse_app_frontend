@@ -1,11 +1,12 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  ActivityIndicator,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { router } from "expo-router";
@@ -16,21 +17,24 @@ import {
 } from "@expo/vector-icons";
 
 import Screen from "../../src/components/centre/Screen";
+import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
+import {
+  fetchCentreDashboardThunk,
+  fetchCentreCratesThunk,
+  fetchLoggedInCollectionOperatorThunk,
+  getCrateByIdThunk,
+  selectCentreCrateError,
+  selectCentreCrates,
+  selectCentreCrateStatus,
+  selectCentreDashboard,
+  selectCurrentCollectionOperator,
+} from "../../src/services/centre/centreCrate.slice";
+import { ApiCrate } from "../../src/services/centre/centreCrate.service";
+import { logoutSession } from "../../src/store/auth/authSession.slice";
+import { clearMe } from "../../src/store/auth/me.slice";
 
 type CentreTabKey = "scan" | "received" | "assign";
 type RecordStatus = "received" | "assigned" | "pending";
-
-type CrateRecord = {
-  id: string;
-  source: string;
-  status: RecordStatus;
-  date: string; // YYYY-MM-DD
-  assignedTo?: string;
-  driverName?: string;
-  vehicleNo?: string;
-  notes?: string;
-  assignedAt?: string;
-};
 
 type CalendarDay = {
   key: string;
@@ -39,33 +43,49 @@ type CalendarDay = {
   isFuture: boolean;
 };
 
-type AssignFormState = {
-  assignedTo: string;
-  driverName: string;
-  vehicleNo: string;
-  notes: string;
+type CrateRecord = {
+  id: string;
+  crateId: string | number;
+  source: string;
+  status: RecordStatus;
+  date: string;
+  rawStatus?: string;
+  custody?: string;
+  assignedTo?: string;
+  assignedLabel?: string;
+  driverName?: string;
+  vehicleNo?: string;
+  transportOperatorId?: string;
+  transportId?: string;
+  notes?: string;
+  assignedAt?: string;
+  temperature?: string;
+  raw?: ApiCrate;
 };
 
 export default function CentreDashboard() {
+  const dispatch = useAppDispatch();
+
+  const status = useAppSelector(selectCentreCrateStatus);
+  const error = useAppSelector(selectCentreCrateError);
+  const dashboard = useAppSelector(selectCentreDashboard);
+  const crates = useAppSelector(selectCentreCrates);
+  const currentCollectionOperator = useAppSelector(
+    selectCurrentCollectionOperator
+  );
+
   const [activeTab, setActiveTab] = useState<CentreTabKey>("scan");
+  const [logoutLoading, setLogoutLoading] = useState(false);
+  const [recordLoading, setRecordLoading] = useState(false);
 
   const today = useMemo(() => formatDateKey(new Date()), []);
-
   const [selectedDate, setSelectedDate] = useState<string>(today);
   const [calendarOpen, setCalendarOpen] = useState(false);
 
-  const [selectedRecord, setSelectedRecord] = useState<CrateRecord | null>(
+  const [selectedRecord, setSelectedRecord] = useState<ApiCrate | CrateRecord | null>(
     null
   );
   const [recordViewOpen, setRecordViewOpen] = useState(false);
-  const [assignFormOpen, setAssignFormOpen] = useState(false);
-
-  const [assignForm, setAssignForm] = useState<AssignFormState>({
-    assignedTo: "",
-    driverName: "",
-    vehicleNo: "",
-    notes: "",
-  });
 
   const initialMonth = useMemo(() => {
     const now = new Date();
@@ -77,6 +97,42 @@ export default function CentreDashboard() {
 
   const [calendarMonth, setCalendarMonth] = useState(initialMonth);
 
+  useEffect(() => {
+    dispatch(fetchLoggedInCollectionOperatorThunk());
+    dispatch(fetchCentreDashboardThunk());
+    dispatch(fetchCentreCratesThunk());
+  }, [dispatch]);
+
+  const handleRefresh = async () => {
+    await Promise.all([
+      dispatch(fetchLoggedInCollectionOperatorThunk()),
+      dispatch(fetchCentreDashboardThunk()),
+      dispatch(fetchCentreCratesThunk()),
+    ]);
+  };
+
+  const handleLogout = () => {
+    if (logoutLoading) return;
+
+    Alert.alert("Logout", "Are you sure you want to logout?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            setLogoutLoading(true);
+            await dispatch(logoutSession()).unwrap();
+            dispatch(clearMe());
+            router.replace("/(auth)/login");
+          } finally {
+            setLogoutLoading(false);
+          }
+        },
+      },
+    ]);
+  };
+
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
     const startYear = currentYear - 5;
@@ -87,28 +143,96 @@ export default function CentreDashboard() {
     );
   }, []);
 
-  const [crateData, setCrateData] = useState<CrateRecord[]>(() =>
-    buildInitialCrateData(today)
-  );
+  const mappedCrates = useMemo<CrateRecord[]>(() => {
+    return (crates || []).map((item: any, index: number) => {
+      const normalizedStatus = mapStatus(item);
+
+      const createdAt =
+        pickBestDate(item, normalizedStatus) ||
+        item?.scheduled_time_utc ||
+        item?.dispatchScheduledAt ||
+        item?.dispatch_scheduled_at ||
+        item?.assignedAt ||
+        item?.assigned_at ||
+        item?.receivedAt ||
+        item?.received_at ||
+        item?.updatedAt ||
+        item?.updated_at ||
+        item?.createdAt ||
+        item?.created_at;
+
+      const date = normalizeToDateKey(createdAt) || today;
+
+      const rawStatus = String(
+        item?.status || item?.crate_status || item?.dispatch_status || ""
+      ).toUpperCase();
+
+      const temperature =
+        item?.latestTemperature ??
+        item?.temperature_value ??
+        item?.temperature ??
+        item?.temperature_c ??
+        item?.temperature_logs?.[item?.temperature_logs?.length - 1]
+          ?.temperature_value ??
+        item?.temperatureLogs?.[item?.temperatureLogs?.length - 1]
+          ?.temperature_value ??
+        "-";
+
+      return {
+        id: String(
+          item?.crateCode ||
+            item?.crate_code ||
+            item?.code ||
+            item?.id ||
+            item?.crateId ||
+            item?.crate_id ||
+            `CRATE-${index + 1}`
+        ),
+        crateId:
+          item?.crateId ?? item?.crate_id ?? item?.id ?? `CRATE-${index + 1}`,
+        source: buildSourceLabel(item, normalizedStatus),
+        status: normalizedStatus,
+        date,
+        rawStatus,
+        custody: item?.custody ?? item?.custody_status,
+        assignedTo:
+          item?.assignedTo ||
+          item?.assigned_to ||
+          item?.destinationName ||
+          item?.destination_name ||
+          item?.assigned_to_label ||
+          item?.assignedToLabel ||
+          (item?.destinationId || item?.destination_id
+            ? `Destination ${item?.destinationId || item?.destination_id}`
+            : undefined),
+        assignedLabel: item?.assigned_to_label || item?.assignedToLabel,
+        driverName: item?.driverName || item?.driver_name,
+        vehicleNo: item?.vehicleNo || item?.vehicle_no,
+        transportOperatorId: String(
+          item?.assignedTransportOperatorId ||
+            item?.assigned_transport_operator_id ||
+            item?.transport_operator_id ||
+            "-"
+        ),
+        transportId: String(item?.transportId || item?.transport_id || "-"),
+        notes: item?.notes || item?.remark || item?.remarks,
+        assignedAt:
+          item?.scheduled_time_utc ||
+          item?.assignedAt ||
+          item?.assigned_at ||
+          item?.dispatchScheduledAt ||
+          item?.dispatch_scheduled_at ||
+          item?.updatedAt ||
+          item?.updated_at,
+        temperature: String(temperature ?? "-"),
+        raw: item,
+      };
+    });
+  }, [crates, today]);
 
   const selectedRecords = useMemo(() => {
-    return crateData.filter((item) => item.date === selectedDate);
-  }, [crateData, selectedDate]);
-
-  const stats = useMemo(() => {
-    const total = selectedRecords.length;
-    const received = selectedRecords.filter(
-      (item) => item.status === "received"
-    ).length;
-    const assigned = selectedRecords.filter(
-      (item) => item.status === "assigned"
-    ).length;
-    const pending = selectedRecords.filter(
-      (item) => item.status === "pending"
-    ).length;
-
-    return { total, received, assigned, pending };
-  }, [selectedRecords]);
+    return mappedCrates.filter((item) => item.date === selectedDate);
+  }, [mappedCrates, selectedDate]);
 
   const receivedList = useMemo(() => {
     return selectedRecords.filter((item) => item.status === "received");
@@ -117,6 +241,79 @@ export default function CentreDashboard() {
   const assignedList = useMemo(() => {
     return selectedRecords.filter((item) => item.status === "assigned");
   }, [selectedRecords]);
+
+  const pendingList = useMemo(() => {
+    return selectedRecords.filter((item) => item.status === "pending");
+  }, [selectedRecords]);
+
+  const apiStats = useMemo(() => {
+    const raw = dashboard || {};
+
+    return {
+      total:
+        numberOrNull(
+          raw?.totalCrates ??
+            raw?.total_crates ??
+            raw?.total ??
+            raw?.crateCount ??
+            raw?.crate_count
+        ) ?? null,
+      received:
+        numberOrNull(
+          raw?.receivedCrates ??
+            raw?.received_crates ??
+            raw?.received ??
+            raw?.receivedCount ??
+            raw?.received_count
+        ) ?? null,
+      assigned:
+        numberOrNull(
+          raw?.assignedCrates ??
+            raw?.assigned_crates ??
+            raw?.assigned ??
+            raw?.assignedCount ??
+            raw?.assigned_count ??
+            raw?.scheduledCount ??
+            raw?.scheduled_count
+        ) ?? null,
+      pending:
+        numberOrNull(
+          raw?.pendingCrates ??
+            raw?.pending_crates ??
+            raw?.pending ??
+            raw?.pendingCount ??
+            raw?.pending_count
+        ) ?? null,
+    };
+  }, [dashboard]);
+
+  const stats = useMemo(() => {
+    const local = {
+      total: selectedRecords.length,
+      received: receivedList.length,
+      assigned: assignedList.length,
+      pending: pendingList.length,
+    };
+
+    if (selectedDate === today) {
+      return {
+        total: apiStats.total ?? local.total,
+        received: apiStats.received ?? local.received,
+        assigned: apiStats.assigned ?? local.assigned,
+        pending: apiStats.pending ?? local.pending,
+      };
+    }
+
+    return local;
+  }, [
+    apiStats,
+    assignedList.length,
+    pendingList.length,
+    receivedList.length,
+    selectedDate,
+    selectedRecords.length,
+    today,
+  ]);
 
   const isTodaySelected = selectedDate === today;
 
@@ -131,6 +328,8 @@ export default function CentreDashboard() {
       calendarMonth.month === now.getMonth()
     );
   }, [calendarMonth]);
+
+  const loading = status === "loading";
 
   const openCalendar = () => {
     const [y, m] = selectedDate.split("-").map(Number);
@@ -180,9 +379,23 @@ export default function CentreDashboard() {
     setCalendarOpen(false);
   };
 
-  const handleOpenRecordView = (record: CrateRecord) => {
-    setSelectedRecord(record);
-    setRecordViewOpen(true);
+  const handleOpenRecordView = async (record: CrateRecord) => {
+    try {
+      setRecordLoading(true);
+
+      const fresh = await dispatch(getCrateByIdThunk(record.crateId)).unwrap();
+
+      setSelectedRecord({
+        ...record,
+        ...fresh,
+      });
+      setRecordViewOpen(true);
+    } catch {
+      setSelectedRecord(record);
+      setRecordViewOpen(true);
+    } finally {
+      setRecordLoading(false);
+    }
   };
 
   const handleCloseRecordView = () => {
@@ -190,64 +403,41 @@ export default function CentreDashboard() {
     setSelectedRecord(null);
   };
 
-  const handleOpenAssignForm = (record: CrateRecord) => {
-    setSelectedRecord(record);
-    setAssignForm({
-      assignedTo: record.assignedTo ?? "",
-      driverName: record.driverName ?? "",
-      vehicleNo: record.vehicleNo ?? "",
-      notes: record.notes ?? "",
-    });
-    setRecordViewOpen(false);
-    setAssignFormOpen(true);
-  };
+  const centreName =
+    dashboard?.centreName ||
+    dashboard?.centre_name ||
+    dashboard?.name ||
+    "Collection Centre";
 
-  const handleCloseAssignForm = () => {
-    setAssignFormOpen(false);
-  };
+  const operatorName =
+    currentCollectionOperator?.full_name ||
+    dashboard?.operatorName ||
+    dashboard?.operator_name ||
+    dashboard?.userName ||
+    dashboard?.user_name ||
+    dashboard?.name ||
+    "Operator";
 
-  const handleSubmitAssign = () => {
-    if (!selectedRecord) return;
+  const operatorRole =
+    currentCollectionOperator?.designation ||
+    currentCollectionOperator?.role ||
+    dashboard?.role ||
+    dashboard?.designation ||
+    "Centre Operator";
 
-    if (!assignForm.assignedTo.trim()) {
-      Alert.alert("Validation", "Assigned To is required.");
-      return;
-    }
+  const operatorLocation =
+    dashboard?.location ||
+    dashboard?.centreLocation ||
+    dashboard?.centre_location ||
+    "Location unavailable";
 
-    if (!assignForm.driverName.trim()) {
-      Alert.alert("Validation", "Driver Name is required.");
-      return;
-    }
-
-    if (!assignForm.vehicleNo.trim()) {
-      Alert.alert("Validation", "Vehicle Number is required.");
-      return;
-    }
-
-    const updatedRecord: CrateRecord = {
-      ...selectedRecord,
-      status: "assigned",
-      source: "Assigned to transport",
-      assignedTo: assignForm.assignedTo.trim(),
-      driverName: assignForm.driverName.trim(),
-      vehicleNo: assignForm.vehicleNo.trim().toUpperCase(),
-      notes: assignForm.notes.trim(),
-      assignedAt: formatDateTimeLabel(new Date()),
-    };
-
-    setCrateData((prev) =>
-      prev.map((item) => (item.id === updatedRecord.id ? updatedRecord : item))
-    );
-
-    setSelectedRecord(updatedRecord);
-    setAssignFormOpen(false);
-    setActiveTab("assign");
-
-    Alert.alert(
-      "Success",
-      `${updatedRecord.id} moved to Assigned Dispatch successfully.`
-    );
-  };
+  const operatorCode =
+    currentCollectionOperator?.user_id ||
+    dashboard?.operatorCode ||
+    dashboard?.operator_code ||
+    dashboard?.centreCode ||
+    dashboard?.centre_code ||
+    "-";
 
   return (
     <Screen>
@@ -255,8 +445,10 @@ export default function CentreDashboard() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 32 }}
+          refreshControl={
+            <RefreshControl refreshing={loading} onRefresh={handleRefresh} />
+          }
         >
-          {/* Header */}
           <View className="bg-[#071a35] px-5 pt-4 pb-6">
             <View className="flex-row items-center justify-between">
               <View className="flex-1 flex-row items-center pr-3">
@@ -270,7 +462,7 @@ export default function CentreDashboard() {
 
                 <View className="ml-3 flex-1">
                   <Text className="text-[24px] font-extrabold text-white">
-                    Collection Centre
+                    {centreName}
                   </Text>
                   <Text className="mt-1 text-[15px] font-semibold text-slate-400">
                     Operator Dashboard
@@ -278,28 +470,32 @@ export default function CentreDashboard() {
                 </View>
               </View>
 
-              <Pressable className="flex-row items-center rounded-2xl border border-slate-700 bg-[#102544] px-4 py-3">
+              <Pressable
+                onPress={handleLogout}
+                disabled={logoutLoading}
+                className="flex-row items-center rounded-2xl border border-slate-700 bg-[#102544] px-4 py-3"
+              >
                 <Feather name="log-out" size={18} color="#fff" />
                 <Text className="ml-2 text-[15px] font-bold text-white">
-                  Logout
+                  {logoutLoading ? "Logging out..." : "Logout"}
                 </Text>
               </Pressable>
             </View>
           </View>
 
-          {/* Profile + stats */}
           <View className="flex-row bg-[#16b8b2] px-5 py-6">
             <View className="flex-1 pr-4">
               <Text className="text-[30px] font-extrabold text-white">
-                Jana
+                {operatorName}
               </Text>
 
               <Text className="mt-3 text-[15px] font-bold leading-7 text-white/90">
-                Centre Operator{"\n"}• Nagapattinam, TamilNadu
+                {operatorRole}
+                {"\n"}• {operatorLocation}
               </Text>
 
               <Text className="mt-3 text-[16px] font-extrabold text-white/95">
-                ID: CC-000003
+                ID: {operatorCode}
               </Text>
 
               <View className="mt-4 flex-row items-center">
@@ -343,7 +539,6 @@ export default function CentreDashboard() {
             </View>
           </View>
 
-          {/* Date Selector */}
           <View className="bg-[#06152b] px-5 pt-5 pb-3">
             <Text className="mb-3 text-[18px] font-extrabold text-white">
               Select Date
@@ -377,17 +572,24 @@ export default function CentreDashboard() {
             <View className="mt-3 rounded-2xl border border-slate-800 bg-[#0b172b] px-4 py-3">
               {isTodaySelected ? (
                 <Text className="text-[14px] font-bold text-[#12c48b]">
-                  Today selected. Scan, receive, and assign are enabled.
+                  Today selected. Receive, log temp, and assign are enabled.
                 </Text>
               ) : (
                 <Text className="text-[14px] font-bold text-[#f1ab19]">
-                  Past date selected. View only mode. Scan is disabled.
+                  Past date selected. View only mode.
                 </Text>
               )}
             </View>
+
+            {!!error && (
+              <View className="mt-3 rounded-2xl border border-red-800 bg-red-950/30 px-4 py-3">
+                <Text className="text-[14px] font-bold text-red-300">
+                  {error}
+                </Text>
+              </View>
+            )}
           </View>
 
-          {/* Tabs */}
           <View className="border-t border-slate-800 bg-[#06152b]">
             <View className="flex-row items-center px-2">
               <TabButton
@@ -431,24 +633,41 @@ export default function CentreDashboard() {
             </View>
           </View>
 
-          {/* Content */}
           <View className="px-5 pt-6">
+            {loading && mappedCrates.length === 0 ? (
+              <View className="items-center justify-center rounded-[24px] border border-slate-800 bg-[#0b172b] py-10">
+                <ActivityIndicator size="large" color="#2d8cff" />
+                <Text className="mt-4 text-[14px] font-semibold text-slate-400">
+                  Loading collection centre dashboard...
+                </Text>
+              </View>
+            ) : null}
+
+            {recordLoading && (
+              <View className="mb-4 items-center justify-center rounded-[22px] border border-slate-800 bg-[#0b172b] px-4 py-4">
+                <ActivityIndicator size="small" color="#2d8cff" />
+                <Text className="mt-2 text-[13px] font-semibold text-slate-400">
+                  Loading crate details...
+                </Text>
+              </View>
+            )}
+
             {activeTab === "scan" && (
               <View>
                 <Text className="mb-5 text-[22px] font-extrabold text-white">
-                  Centre Scanner
+                  Centre Operations
                 </Text>
 
                 <View className="rounded-[28px] border border-slate-800 bg-[#0b172b] p-4">
                   <Text className="mb-2 text-[17px] font-bold text-slate-200">
                     {isTodaySelected
-                      ? "Scan crate QR to continue"
-                      : "Past date records cannot be scanned"}
+                      ? "Run crate receive flow"
+                      : "Past date records cannot be changed"}
                   </Text>
 
                   <Text className="mb-5 text-[14px] text-slate-400">
                     {isTodaySelected
-                      ? "Use this section for crate receive or crate assign flow."
+                      ? "Step 1 Receive → Step 2 Temperature → Step 3 Assign transport"
                       : `Showing view-only records for ${formatDisplayDate(
                           selectedDate
                         )}.`}
@@ -456,43 +675,23 @@ export default function CentreDashboard() {
 
                   <View className="gap-3">
                     <ActionButton
-                      title="Receive Crate (Scan)"
+                      title="Receive Crate"
                       icon="download-outline"
                       disabled={!isTodaySelected}
                       onPress={() => router.push("/(centre)/receive")}
                     />
                     <ActionButton
-                      title="Assign Dispatch (Scan)"
+                      title="Log Temperature"
+                      icon="thermometer-outline"
+                      disabled={!isTodaySelected}
+                      onPress={() => router.push("/(centre)/temp-log")}
+                    />
+                    <ActionButton
+                      title="Assign Dispatch"
                       icon="car-outline"
                       disabled={!isTodaySelected}
                       onPress={() => router.push("/(centre)/assign")}
                     />
-                  </View>
-
-                  <View className="mt-6 min-h-[300px] items-center justify-center rounded-[24px] border border-slate-800 bg-[#040b19] p-5">
-                    <View
-                      className={`w-full items-center justify-center rounded-[24px] border-2 p-8 ${
-                        isTodaySelected
-                          ? "border-dashed border-[#1f86ff]"
-                          : "border-slate-700"
-                      }`}
-                    >
-                      <Ionicons
-                        name={isTodaySelected ? "scan" : "lock-closed-outline"}
-                        size={56}
-                        color={isTodaySelected ? "#1f86ff" : "#64748b"}
-                      />
-                      <Text className="mt-4 text-[18px] font-bold text-slate-300">
-                        {isTodaySelected
-                          ? "Align QR inside the box"
-                          : "Scanner disabled for past dates"}
-                      </Text>
-                      <Text className="mt-2 text-center text-[13px] text-slate-500">
-                        {isTodaySelected
-                          ? "Camera preview / QR scanner UI can be shown here"
-                          : "You can only view received and assigned records for previous days"}
-                      </Text>
-                    </View>
                   </View>
                 </View>
               </View>
@@ -510,9 +709,13 @@ export default function CentreDashboard() {
                   <View className="gap-3">
                     {receivedList.map((item) => (
                       <ListCard
-                        key={item.id}
+                        key={`${item.crateId}-${item.id}`}
                         title={item.id}
-                        subtitle={item.source}
+                        subtitle={`${item.source}${
+                          item.temperature && item.temperature !== "-"
+                            ? ` • Temp ${item.temperature}°C`
+                            : ""
+                        }`}
                         rightText="View"
                         rightColor="#12c48b"
                         onPress={() => handleOpenRecordView(item)}
@@ -535,7 +738,7 @@ export default function CentreDashboard() {
                   <View className="gap-3">
                     {assignedList.map((item) => (
                       <ListCard
-                        key={item.id}
+                        key={`${item.crateId}-${item.id}`}
                         title={item.id}
                         subtitle={
                           item.assignedTo
@@ -547,17 +750,6 @@ export default function CentreDashboard() {
                         onPress={() => handleOpenRecordView(item)}
                       />
                     ))}
-
-                    {isTodaySelected && (
-                      <Pressable
-                        onPress={() => router.push("/(centre)/assign")}
-                        className="mt-3 items-center rounded-[22px] bg-[#18488d] py-4"
-                      >
-                        <Text className="text-[16px] font-extrabold text-white">
-                          Go to Assign Screen
-                        </Text>
-                      </Pressable>
-                    )}
                   </View>
                 )}
               </View>
@@ -584,21 +776,6 @@ export default function CentreDashboard() {
           visible={recordViewOpen}
           onClose={handleCloseRecordView}
           record={selectedRecord}
-          canAssign={!!selectedRecord && selectedRecord.status === "received" && isTodaySelected}
-          onPressAssign={() => {
-            if (selectedRecord) {
-              handleOpenAssignForm(selectedRecord);
-            }
-          }}
-        />
-
-        <AssignFormModal
-          visible={assignFormOpen}
-          onClose={handleCloseAssignForm}
-          record={selectedRecord}
-          form={assignForm}
-          onChange={setAssignForm}
-          onSubmit={handleSubmitAssign}
         />
       </View>
     </Screen>
@@ -771,13 +948,6 @@ function CalendarModal({
                 );
               })}
             </View>
-
-            <View className="mt-2 rounded-2xl bg-[#040b19] px-4 py-3">
-              <Text className="text-[13px] font-semibold text-slate-300">
-                Future dates are disabled. Only today and past dates can be
-                selected.
-              </Text>
-            </View>
           </View>
         </View>
       </View>
@@ -789,30 +959,48 @@ function RecordViewModal({
   visible,
   onClose,
   record,
-  canAssign,
-  onPressAssign,
 }: {
   visible: boolean;
   onClose: () => void;
-  record: CrateRecord | null;
-  canAssign: boolean;
-  onPressAssign: () => void;
+  record: any;
 }) {
   if (!record) return null;
 
+  const status = mapStatus(record);
+
   const statusColor =
-    record.status === "received"
+    status === "received"
       ? "#12c48b"
-      : record.status === "assigned"
+      : status === "assigned"
       ? "#2d8cff"
       : "#ef5a67";
 
   const statusText =
-    record.status === "received"
+    status === "received"
       ? "Received"
-      : record.status === "assigned"
+      : status === "assigned"
       ? "Assigned"
       : "Pending";
+
+  const displayDate =
+    normalizeToDateKey(
+      record?.assignedAt ||
+        record?.assigned_at ||
+        record?.scheduled_time_utc ||
+        record?.receivedAt ||
+        record?.received_at ||
+        record?.updatedAt ||
+        record?.updated_at ||
+        record?.createdAt ||
+        record?.created_at
+    ) || record?.date;
+
+  const temperature =
+    record?.latestTemperature ??
+    record?.temperature_value ??
+    record?.temperature ??
+    record?.temperature_c ??
+    "-";
 
   return (
     <Modal
@@ -836,157 +1024,117 @@ function RecordViewModal({
             </Pressable>
           </View>
 
-          <View className="rounded-[24px] border border-slate-700 bg-[#0b172b] p-4">
-            <View className="flex-row items-start justify-between">
-              <View className="flex-1 pr-3">
-                <Text className="text-[20px] font-extrabold text-white">
-                  {record.id}
-                </Text>
-                <Text className="mt-2 text-[13px] text-slate-400">
-                  {record.source}
-                </Text>
-              </View>
-
-              <View
-                style={{ backgroundColor: statusColor }}
-                className="rounded-full px-4 py-2"
-              >
-                <Text className="text-[12px] font-extrabold text-white">
-                  {statusText}
-                </Text>
-              </View>
-            </View>
-
-            <View className="mt-5 gap-3">
-              <DetailRow label="Date" value={formatDisplayDate(record.date)} />
-              <DetailRow label="Status" value={statusText} />
-              <DetailRow
-                label="Assigned To"
-                value={record.assignedTo || "-"}
-              />
-              <DetailRow
-                label="Driver Name"
-                value={record.driverName || "-"}
-              />
-              <DetailRow
-                label="Vehicle Number"
-                value={record.vehicleNo || "-"}
-              />
-              <DetailRow label="Assigned At" value={record.assignedAt || "-"} />
-              <DetailRow label="Notes" value={record.notes || "-"} />
-            </View>
-
-            {canAssign && (
-              <Pressable
-                onPress={onPressAssign}
-                className="mt-6 items-center rounded-[22px] bg-[#18488d] py-4"
-              >
-                <Text className="text-[16px] font-extrabold text-white">
-                  Assign This Crate
-                </Text>
-              </Pressable>
-            )}
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-function AssignFormModal({
-  visible,
-  onClose,
-  record,
-  form,
-  onChange,
-  onSubmit,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  record: CrateRecord | null;
-  form: AssignFormState;
-  onChange: React.Dispatch<React.SetStateAction<AssignFormState>>;
-  onSubmit: () => void;
-}) {
-  if (!record) return null;
-
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
-      <View className="flex-1 justify-end bg-black/60">
-        <View className="rounded-t-[30px] bg-[#071a35] px-5 pt-5 pb-8">
-          <View className="mb-5 flex-row items-center justify-between">
-            <Text className="text-[20px] font-extrabold text-white">
-              Assign Dispatch Form
-            </Text>
-
-            <Pressable
-              onPress={onClose}
-              className="h-10 w-10 items-center justify-center rounded-full bg-[#102544]"
-            >
-              <Ionicons name="close" size={20} color="#fff" />
-            </Pressable>
-          </View>
-
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 12 }}
-          >
+          <ScrollView showsVerticalScrollIndicator={false}>
             <View className="rounded-[24px] border border-slate-700 bg-[#0b172b] p-4">
-              <Text className="mb-5 text-[18px] font-extrabold text-white">
-                {record.id}
-              </Text>
+              <View className="flex-row items-start justify-between">
+                <View className="flex-1 pr-3">
+                  <Text className="text-[20px] font-extrabold text-white">
+                    {String(
+                      record?.crateCode ||
+                        record?.crate_code ||
+                        record?.code ||
+                        record?.id ||
+                        "-"
+                    )}
+                  </Text>
+                  <Text className="mt-2 text-[13px] text-slate-400">
+                    {record?.source ||
+                      record?.destination_name ||
+                      record?.destinationName ||
+                      "Crate detail view"}
+                  </Text>
+                </View>
 
-              <InputField
-                label="Assigned To"
-                placeholder="Enter dispatch team / unit"
-                value={form.assignedTo}
-                onChangeText={(value) =>
-                  onChange((prev) => ({ ...prev, assignedTo: value }))
-                }
-              />
+                <View
+                  style={{ backgroundColor: statusColor }}
+                  className="rounded-full px-4 py-2"
+                >
+                  <Text className="text-[12px] font-extrabold text-white">
+                    {statusText}
+                  </Text>
+                </View>
+              </View>
 
-              <InputField
-                label="Driver Name"
-                placeholder="Enter driver name"
-                value={form.driverName}
-                onChangeText={(value) =>
-                  onChange((prev) => ({ ...prev, driverName: value }))
-                }
-              />
-
-              <InputField
-                label="Vehicle Number"
-                placeholder="Enter vehicle number"
-                value={form.vehicleNo}
-                autoCapitalize="characters"
-                onChangeText={(value) =>
-                  onChange((prev) => ({ ...prev, vehicleNo: value }))
-                }
-              />
-
-              <InputField
-                label="Notes"
-                placeholder="Optional notes"
-                value={form.notes}
-                multiline
-                onChangeText={(value) =>
-                  onChange((prev) => ({ ...prev, notes: value }))
-                }
-              />
-
-              <Pressable
-                onPress={onSubmit}
-                className="mt-3 items-center rounded-[22px] bg-[#18488d] py-4"
-              >
-                <Text className="text-[16px] font-extrabold text-white">
-                  Submit and Move to Assign
-                </Text>
-              </Pressable>
+              <View className="mt-5 gap-3">
+                <DetailRow
+                  label="Date"
+                  value={displayDate ? formatDisplayDate(displayDate) : "-"}
+                />
+                <DetailRow label="Status" value={statusText} />
+                <DetailRow
+                  label="Backend Status"
+                  value={String(
+                    record?.status ||
+                      record?.crate_status ||
+                      record?.dispatch_status ||
+                      "-"
+                  )}
+                />
+                <DetailRow
+                  label="Custody"
+                  value={String(
+                    record?.custody ||
+                      record?.custody_status ||
+                      record?.current_custodian_role ||
+                      "-"
+                  )}
+                />
+                <DetailRow
+                  label="Assigned To"
+                  value={String(
+                    record?.destination_name ||
+                      record?.destinationName ||
+                      record?.assigned_to_label ||
+                      record?.assignedToLabel ||
+                      "-"
+                  )}
+                />
+                <DetailRow
+                  label="Assigned Label"
+                  value={String(
+                    record?.assigned_to_label ||
+                      record?.assignedToLabel ||
+                      "-"
+                  )}
+                />
+                <DetailRow
+                  label="Transport Operator ID"
+                  value={String(
+                    record?.transport_operator_id ||
+                      record?.assigned_transport_operator_id ||
+                      record?.assignedTransportOperatorId ||
+                      "-"
+                  )}
+                />
+                <DetailRow
+                  label="Transport ID"
+                  value={String(record?.transport_id || record?.transportId || "-")}
+                />
+                <DetailRow
+                  label="Driver Name"
+                  value={String(record?.driver_name || record?.driverName || "-")}
+                />
+                <DetailRow
+                  label="Vehicle Number"
+                  value={String(record?.vehicle_no || record?.vehicleNo || "-")}
+                />
+                <DetailRow
+                  label="Assigned At"
+                  value={String(
+                    record?.scheduled_time_utc ||
+                      record?.assignedAt ||
+                      record?.assigned_at ||
+                      record?.dispatchScheduledAt ||
+                      record?.dispatch_scheduled_at ||
+                      "-"
+                  )}
+                />
+                <DetailRow label="Temperature" value={String(temperature)} />
+                <DetailRow
+                  label="Notes"
+                  value={String(record?.notes || record?.remark || record?.remarks || "-")}
+                />
+              </View>
             </View>
           </ScrollView>
         </View>
@@ -1006,42 +1154,6 @@ function DetailRow({
     <View className="rounded-2xl bg-[#102544] px-4 py-3">
       <Text className="text-[12px] font-semibold text-slate-400">{label}</Text>
       <Text className="mt-1 text-[15px] font-bold text-white">{value}</Text>
-    </View>
-  );
-}
-
-function InputField({
-  label,
-  value,
-  placeholder,
-  onChangeText,
-  multiline = false,
-  autoCapitalize = "sentences",
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  onChangeText: (value: string) => void;
-  multiline?: boolean;
-  autoCapitalize?: "none" | "sentences" | "words" | "characters";
-}) {
-  return (
-    <View className="mb-4">
-      <Text className="mb-2 text-[13px] font-semibold text-slate-300">
-        {label}
-      </Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor="#64748b"
-        autoCapitalize={autoCapitalize}
-        multiline={multiline}
-        textAlignVertical={multiline ? "top" : "center"}
-        className={`rounded-[18px] border border-slate-700 bg-[#102544] px-4 text-white ${
-          multiline ? "min-h-[110px] py-4" : "py-4"
-        }`}
-      />
     </View>
   );
 }
@@ -1188,97 +1300,129 @@ function EmptyState({ text }: { text: string }) {
   );
 }
 
-/* helpers */
+function numberOrNull(value: any): number | null {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
 
-function buildInitialCrateData(today: string): CrateRecord[] {
-  return [
-    {
-      id: "RV-CRATE-000121",
-      source: "Received from Wild Capture",
-      status: "received",
-      date: today,
-    },
-    {
-      id: "RV-CRATE-000122",
-      source: "Received from Wild Capture",
-      status: "received",
-      date: today,
-    },
-    {
-      id: "RV-CRATE-000123",
-      source: "Awaiting next step",
-      status: "pending",
-      date: today,
-    },
-    {
-      id: "RV-CRATE-000118",
-      source: "Assigned to transport",
-      status: "assigned",
-      date: today,
-      assignedTo: "Nagapattinam Dispatch",
-      driverName: "Prakash",
-      vehicleNo: "TN51AB4321",
-      notes: "Ready for delivery route",
-      assignedAt: formatDateTimeLabel(new Date()),
-    },
-    {
-      id: "RV-CRATE-000119",
-      source: "Assigned to transport",
-      status: "assigned",
-      date: today,
-      assignedTo: "Main Harbour Dispatch",
-      driverName: "Arun",
-      vehicleNo: "TN49CD8765",
-      notes: "Urgent dispatch",
-      assignedAt: formatDateTimeLabel(new Date()),
-    },
-    {
-      id: "RV-CRATE-000110",
-      source: "Received from Wild Capture",
-      status: "received",
-      date: offsetDateKey(today, -1),
-    },
-    {
-      id: "RV-CRATE-000111",
-      source: "Assigned to transport",
-      status: "assigned",
-      date: offsetDateKey(today, -1),
-      assignedTo: "Yesterday Dispatch",
-      driverName: "Muthu",
-      vehicleNo: "TN22EF1234",
-      notes: "Completed",
-      assignedAt: formatDateTimeLabel(new Date()),
-    },
-    {
-      id: "RV-CRATE-000112",
-      source: "Awaiting next step",
-      status: "pending",
-      date: offsetDateKey(today, -1),
-    },
-    {
-      id: "RV-CRATE-000101",
-      source: "Received from Wild Capture",
-      status: "received",
-      date: offsetDateKey(today, -2),
-    },
-    {
-      id: "RV-CRATE-000102",
-      source: "Assigned to transport",
-      status: "assigned",
-      date: offsetDateKey(today, -2),
-      assignedTo: "Zone 2 Dispatch",
-      driverName: "Ravi",
-      vehicleNo: "TN09GH2222",
-      notes: "Moved from centre",
-      assignedAt: formatDateTimeLabel(new Date()),
-    },
-    {
-      id: "RV-CRATE-000090",
-      source: "Received from Wild Capture",
-      status: "received",
-      date: offsetDateKey(today, -3),
-    },
-  ];
+function normalizeToDateKey(value: any): string | null {
+  if (!value) return null;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return formatDateKey(date);
+}
+
+function pickBestDate(item: any, status: RecordStatus): string | null {
+  if (status === "assigned") {
+    return (
+      item?.scheduled_time_utc ||
+      item?.assignedAt ||
+      item?.assigned_at ||
+      item?.dispatchScheduledAt ||
+      item?.dispatch_scheduled_at ||
+      item?.updatedAt ||
+      item?.updated_at ||
+      item?.createdAt ||
+      item?.created_at ||
+      null
+    );
+  }
+
+  if (status === "received") {
+    return (
+      item?.receivedAt ||
+      item?.received_at ||
+      item?.updatedAt ||
+      item?.updated_at ||
+      item?.createdAt ||
+      item?.created_at ||
+      null
+    );
+  }
+
+  return (
+    item?.updatedAt ||
+    item?.updated_at ||
+    item?.createdAt ||
+    item?.created_at ||
+    null
+  );
+}
+
+function buildSourceLabel(item: any, status: RecordStatus) {
+  if (status === "assigned") {
+    return (
+      item?.assigned_to_label ||
+      item?.assignedToLabel ||
+      item?.destination_name ||
+      item?.destinationName ||
+      "Assigned to transport"
+    );
+  }
+
+  if (status === "received") {
+    return (
+      item?.source ||
+      item?.source_name ||
+      item?.origin ||
+      "Received at collection centre"
+    );
+  }
+
+  return item?.source || item?.source_name || "Awaiting next step";
+}
+
+function mapStatus(item: any): RecordStatus {
+  const status = String(
+    item?.status || item?.crate_status || item?.dispatch_status || ""
+  ).toUpperCase();
+
+  const custody = String(
+    item?.custody ||
+      item?.custody_status ||
+      item?.current_custodian_role ||
+      ""
+  ).toUpperCase();
+
+  const hasAssignedTransport =
+    custody.includes("SCHEDULED_FOR_DISPATCH") ||
+    custody.includes("DISPATCH") ||
+    status.includes("ASSIGN") ||
+    status.includes("DISPATCH") ||
+    status.includes("SCHEDULED") ||
+    !!item?.assignedTransportOperatorId ||
+    !!item?.assigned_transport_operator_id ||
+    !!item?.transport_operator_id ||
+    !!item?.transportId ||
+    !!item?.transport_id ||
+    !!item?.destinationName ||
+    !!item?.destination_name ||
+    !!item?.assigned_to_label ||
+    !!item?.assignedToLabel ||
+    !!item?.driverName ||
+    !!item?.driver_name ||
+    !!item?.vehicleNo ||
+    !!item?.vehicle_no ||
+    !!item?.scheduled_time_utc ||
+    !!item?.dispatchScheduledAt ||
+    !!item?.dispatch_scheduled_at;
+
+  if (hasAssignedTransport) return "assigned";
+
+  const isReceived =
+    custody.includes("RECEIVED_AT_COLLECTION_CENTRE") ||
+    custody.includes("COLLECTION_CENTRE") ||
+    custody.includes("CENTRE") ||
+    status.includes("RECEIVE") ||
+    status.includes("RECEIVED") ||
+    status.includes("COLLECTION") ||
+    status === "CLOSED";
+
+  if (isReceived) return "received";
+
+  return "pending";
 }
 
 function formatDateKey(date: Date) {
@@ -1286,13 +1430,6 @@ function formatDateKey(date: Date) {
   const m = `${date.getMonth() + 1}`.padStart(2, "0");
   const d = `${date.getDate()}`.padStart(2, "0");
   return `${y}-${m}-${d}`;
-}
-
-function offsetDateKey(baseDateKey: string, offset: number) {
-  const [y, m, d] = baseDateKey.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  date.setDate(date.getDate() + offset);
-  return formatDateKey(date);
 }
 
 function formatDisplayDate(dateKey: string) {
@@ -1303,16 +1440,6 @@ function formatDisplayDate(dateKey: string) {
     day: "2-digit",
     month: "short",
     year: "numeric",
-  });
-}
-
-function formatDateTimeLabel(date: Date) {
-  return date.toLocaleString("en-US", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
   });
 }
 

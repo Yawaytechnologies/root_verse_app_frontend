@@ -17,6 +17,11 @@ import {
   restoreSession,
   selectAuthSession,
 } from "../src/store/auth/authSession.slice";
+import {
+  getRouteForRole,
+  pickAuthRole,
+  pickAuthStatus,
+} from "../src/store/auth/authRouting";
 import { fetchMe, restoreMeFromCache } from "../src/store/auth/me.slice";
 
 import NetInfo from "@react-native-community/netinfo";
@@ -168,8 +173,8 @@ function RootLayoutInner() {
 
     // token + me exists -> your existing status routing logic (UNCHANGED)
     const me = meState.me;
-    const status = String(me.status || me.verification_status || "").toUpperCase();
-    const rtype = String(me.rootverse_type || "").toUpperCase();
+    const status = pickAuthStatus(me);
+    const rtype = pickAuthRole(me);
 
     if (status === "PENDING" || status === "PENDING_APPROVAL") {
       if (segments[1] !== "pending") router.replace("/(auth)/pending");
@@ -181,10 +186,8 @@ function RootLayoutInner() {
     }
 
     if (inAuthGroup) {
-      if (rtype === "QUALITY_CHECKER") return router.replace("/quality");
-      if (rtype.includes("WILD")) return router.replace("/(wild)/dashboard");
-      if (rtype.includes("AQUA")) return router.replace("/(aqua)/tabs/dashboard");
-      if (rtype.includes("MARI")) return router.replace("/mariculture");
+      const route = getRouteForRole(rtype);
+      if (route) return router.replace(route as any);
       return;
     }
   }, [
