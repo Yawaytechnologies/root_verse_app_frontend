@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -21,14 +21,23 @@ import {
   clearScannedCrate,
   fetchCentreCratesThunk,
   fetchCentreDashboardThunk,
+  fetchLoggedInCollectionOperatorThunk,
   getCrateByQrThunk,
   selectCentreCrateError,
   selectCentreCrateStatus,
+  selectCurrentCollectionOperator,
   selectScannedCrate,
 } from "../../src/services/centre/centreCrate.slice";
 
 function hasValue(value: any) {
   return value !== null && value !== undefined && String(value).trim() !== "";
+}
+
+function firstValue(...values: any[]) {
+  for (const value of values) {
+    if (hasValue(value)) return value;
+  }
+  return "";
 }
 
 function getCrateStage(crate: any): "assigned" | "received" | "pending" {
@@ -39,38 +48,44 @@ function getCrateStage(crate: any): "assigned" | "received" | "pending" {
   ).toUpperCase();
 
   const custody = String(
-    crate?.custody || crate?.custody_status || ""
+    crate?.custody ||
+      crate?.custody_status ||
+      crate?.current_custodian_role ||
+      ""
   ).toUpperCase();
 
   const assigned =
+    custody.includes("IN_TRANSIT") ||
     custody.includes("SCHEDULED_FOR_DISPATCH") ||
+    custody.includes("DISPATCH") ||
     status.includes("ASSIGN") ||
     status.includes("DISPATCH") ||
     status.includes("SCHEDULED") ||
-    hasValue(crate?.destination_name) ||
-    hasValue(crate?.destinationName) ||
+    hasValue(crate?.transport_operator_id) ||
+    hasValue(crate?.assigned_transport_operator_id) ||
+    hasValue(crate?.assignedTransportOperatorId) ||
+    hasValue(crate?.transport_id) ||
+    hasValue(crate?.transportId) ||
+    hasValue(crate?.vehicle_no) ||
+    hasValue(crate?.vehicleNo) ||
     hasValue(crate?.assigned_to) ||
     hasValue(crate?.assignedTo) ||
     hasValue(crate?.assigned_to_label) ||
     hasValue(crate?.assignedToLabel) ||
-    hasValue(crate?.transport_operator_id) ||
-    hasValue(crate?.assigned_transport_operator_id) ||
-    hasValue(crate?.transportId) ||
-    hasValue(crate?.transport_id) ||
-    hasValue(crate?.driver_name) ||
-    hasValue(crate?.driverName) ||
-    hasValue(crate?.vehicle_no) ||
-    hasValue(crate?.vehicleNo) ||
-    hasValue(crate?.scheduled_time_utc);
+    (String(crate?.current_custodian_role || "").toUpperCase() ===
+      "TRANSPORT_OPERATOR" &&
+      hasValue(crate?.current_custodian_id));
 
   if (assigned) return "assigned";
 
   const received =
     custody.includes("RECEIVED_AT_COLLECTION_CENTRE") ||
     custody.includes("COLLECTION_CENTRE") ||
+    custody.includes("CENTRE") ||
     status.includes("RECEIVE") ||
     status.includes("COLLECTION") ||
-    status === "CLOSED";
+    status === "CLOSED" ||
+    hasValue(crate?.received_centre_id);
 
   if (received) return "received";
 
@@ -91,16 +106,53 @@ function getDefaultScheduleLocal() {
 }
 
 function valueOrDash(value: any) {
-  if (value === null || value === undefined) return "-";
-  const text = String(value).trim();
-  return text ? text : "-";
+  if (!hasValue(value)) return "-";
+  return String(value).trim();
 }
 
 function formatDateTime(value: any) {
-  if (!value) return "-";
+  if (!hasValue(value)) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleString();
+}
+
+function getTransportOperatorId(crate: any) {
+  const currentRole = String(
+    crate?.current_custodian_role || ""
+  ).toUpperCase();
+
+  return firstValue(
+    crate?.transport_operator_id,
+    crate?.assigned_transport_operator_id,
+    crate?.assignedTransportOperatorId,
+    currentRole === "TRANSPORT_OPERATOR" ? crate?.current_custodian_id : ""
+  );
+}
+
+function getVehicleNo(crate: any) {
+  return firstValue(crate?.vehicleNo, crate?.vehicle_no);
+}
+
+function getAssignedTo(crate: any) {
+  return firstValue(
+    crate?.assignedTo,
+    crate?.assigned_to,
+    crate?.assignedToLabel,
+    crate?.assigned_to_label,
+    crate?.destinationName,
+    crate?.destination_name
+  );
+}
+
+function getAssignedAt(crate: any) {
+  return firstValue(
+    crate?.assignedAt,
+    crate?.assigned_at,
+    crate?.scheduled_time_utc,
+    crate?.dispatchScheduledAt,
+    crate?.dispatch_scheduled_at
+  );
 }
 
 export default function CentreAssign() {
@@ -109,6 +161,9 @@ export default function CentreAssign() {
   const status = useAppSelector(selectCentreCrateStatus);
   const error = useAppSelector(selectCentreCrateError);
   const scannedCrate = useAppSelector(selectScannedCrate);
+  const currentCollectionOperator = useAppSelector(
+    selectCurrentCollectionOperator
+  );
 
   const [scanOpen, setScanOpen] = useState(false);
   const [scannedQr, setScannedQr] = useState("");
@@ -116,24 +171,77 @@ export default function CentreAssign() {
   const [destinationName, setDestinationName] = useState(
     "Main Harbour Processing Unit"
   );
-  const [transportOperatorId, setTransportOperatorId] = useState("RV-TR-009");
-  const [transportId, setTransportId] = useState("TR-009");
+  const [transportOperatorId, setTransportOperatorId] = useState("");
+  const [transportId, setTransportId] = useState("");
   const [scheduledLocal, setScheduledLocal] = useState(getDefaultScheduleLocal());
   const [assignedToLabel, setAssignedToLabel] = useState(
     "Main Harbour Processing Unit"
   );
-  const [driverName, setDriverName] = useState("Prakash");
-  const [vehicleNo, setVehicleNo] = useState("TN51AB4321");
+  const [driverName, setDriverName] = useState("");
+  const [vehicleNo, setVehicleNo] = useState("");
   const [operatorId, setOperatorId] = useState("");
   const [notes, setNotes] = useState("");
+
+  useEffect(() => {
+    dispatch(fetchLoggedInCollectionOperatorThunk());
+  }, [dispatch]);
 
   const loading = useMemo(() => status === "loading", [status]);
   const crateStage = useMemo(() => getCrateStage(scannedCrate), [scannedCrate]);
 
   const crateId = useMemo(
-    () => scannedCrate?.crateId ?? scannedCrate?.id ?? "",
+    () =>
+      scannedCrate?.crateId ??
+      scannedCrate?.id ??
+      scannedCrate?.idx ??
+      "",
     [scannedCrate]
   );
+
+  const loggedInCollectionId = useMemo(() => {
+    return firstValue(
+      currentCollectionOperator?.user_id,
+      currentCollectionOperator?.operator_rv_id,
+      currentCollectionOperator?.id,
+      currentCollectionOperator?.collection_centre_id,
+      currentCollectionOperator?.collectionCentreId
+    );
+  }, [currentCollectionOperator]);
+
+  const detailCurrentCustodianRole = useMemo(() => {
+    return valueOrDash(
+      scannedCrate?.current_custodian_role || "COLLECTION_CENTRE_OPERATOR"
+    );
+  }, [scannedCrate]);
+
+  const detailCollectionCentreId = useMemo(() => {
+    return valueOrDash(
+      scannedCrate?.received_centre_id ||
+        scannedCrate?.centreId ||
+        scannedCrate?.centre_id ||
+        loggedInCollectionId
+    );
+  }, [scannedCrate, loggedInCollectionId]);
+
+  const detailCurrentCustodianId = useMemo(() => {
+    return valueOrDash(loggedInCollectionId);
+  }, [loggedInCollectionId]);
+
+  const detailTransportOperatorId = useMemo(() => {
+    return valueOrDash(getTransportOperatorId(scannedCrate));
+  }, [scannedCrate]);
+
+  const detailVehicleNo = useMemo(() => {
+    return valueOrDash(getVehicleNo(scannedCrate));
+  }, [scannedCrate]);
+
+  const detailAssignedTo = useMemo(() => {
+    return valueOrDash(getAssignedTo(scannedCrate));
+  }, [scannedCrate]);
+
+  const detailAssignedAt = useMemo(() => {
+    return formatDateTime(getAssignedAt(scannedCrate));
+  }, [scannedCrate]);
 
   const canAssign = useMemo(() => {
     return (
@@ -191,28 +299,10 @@ export default function CentreAssign() {
             "Already Assigned",
             [
               `Crate: ${crate.crateCode || crate.code || crate.id || cleanQr}`,
-              `Status: ${crate.status || "-"}`,
-              `Custody: ${crate.custody || crate.custody_status || "-"}`,
-              `Assigned To: ${
-                crate.assignedTo ||
-                crate.assigned_to ||
-                crate.destinationName ||
-                crate.destination_name ||
-                crate.assignedToLabel ||
-                crate.assigned_to_label ||
-                "-"
-              }`,
-              `Assigned Label: ${
-                crate.assignedToLabel || crate.assigned_to_label || "-"
-              }`,
-              `Transport Operator ID: ${
-                crate.transport_operator_id ||
-                crate.assigned_transport_operator_id ||
-                "-"
-              }`,
-              `Transport ID: ${crate.transportId || crate.transport_id || "-"}`,
-              `Driver Name: ${crate.driverName || crate.driver_name || "-"}`,
-              `Vehicle No: ${crate.vehicleNo || crate.vehicle_no || "-"}`,
+              `Transport Operator ID: ${valueOrDash(getTransportOperatorId(crate))}`,
+              `Vehicle Number: ${valueOrDash(getVehicleNo(crate))}`,
+              `Assigned To: ${valueOrDash(getAssignedTo(crate))}`,
+              `Assigned At: ${formatDateTime(getAssignedAt(crate))}`,
             ].join("\n")
           );
           return;
@@ -229,9 +319,24 @@ export default function CentreAssign() {
         setAssignedToLabel(
           crate?.assignedToLabel ||
             crate?.assigned_to_label ||
+            crate?.destinationName ||
+            crate?.destination_name ||
             destinationName ||
             "Main Harbour Processing Unit"
         );
+
+        setTransportOperatorId(
+          firstValue(
+            crate?.transport_operator_id,
+            crate?.assigned_transport_operator_id,
+            crate?.assignedTransportOperatorId
+          )
+        );
+
+        setTransportId(firstValue(crate?.transport_id, crate?.transportId));
+        setVehicleNo(firstValue(crate?.vehicle_no, crate?.vehicleNo));
+        setDriverName(firstValue(crate?.driver_name, crate?.driverName));
+        setOperatorId(loggedInCollectionId);
       } catch (e: any) {
         Alert.alert(
           "Fetch Failed",
@@ -239,7 +344,7 @@ export default function CentreAssign() {
         );
       }
     },
-    [dispatch, destinationName]
+    [dispatch, destinationName, loggedInCollectionId]
   );
 
   const handleAssign = useCallback(async () => {
@@ -284,7 +389,7 @@ export default function CentreAssign() {
           assignedToLabel: assignedToLabel.trim() || destinationName.trim(),
           driverName: driverName.trim(),
           vehicleNo: vehicleNo.trim(),
-          operatorId: operatorId.trim(),
+          operatorId: operatorId.trim() || loggedInCollectionId,
           notes: notes.trim(),
         })
       ).unwrap();
@@ -297,38 +402,12 @@ export default function CentreAssign() {
       Alert.alert(
         "Dispatch Assigned",
         [
-          `Crate: ${crate.crateCode || crate.code || crate.id || "-"}`,
-          `Destination: ${
-            crate.destinationName ||
-            crate.destination_name ||
-            destinationName ||
-            "-"
-          }`,
-          `Assigned To: ${
-            crate.assignedTo || crate.assigned_to || operatorId || "-"
-          }`,
-          `Assigned Label: ${
-            crate.assignedToLabel ||
-            crate.assigned_to_label ||
-            assignedToLabel ||
-            "-"
-          }`,
-          `Transport Operator ID: ${
-            crate.transport_operator_id ||
-            crate.assigned_transport_operator_id ||
-            transportOperatorId
-          }`,
-          `Transport ID: ${
-            crate.transportId || crate.transport_id || transportId || "-"
-          }`,
-          `Driver Name: ${crate.driverName || crate.driver_name || driverName || "-"}`,
-          `Vehicle No: ${crate.vehicleNo || crate.vehicle_no || vehicleNo || "-"}`,
-          `Scheduled UTC: ${
-            crate.scheduled_time_utc ||
-            crate.dispatchScheduledAt ||
-            crate.dispatch_scheduled_at ||
-            scheduledTimeUtc
-          }`,
+          `Transport Operator ID: ${valueOrDash(
+            getTransportOperatorId(crate) || transportOperatorId
+          )}`,
+          `Vehicle Number: ${valueOrDash(getVehicleNo(crate) || vehicleNo)}`,
+          `Assigned To: ${valueOrDash(getAssignedTo(crate) || assignedToLabel)}`,
+          `Assigned At: ${formatDateTime(getAssignedAt(crate) || scheduledTimeUtc)}`,
         ].join("\n"),
         [
           { text: "Stay Here" },
@@ -360,6 +439,7 @@ export default function CentreAssign() {
     vehicleNo,
     operatorId,
     notes,
+    loggedInCollectionId,
   ]);
 
   const handleRescan = useCallback(() => {
@@ -373,6 +453,10 @@ export default function CentreAssign() {
     if (loading) return;
     setScannedQr("");
     dispatch(clearScannedCrate());
+    setTransportOperatorId("");
+    setTransportId("");
+    setVehicleNo("");
+    setDriverName("");
   }, [dispatch, loading]);
 
   return (
@@ -458,83 +542,32 @@ export default function CentreAssign() {
 
             <View className="mt-3 gap-2">
               <DetailRow
-                label="Crate Code"
-                value={String(
-                  scannedCrate.crateCode ||
-                    scannedCrate.code ||
-                    scannedCrate.crateId ||
-                    scannedCrate.id ||
-                    "-"
-                )}
+                label="Current Custodian Role"
+                value={detailCurrentCustodianRole}
               />
               <DetailRow
-                label="Status"
-                value={String(scannedCrate.status || "-")}
+                label="Collection Centre ID"
+                value={detailCollectionCentreId}
               />
               <DetailRow
-                label="Custody"
-                value={String(
-                  scannedCrate.custody || scannedCrate.custody_status || "-"
-                )}
-              />
-              <DetailRow
-                label="Assigned To"
-                value={valueOrDash(
-                  scannedCrate.assignedTo ||
-                    scannedCrate.assigned_to ||
-                    scannedCrate.destinationName ||
-                    scannedCrate.destination_name
-                )}
-              />
-              <DetailRow
-                label="Assigned Label"
-                value={valueOrDash(
-                  scannedCrate.assignedToLabel || scannedCrate.assigned_to_label
-                )}
+                label="Current Custodian ID"
+                value={detailCurrentCustodianId}
               />
               <DetailRow
                 label="Transport Operator ID"
-                value={valueOrDash(
-                  scannedCrate.transport_operator_id ||
-                    scannedCrate.assigned_transport_operator_id
-                )}
-              />
-              <DetailRow
-                label="Transport ID"
-                value={valueOrDash(
-                  scannedCrate.transportId || scannedCrate.transport_id
-                )}
-              />
-              <DetailRow
-                label="Driver Name"
-                value={valueOrDash(
-                  scannedCrate.driverName || scannedCrate.driver_name
-                )}
+                value={detailTransportOperatorId}
               />
               <DetailRow
                 label="Vehicle Number"
-                value={valueOrDash(
-                  scannedCrate.vehicleNo || scannedCrate.vehicle_no
-                )}
+                value={detailVehicleNo}
+              />
+              <DetailRow
+                label="Assigned To"
+                value={detailAssignedTo}
               />
               <DetailRow
                 label="Assigned At"
-                value={formatDateTime(
-                  scannedCrate.assignedAt ||
-                    scannedCrate.assigned_at ||
-                    scannedCrate.scheduled_time_utc ||
-                    scannedCrate.dispatchScheduledAt ||
-                    scannedCrate.dispatch_scheduled_at
-                )}
-              />
-              <DetailRow
-                label="Temperature"
-                value={valueOrDash(
-                  scannedCrate.latestTemperature ||
-                    scannedCrate.temperature ||
-                    scannedCrate.temperature_value ||
-                    scannedCrate.temperature_c
-                )}
+                value={detailAssignedAt}
               />
             </View>
 
@@ -587,7 +620,7 @@ export default function CentreAssign() {
           />
 
           <Input
-            label="Assigned To Label"
+            label="Assigned To"
             value={assignedToLabel}
             onChangeText={setAssignedToLabel}
           />
@@ -606,7 +639,7 @@ export default function CentreAssign() {
 
           <Input
             label="Operator ID"
-            value={operatorId}
+            value={operatorId || loggedInCollectionId}
             onChangeText={setOperatorId}
           />
 

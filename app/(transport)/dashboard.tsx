@@ -1,15 +1,11 @@
-import React, { useEffect } from "react";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { Alert, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { router } from "expo-router";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useDispatch, useSelector } from "react-redux";
 
 import Screen from "../../src/components/centre/Screen";
-import {
-  formatDisplayDate,
-  formatShortDay,
-  getLastNDays,
-} from "../../src/data/transport/dummyTransportData";
 import {
   fetchTransportDashboard,
   selectAssignedCrates,
@@ -25,9 +21,48 @@ import {
 import { logoutSession } from "../../src/store/auth/authSession.slice";
 import { clearMe } from "../../src/store/auth/me.slice";
 
+function pad(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function formatDateKey(date: Date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function parseDateKey(dateKey?: string) {
+  if (!dateKey) return new Date();
+  const [y, m, d] = String(dateKey).split("-").map(Number);
+  if (!y || !m || !d) return new Date();
+  return new Date(y, m - 1, d);
+}
+
+function isToday(dateKey?: string) {
+  if (!dateKey) return false;
+  return formatDateKey(new Date()) === dateKey;
+}
+
+function formatDisplayDate(dateKey: string) {
+  const d = parseDateKey(dateKey);
+  return d.toLocaleDateString("en-US", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function firstText(...values: any[]) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value);
+    }
+  }
+  return "";
+}
+
 export default function TransportDashboard() {
   const dispatch = useDispatch<any>();
-  const [logoutLoading, setLogoutLoading] = React.useState(false);
+  const [logoutLoading, setLogoutLoading] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const currentTransport = useSelector(selectCurrentTransport);
   const currentTransportOperator = useSelector(selectCurrentTransportOperator);
@@ -35,10 +70,14 @@ export default function TransportDashboard() {
   const assignedCrates = useSelector(selectAssignedCrates);
   const inTransitCrates = useSelector(selectInTransitCrates);
   const stats = useSelector(selectTransportStats);
+
+  const meProfile = useSelector((state: any) => state?.me?.me || {});
+  const authUser = useSelector((state: any) => state?.auth?.user || {});
+  const loginUser = useSelector((state: any) => state?.login || {});
+
   useEffect(() => {
     if (!selectedDate) {
-      const today = getLastNDays(1)[0];
-      dispatch(setSelectedTransportDate(today));
+      dispatch(setSelectedTransportDate(formatDateKey(new Date())));
       return;
     }
 
@@ -49,31 +88,60 @@ export default function TransportDashboard() {
     dispatch(fetchLoggedInTransportOperatorThunk());
   }, [dispatch]);
 
-  const last4Days = getLastNDays(4);
-  const activeDate = selectedDate || last4Days[0];
+  const activeDate = selectedDate || formatDateKey(new Date());
+  const activeDateObj = useMemo(() => parseDateKey(activeDate), [activeDate]);
+  const selectedIsToday = isToday(activeDate);
 
   const transportName =
-    currentTransportOperator?.full_name ||
-    currentTransport?.name ||
-    "Transport User";
+    firstText(
+      currentTransportOperator?.full_name,
+      currentTransport?.name,
+      currentTransport?.full_name,
+      meProfile?.full_name,
+      meProfile?.name,
+      meProfile?.username,
+      authUser?.full_name,
+      authUser?.name,
+      loginUser?.full_name,
+      loginUser?.name
+    ) || "Transport User";
 
   const transportCode =
-    currentTransportOperator?.user_id || currentTransport?.id || "-";
+    firstText(
+      currentTransportOperator?.transport_id,
+      currentTransportOperator?.user_id,
+      currentTransport?.transport_id,
+      currentTransport?.transportId,
+      currentTransport?.id,
+      meProfile?.transport_id,
+      meProfile?.id,
+      authUser?.transport_id,
+      authUser?.id
+    ) || "-";
 
   const vehicleNo =
-    currentTransport?.vehicleNo ||
-    currentTransport?.vehicle_no ||
-    currentTransportOperator?.vehicleNo ||
-    currentTransportOperator?.vehicle_no ||
-    "-";
+    firstText(
+      currentTransport?.vehicleNo,
+      currentTransport?.vehicle_no,
+      currentTransportOperator?.vehicleNo,
+      currentTransportOperator?.vehicle_no,
+      meProfile?.vehicleNo,
+      meProfile?.vehicle_no,
+      authUser?.vehicleNo,
+      authUser?.vehicle_no
+    ) || "-";
 
   const routeName =
-    currentTransport?.route ||
-    currentTransport?.routeName ||
-    currentTransport?.route_name ||
-    currentTransportOperator?.route_name ||
-    currentTransportOperator?.routeName ||
-    "-";
+    firstText(
+      currentTransport?.route,
+      currentTransport?.routeName,
+      currentTransport?.route_name,
+      currentTransportOperator?.route_name,
+      currentTransportOperator?.routeName,
+      meProfile?.route,
+      meProfile?.routeName,
+      meProfile?.route_name
+    ) || "-";
 
   const handleLogout = () => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
@@ -95,6 +163,14 @@ export default function TransportDashboard() {
     ]);
   };
 
+  const handleDateChange = (_: any, date?: Date) => {
+    setShowDatePicker(false);
+    if (!date) return;
+
+    const nextDate = formatDateKey(date);
+    dispatch(setSelectedTransportDate(nextDate));
+  };
+
   return (
     <Screen>
       <View className="flex-1 bg-[#031225]">
@@ -102,9 +178,9 @@ export default function TransportDashboard() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 32 }}
         >
-          <View className="bg-[#071a35] px-5 pt-4 pb-6">
+          <View className="bg-[#071a35] px-5 pb-6 pt-4">
             <View className="flex-row items-start justify-between">
-              <View className="flex-row items-center flex-1 pr-3">
+              <View className="flex-1 flex-row items-center pr-3">
                 <View className="h-16 w-16 items-center justify-center rounded-2xl border border-[#1e90ff] bg-[#0d274a]">
                   <MaterialCommunityIcons
                     name="truck-fast-outline"
@@ -168,46 +244,49 @@ export default function TransportDashboard() {
             </View>
           </View>
 
-          <View className="bg-[#06152b] px-5 pt-5 pb-4">
-            <Text className="mb-3 text-[18px] font-extrabold text-white">
+          <View className="bg-[#06152b] px-5 pb-4 pt-5">
+            <Text className="mb-4 text-[18px] font-extrabold text-white">
               Select Date
             </Text>
 
-            <View className="flex-row gap-3">
-              {last4Days.map((dateKey) => {
-                const active = dateKey === activeDate;
-                return (
-                  <Pressable
-                    key={dateKey}
-                    onPress={() => dispatch(setSelectedTransportDate(dateKey))}
-                    className={`flex-1 rounded-[18px] border px-3 py-3 ${
-                      active
-                        ? "border-[#2d8cff] bg-[#14325a]"
-                        : "border-slate-700 bg-[#0b172b]"
-                    }`}
-                  >
-                    <Text
-                      className={`text-center text-[11px] font-semibold ${
-                        active ? "text-[#93c5fd]" : "text-slate-400"
-                      }`}
-                    >
-                      {formatShortDay(dateKey)}
-                    </Text>
-                    <Text
-                      className={`mt-1 text-center text-[14px] font-extrabold ${
-                        active ? "text-white" : "text-slate-200"
-                      }`}
-                    >
-                      {dateKey.split("-")[2]}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <Pressable
+              onPress={() => setShowDatePicker(true)}
+              className="rounded-[28px] border border-slate-800 bg-[#0b172b] px-5 py-5"
+            >
+              <View className="flex-row items-center">
+                <View className="h-16 w-16 items-center justify-center rounded-2xl bg-[#14325a]">
+                  <Ionicons name="calendar-outline" size={28} color="#60a5fa" />
+                </View>
 
-            <Text className="mt-3 text-[14px] font-bold text-slate-300">
-              Selected: {formatDisplayDate(activeDate)}
-            </Text>
+                <View className="ml-4 flex-1">
+                  <Text className="text-[13px] font-bold text-slate-400">
+                    Selected Date
+                  </Text>
+                  <Text className="mt-1 text-[22px] font-extrabold text-white">
+                    {formatDisplayDate(activeDate)}
+                  </Text>
+                  <Text className="mt-1 text-[13px] text-slate-400">
+                    Tap to change day, month, and year
+                  </Text>
+                </View>
+
+                <View className="h-14 w-14 items-center justify-center rounded-full bg-[#14325a]">
+                  <Ionicons name="chevron-down" size={24} color="#bfdbfe" />
+                </View>
+              </View>
+            </Pressable>
+
+            <View className="mt-4 rounded-[24px] border border-slate-800 bg-[#0b172b] px-5 py-4">
+              <Text
+                className={`text-[15px] font-extrabold ${
+                  selectedIsToday ? "text-[#22c55e]" : "text-[#93c5fd]"
+                }`}
+              >
+                {selectedIsToday
+                  ? "Today selected. Scan, verify, and transit actions are enabled."
+                  : `Showing transport data for ${formatDisplayDate(activeDate)}.`}
+              </Text>
+            </View>
           </View>
 
           <View className="px-5 pt-6">
@@ -232,7 +311,7 @@ export default function TransportDashboard() {
               />
             </View>
 
-            <Text className="mt-8 mb-4 text-[20px] font-extrabold text-white">
+            <Text className="mb-4 mt-8 text-[20px] font-extrabold text-white">
               Today Preview
             </Text>
 
@@ -242,7 +321,15 @@ export default function TransportDashboard() {
               </Text>
               <Text className="mt-2 text-[13px] text-slate-400">
                 {assignedCrates?.length > 0
-                  ? assignedCrates.map((item: any) => item.id).join(", ")
+                  ? assignedCrates
+                      .map(
+                        (item: any) =>
+                          item?.crateQr ||
+                          item?.code ||
+                          item?.crateId ||
+                          item?.id
+                      )
+                      .join(", ")
                   : "No assigned crates for this date."}
               </Text>
 
@@ -251,12 +338,58 @@ export default function TransportDashboard() {
               </Text>
               <Text className="mt-2 text-[13px] text-slate-400">
                 {inTransitCrates?.length > 0
-                  ? inTransitCrates.map((item: any) => item.id).join(", ")
+                  ? inTransitCrates
+                      .map(
+                        (item: any) =>
+                          item?.crateQr ||
+                          item?.code ||
+                          item?.crateId ||
+                          item?.id
+                      )
+                      .join(", ")
                   : "No crates in transit for this date."}
               </Text>
             </View>
           </View>
         </ScrollView>
+
+        {showDatePicker && (
+          <Modal transparent animationType="fade" visible={showDatePicker}>
+            <View className="flex-1 items-center justify-end bg-black/50 px-4 pb-6">
+              <View className="w-full rounded-[28px] border border-slate-700 bg-[#0b172b] p-4">
+                <View className="mb-3 flex-row items-center justify-between">
+                  <Text className="text-[18px] font-extrabold text-white">
+                    Select Date
+                  </Text>
+
+                  <Pressable onPress={() => setShowDatePicker(false)}>
+                    <Ionicons name="close" size={24} color="#fff" />
+                  </Pressable>
+                </View>
+
+                <View className="rounded-[20px] bg-white">
+                  <DateTimePicker
+                    value={activeDateObj}
+                    mode="date"
+                    display="spinner"
+                    onChange={handleDateChange}
+                    maximumDate={new Date(2100, 11, 31)}
+                    minimumDate={new Date(2024, 0, 1)}
+                  />
+                </View>
+
+                <Pressable
+                  onPress={() => setShowDatePicker(false)}
+                  className="mt-4 items-center rounded-[18px] bg-[#204a8f] py-3"
+                >
+                  <Text className="text-[15px] font-extrabold text-white">
+                    Done
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </Modal>
+        )}
       </View>
     </Screen>
   );
@@ -272,7 +405,9 @@ function StatCard({
   bgClass: string;
 }) {
   return (
-    <View className={`flex-1 min-h-[90px] items-center justify-center rounded-[24px] ${bgClass}`}>
+    <View
+      className={`min-h-[90px] flex-1 items-center justify-center rounded-[24px] ${bgClass}`}
+    >
       <Text className="text-[24px] font-extrabold text-white">{value}</Text>
       <Text className="mt-1 text-[11px] font-bold text-white">{label}</Text>
     </View>

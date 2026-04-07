@@ -189,7 +189,9 @@ function mergeSources(raw: any) {
     root?.data?.dispatch,
     root?.data?.assignment,
     root?.data?.assign_dispatch,
-    root?.data?.dispatch_info
+    root?.data?.dispatch_info,
+    root?.data?.dispatchDetails,
+    root?.data?.dispatch_details
   );
 
   return {
@@ -228,6 +230,78 @@ function pickLatestTemperature(raw: any): number | string | null {
   );
 }
 
+function hasDispatchDetails(crate: any) {
+  if (!crate) return false;
+
+  return (
+    hasValue(crate?.destination_name) ||
+    hasValue(crate?.destinationName) ||
+    hasValue(crate?.assigned_to) ||
+    hasValue(crate?.assignedTo) ||
+    hasValue(crate?.assigned_to_label) ||
+    hasValue(crate?.assignedToLabel) ||
+    hasValue(crate?.transport_operator_id) ||
+    hasValue(crate?.assigned_transport_operator_id) ||
+    hasValue(crate?.assignedTransportOperatorId) ||
+    hasValue(crate?.transport_id) ||
+    hasValue(crate?.transportId) ||
+    hasValue(crate?.driver_name) ||
+    hasValue(crate?.driverName) ||
+    hasValue(crate?.vehicle_no) ||
+    hasValue(crate?.vehicleNo) ||
+    hasValue(crate?.scheduled_time_utc) ||
+    hasValue(crate?.dispatchScheduledAt) ||
+    hasValue(crate?.dispatch_scheduled_at)
+  );
+}
+
+function mergeCrates(base: any, extra: any): ApiCrate {
+  return normalizeCrate({
+    ...(base || {}),
+    ...(extra || {}),
+    dispatch:
+      extra?.dispatch ??
+      extra?.assignment ??
+      extra?.assign_dispatch ??
+      extra?.dispatch_info ??
+      base?.dispatch ??
+      base?.assignment ??
+      base?.assign_dispatch ??
+      base?.dispatch_info ??
+      null,
+    assignment:
+      extra?.assignment ??
+      extra?.dispatch ??
+      extra?.assign_dispatch ??
+      extra?.dispatch_info ??
+      base?.assignment ??
+      base?.dispatch ??
+      base?.assign_dispatch ??
+      base?.dispatch_info ??
+      null,
+    assign_dispatch:
+      extra?.assign_dispatch ??
+      extra?.dispatch ??
+      extra?.assignment ??
+      extra?.dispatch_info ??
+      base?.assign_dispatch ??
+      base?.dispatch ??
+      base?.assignment ??
+      base?.dispatch_info ??
+      null,
+    dispatch_info:
+      extra?.dispatch_info ??
+      extra?.dispatch ??
+      extra?.assignment ??
+      extra?.assign_dispatch ??
+      base?.dispatch_info ??
+      base?.dispatch ??
+      base?.assignment ??
+      base?.assign_dispatch ??
+      null,
+  });
+}
+
 export function deriveCrateStage(crate: any): CrateStage {
   if (!crate) return "pending";
 
@@ -248,24 +322,7 @@ export function deriveCrateStage(crate: any): CrateStage {
     status.includes("ASSIGN") ||
     status.includes("DISPATCH") ||
     status.includes("SCHEDULED") ||
-    hasValue(crate?.destination_name) ||
-    hasValue(crate?.destinationName) ||
-    hasValue(crate?.assigned_to) ||
-    hasValue(crate?.assignedTo) ||
-    hasValue(crate?.assigned_to_label) ||
-    hasValue(crate?.assignedToLabel) ||
-    hasValue(crate?.transport_operator_id) ||
-    hasValue(crate?.assigned_transport_operator_id) ||
-    hasValue(crate?.assignedTransportOperatorId) ||
-    hasValue(crate?.transport_id) ||
-    hasValue(crate?.transportId) ||
-    hasValue(crate?.driver_name) ||
-    hasValue(crate?.driverName) ||
-    hasValue(crate?.vehicle_no) ||
-    hasValue(crate?.vehicleNo) ||
-    hasValue(crate?.scheduled_time_utc) ||
-    hasValue(crate?.dispatchScheduledAt) ||
-    hasValue(crate?.dispatch_scheduled_at);
+    hasDispatchDetails(crate);
 
   if (hasDispatch) return "assigned";
 
@@ -515,7 +572,56 @@ export const centreCrateService = {
   async getCrateByCode(code: string): Promise<ApiCrate> {
     const cleanCode = encodeURIComponent(String(code ?? "").trim());
     const res = await http.getJson(`/api/crate/${cleanCode}`);
-    return normalizeCrate(unwrap(res));
+    const baseCrate = normalizeCrate(unwrap(res));
+
+    if (
+      baseCrate.stage === "assigned" &&
+      !hasDispatchDetails(baseCrate)
+    ) {
+      const crateId = baseCrate?.crateId ?? baseCrate?.id;
+
+      if (crateId) {
+        try {
+          const detailed = await this.getCrateById(crateId);
+          const merged = mergeCrates(baseCrate, detailed);
+
+          if (hasDispatchDetails(merged)) {
+            return merged;
+          }
+        } catch {
+          // ignore and continue fallback
+        }
+      }
+
+      try {
+        const crates = await this.getCrates();
+        const matched =
+          crates.find(
+            (item) =>
+              String(item?.crateId ?? item?.id ?? "") ===
+              String(baseCrate?.crateId ?? baseCrate?.id ?? "")
+          ) ||
+          crates.find(
+            (item) =>
+              String(item?.crateCode ?? item?.code ?? "").trim().toUpperCase() ===
+              String(baseCrate?.crateCode ?? baseCrate?.code ?? "")
+                .trim()
+                .toUpperCase()
+          ) ||
+          null;
+
+        if (matched) {
+          const merged = mergeCrates(baseCrate, matched);
+          if (hasDispatchDetails(merged)) {
+            return merged;
+          }
+        }
+      } catch {
+        // ignore fallback failure
+      }
+    }
+
+    return baseCrate;
   },
 
   async receiveCrate(payload: ReceiveCratePayload): Promise<ApiCrate> {
@@ -615,12 +721,9 @@ export const centreCrateService = {
       notes: assigned.notes || payload.notes || "",
       operator_id: assigned.operator_id || payload.operatorId || "",
       operatorId: assigned.operatorId || payload.operatorId || "",
-      custody_status:
-        assigned.custody_status || "SCHEDULED_FOR_DISPATCH",
-      custody:
-        assigned.custody || "SCHEDULED_FOR_DISPATCH",
-      status:
-        assigned.status || "ASSIGNED",
+      custody_status: assigned.custody_status || "SCHEDULED_FOR_DISPATCH",
+      custody: assigned.custody || "SCHEDULED_FOR_DISPATCH",
+      status: assigned.status || "ASSIGNED",
       stage: "assigned",
       isAssigned: true,
       isReceived: false,
