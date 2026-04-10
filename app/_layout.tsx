@@ -33,10 +33,13 @@ import { LanguageProvider } from "../src/data/wild/lang.store";
 import { TraceProvider } from "../src/data/wild/trace.store";
 
 import { initI18n } from "../src/components/aqua/i18n/i18n";
-
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-SplashScreen.preventAutoHideAsync().catch(() => { });
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
+const PREVIEW_CRATE_PACKER =
+  String(process.env.EXPO_PUBLIC_PREVIEW_CRATE_PACKER || "").toLowerCase() ===
+  "true";
 
 const LAST_ROUTE_KEY = "nav_last_route_v1";
 
@@ -49,28 +52,22 @@ function RootLayoutInner() {
   const { token, hydrated } = useAppSelector(selectAuthSession);
   const meState = useAppSelector((s: any) => s.me);
 
-  // IMPORTANT: use your real slice path
   const networkOnline = useAppSelector((s: any) => s.network?.online);
 
   const restoredRouteRef = useRef(false);
 
-  // i18n
   useEffect(() => {
     initI18n().catch((e) => console.warn("i18n init failed:", e));
   }, []);
 
-  // restore session
   useEffect(() => {
     dispatch(restoreSession());
   }, [dispatch]);
 
-  // network monitor (keep stable; don't treat null as offline)
   useEffect(() => {
     let mounted = true;
 
     const apply = (state: any) => {
-      // ✅ Treat "null reachability" as "unknown/ok", not offline.
-      // Offline is only when connected is false OR internetReachable is explicitly false.
       const online =
         state.isConnected === true && state.isInternetReachable !== false;
 
@@ -93,32 +90,21 @@ function RootLayoutInner() {
     };
   }, [dispatch]);
 
-  // Save last route (only when NOT in auth)
   useEffect(() => {
     const inAuthGroup = segments[0] === "(auth)";
     if (!pathname) return;
     if (inAuthGroup) return;
-    AsyncStorage.setItem(LAST_ROUTE_KEY, pathname).catch(() => { });
+    AsyncStorage.setItem(LAST_ROUTE_KEY, pathname).catch(() => {});
   }, [pathname, segments]);
 
-  /**
-   * ✅ ME loading strategy (MINIMUM change, keeps old behavior)
-   * - If OFFLINE: restore cached me only
-   * - Otherwise: fetchMe as before (primary source)
-   * - If fetchMe fails due to NETWORK_ERROR: fallback to cache
-   *
-   * This prevents old cached "WILD" me from overriding a new "QUALITY" login while online.
-   */
   useEffect(() => {
     if (!hydrated || !token) return;
 
-    // confirmed offline -> only cache
     if (networkOnline === false) {
       dispatch(restoreMeFromCache());
       return;
     }
 
-    // online/unknown -> fetch first (old behavior)
     (dispatch(fetchMe()) as any)
       .unwrap()
       .catch((e: any) => {
@@ -128,66 +114,109 @@ function RootLayoutInner() {
       });
   }, [hydrated, token, networkOnline, dispatch]);
 
-  // routing guard
   useEffect(() => {
     if (!hydrated) return;
 
-    SplashScreen.hideAsync().catch(() => { });
-    const inAuthGroup = segments[0] === "(auth)";
+    SplashScreen.hideAsync().catch(() => {});
+    const rootSeg = segments?.[0];
+    const inAuthGroup = rootSeg === "(auth)";
 
-    // no token -> login
+    if (!token && PREVIEW_CRATE_PACKER && rootSeg === "crate_packer") {
+      return;
+    }
+
     if (!token) {
       if (!inAuthGroup) router.replace("/(auth)/login");
       return;
     }
 
-    // error is STRING in your slice
     const err = (meState?.error as string | null) ?? null;
 
-    // ✅ Only kick to login when truly invalid session
     if (err === "UNAUTHORIZED" || err === "NO_TOKEN") {
       router.replace("/(auth)/login");
       return;
     }
 
-    // If no me yet:
     if (!meState.me) {
-      // ✅ offline fetch failure should not force login
       if (networkOnline === false || err === "NETWORK_ERROR") {
         if (inAuthGroup && !restoredRouteRef.current) {
           restoredRouteRef.current = true;
           AsyncStorage.getItem(LAST_ROUTE_KEY)
             .then((last) => {
               if (last) router.replace(last as any);
-              else router.replace("/(wild)/dashboard"); // fallback (keep your existing)
+              else router.replace("/(wild)/dashboard");
             })
             .catch(() => router.replace("/(wild)/dashboard"));
         }
         return;
       }
 
-      // online + still loading -> wait
       if (meState.loading) return;
       return;
     }
 
-    // token + me exists -> your existing status routing logic (UNCHANGED)
     const me = meState.me;
     const status = pickAuthStatus(me);
     const rtype = pickAuthRole(me);
 
     if (status === "PENDING" || status === "PENDING_APPROVAL") {
-      if (segments[1] !== "pending") router.replace("/(auth)/pending");
+      if (segments?.[1] !== "pending") router.replace("/(auth)/pending");
       return;
     }
     if (status === "REJECTED") {
-      if (segments[1] !== "rejected") router.replace("/(auth)/rejected");
+      if (segments?.[1] !== "rejected") router.replace("/(auth)/rejected");
+      return;
+    }
+
+    let homePath: string | null = null;
+    let allowedRoot: string | null = null;
+
+    if (rtype === "QUALITY_CHECKER") {
+      homePath = "/quality";
+      allowedRoot = "quality";
+    } else if (
+      rtype === "COLLECTION_CENTRE_OPERATOR" ||
+      rtype === "COLLECTION_CENTER_OPERATOR"
+    ) {
+      homePath = "/(centre)/dashboard";
+      allowedRoot = "(centre)";
+    } else if (rtype === "TRANSPORT_OPERATOR") {
+      homePath = "/(transport)/dashboard";
+      allowedRoot = "(transport)";
+    } else if (rtype.includes("WILD")) {
+      homePath = "/(wild)/dashboard";
+      allowedRoot = "(wild)";
+    } else if (rtype === "OWNER") {
+      homePath = "/(wild)/dashboard";
+      allowedRoot = "(wild)";
+    } else if (rtype.includes("AQUA")) {
+      homePath = "/(aqua)/tabs/dashboard";
+      allowedRoot = "(aqua)";
+    } else if (rtype.includes("MARI")) {
+      homePath = "/mariculture";
+      allowedRoot = "mariculture";
+    } else if (rtype.includes("CRATE")) {
+      homePath = "/crate_packer";
+      allowedRoot = "crate_packer";
+    }
+
+    if (!homePath || !allowedRoot) {
       return;
     }
 
     if (inAuthGroup) {
-      const route = getRouteForRole(rtype);
-      if (route) return router.replace(route as any);
+      const route = getRouteForRole(rtype) || homePath;
+      if (route) {
+        router.replace(route as any);
+      }
+      return;
+    }
+
+    if (rootSeg && rootSeg !== allowedRoot) {
+      const route = getRouteForRole(rtype) || homePath;
+      if (route) {
+        router.replace(route as any);
+      }
       return;
     }
   }, [

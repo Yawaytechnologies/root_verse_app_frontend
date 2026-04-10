@@ -15,7 +15,6 @@ import * as Location from "expo-location";
 import { captureRef } from "react-native-view-shot";
 import { Ionicons } from "@expo/vector-icons";
 
-import type { Lang } from "../QualityUI";
 import {
   ensureFileUri,
   ImageList,
@@ -91,7 +90,6 @@ export const wildInitial = (): WildFormState => ({
 
 type Props = {
   visible: boolean;
-  lang: Lang;
   scannedCode: string;
 
   loading?: boolean;
@@ -99,7 +97,10 @@ type Props = {
   data?: any;
 
   form: WildFormState;
-  setFormField: <K extends keyof WildFormState>(k: K, v: WildFormState[K]) => void;
+  setFormField: <K extends keyof WildFormState>(
+    k: K,
+    v: WildFormState[K],
+  ) => void;
 
   // parent still passes these; we keep prop compatibility
   onPickImages: () => void;
@@ -156,19 +157,22 @@ function mapResultToStatus(r: QcResult | null): QCStatus | null {
   return "REJECTED";
 }
 
-async function getImageSizeSafe(uri: string): Promise<{ w: number; h: number }> {
+async function getImageSizeSafe(
+  uri: string,
+): Promise<{ w: number; h: number }> {
   return await new Promise((resolve) => {
     Image.getSize(
       uri,
       (w, h) => resolve({ w, h }),
-      () => resolve({ w: 1080, h: 1080 })
+      () => resolve({ w: 1080, h: 1080 }),
     );
   });
 }
 
 function scaleDown(w: number, h: number, maxSide: number = 1280) {
   const max = Math.max(w, h);
-  if (!max || max <= maxSide) return { W: Math.round(w || 1080), H: Math.round(h || 1080) };
+  if (!max || max <= maxSide)
+    return { W: Math.round(w || 1080), H: Math.round(h || 1080) };
   const s = maxSide / max;
   return { W: Math.round(w * s), H: Math.round(h * s) };
 }
@@ -183,7 +187,9 @@ async function captureLiveLocationStamp(extraLine?: string) {
   const timeoutMs = 8000;
   const pos = (await Promise.race([
     Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest }),
-    new Promise((_, rej) => setTimeout(() => rej(new Error("Location timeout")), timeoutMs)),
+    new Promise((_, rej) =>
+      setTimeout(() => rej(new Error("Location timeout")), timeoutMs),
+    ),
   ])) as Location.LocationObject;
 
   const lat = pos.coords.latitude;
@@ -199,12 +205,11 @@ async function captureLiveLocationStamp(extraLine?: string) {
   return extraLine ? `${l1}\n${l2}\n${extraLine}` : `${l1}\n${l2}`;
 }
 
-const POWERED_LINE = "Powered by BlueOs";
+const POWERED_LINE = "Powered by Rootverse";
 
 export default function WildInspectionModal(props: Props) {
   const {
     visible,
-    lang,
     scannedCode,
     loading,
     error,
@@ -220,6 +225,9 @@ export default function WildInspectionModal(props: Props) {
   } = props;
 
   const inspector = useAppSelector(selectQcInspector);
+
+  const qcInspectorId =
+    String(inspector?.checker_code ?? inspector?.id ?? "").trim() || "-";
 
   const MAX_IMAGES = 3;
   const speciesAuto = data?.fish_name ?? "";
@@ -243,7 +251,8 @@ export default function WildInspectionModal(props: Props) {
     if (readOnly) return { ok: true, msg: "" };
 
     if (!form.qc_result) return { ok: false, msg: "QC result required" };
-    if (!form.quality_grade) return { ok: false, msg: "Quality grade required" };
+    if (!form.quality_grade)
+      return { ok: false, msg: "Quality grade required" };
 
     if (!form.weight_kg) return { ok: false, msg: "Weight required" };
     if (!form.temperature_c) return { ok: false, msg: "Temperature required" };
@@ -251,16 +260,22 @@ export default function WildInspectionModal(props: Props) {
     if (!form.size) return { ok: false, msg: "Size required" };
     if (!form.damage) return { ok: false, msg: "Damage required" };
 
-    if (isReject && !form.reject_reason) return { ok: false, msg: "Reject reason required" };
+    if (isReject && !form.reject_reason)
+      return { ok: false, msg: "Reject reason required" };
 
     return { ok: true, msg: "" };
   }, [form, readOnly, isReject]);
 
-  // ✅ watermark staging (fix black output)
+  // ✅ watermark staging
   const watermarkRef = useRef<View | null>(null);
   const wmPromiseRef = useRef<null | { resolve: (u: string) => void }>(null);
 
-  const [wmTask, setWmTask] = useState<null | { uri: string; text: string; W: number; H: number }>(null);
+  const [wmTask, setWmTask] = useState<null | {
+    uri: string;
+    text: string;
+    W: number;
+    H: number;
+  }>(null);
   const [wmBusy, setWmBusy] = useState(false);
   const [stageReady, setStageReady] = useState(false);
   const [stageErr, setStageErr] = useState<string | null>(null);
@@ -283,7 +298,7 @@ export default function WildInspectionModal(props: Props) {
 
         const outUri = await captureRef(watermarkRef, {
           format: "jpg",
-          quality: 0.92,
+          quality: 0.72,
           result: "tmpfile",
         });
 
@@ -308,7 +323,7 @@ export default function WildInspectionModal(props: Props) {
     const safeUri = await ensureFileUri(uri);
 
     const { w, h } = await getImageSizeSafe(safeUri);
-    const { W, H } = scaleDown(w, h, 1280);
+    const { W, H } = scaleDown(w, h, 960);
 
     return await new Promise<string>((resolve) => {
       wmPromiseRef.current = { resolve };
@@ -399,7 +414,9 @@ export default function WildInspectionModal(props: Props) {
         return;
       }
 
-      const picked = (res.assets || []).map((a) => a.uri).filter(Boolean) as string[];
+      const picked = (res.assets || [])
+        .map((a) => a.uri)
+        .filter(Boolean) as string[];
       if (!picked.length) {
         setWmBusy(false);
         return;
@@ -419,7 +436,10 @@ export default function WildInspectionModal(props: Props) {
 
       appendImages(out);
     } catch (e: any) {
-      Alert.alert("Gallery watermark failed", String(e?.message || e || "Failed"));
+      Alert.alert(
+        "Gallery watermark failed",
+        String(e?.message || e || "Failed"),
+      );
     } finally {
       setWmBusy(false);
     }
@@ -428,13 +448,11 @@ export default function WildInspectionModal(props: Props) {
   const buildPayload = () => {
     const qc_status = mapResultToStatus(form.qc_result);
 
-    // ✅ exact mapping to your auth slice fields
     const quality_checker_id = inspector?.id ?? null;
     const quality_checker_code = inspector?.checker_code ?? null;
     const quality_checker_name = inspector?.checker_name ?? null;
 
     return {
-      // ✅ include in POST only (no UI)
       quality_checker_id,
       quality_checker_code,
       quality_checker_name,
@@ -455,28 +473,47 @@ export default function WildInspectionModal(props: Props) {
 
       inspected_at: capturedAtIso || null,
       images: form.images,
-      division: "WILD", // ✅ helps qcFill slice choose image field
+      division: "WILD",
     };
   };
 
-  const codeToShow = String(scannedCode || data?.fish_code || data?.qr_code || "").trim();
-  const t = (en: string, ta: string) => (lang === "ta" ? ta : en);
+  const codeToShow = String(
+    scannedCode || data?.fish_code || data?.qr_code || "",
+  ).trim();
 
   return (
     <Modal visible={visible} transparent animationType="fade">
       <View className="flex-1 bg-black/60 p-4 justify-center">
         <View className="rounded-3xl bg-[#0b1630] h-[90%] overflow-hidden">
-          {/* HEADER */}
           <View className="px-4 py-4 border-b border-white/10">
             <View className="flex-row items-start justify-between">
               <View className="flex-1 pr-3">
                 <Text className="text-white font-extrabold text-lg">
-                  {t("Wild Quality Inspection", "காட்டு தர ஆய்வு")}
+                  {"Wild Quality Inspection"}
                 </Text>
 
-                <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  <Ionicons name="qr-code-outline" size={16} color="rgba(255,255,255,0.7)" />
-                  <Text style={{ color: "rgba(255,255,255,0.7)", fontWeight: "900" }}>QR:</Text>
+                <View
+                  style={{
+                    marginTop: 8,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    minWidth: 0,
+                  }}
+                >
+                  <Ionicons
+                    name="qr-code-outline"
+                    size={16}
+                    color="rgba(255,255,255,0.7)"
+                  />
+                  <Text
+                    style={{
+                      color: "rgba(255,255,255,0.7)",
+                      fontWeight: "900",
+                    }}
+                  >
+                    QR:
+                  </Text>
 
                   <ScrollView
                     horizontal
@@ -484,7 +521,15 @@ export default function WildInspectionModal(props: Props) {
                     style={{ flex: 1, minWidth: 0 }}
                     contentContainerStyle={{ paddingRight: 12 }}
                   >
-                    <Text selectable style={{ color: "white", fontWeight: "900", fontSize: 14, letterSpacing: 0.3 }}>
+                    <Text
+                      selectable
+                      style={{
+                        color: "white",
+                        fontWeight: "900",
+                        fontSize: 14,
+                        letterSpacing: 0.3,
+                      }}
+                    >
                       {codeToShow || "—"}
                     </Text>
                   </ScrollView>
@@ -492,44 +537,58 @@ export default function WildInspectionModal(props: Props) {
 
                 {readOnly && (
                   <Text className="mt-2 text-amber-300 font-extrabold">
-                    {t("Already submitted (Read-only)", "ஏற்கனவே சமர்ப்பிக்கப்பட்டது (Read-only)")}
+                    Already submitted (Read-only)
                   </Text>
                 )}
-                {!readOnly && !validation.ok && <Text className="mt-2 text-red-300 font-extrabold">{validation.msg}</Text>}
+                {!readOnly && !validation.ok && (
+                  <Text className="mt-2 text-red-300 font-extrabold">
+                    {validation.msg}
+                  </Text>
+                )}
               </View>
 
               <View className="items-end gap-2">
                 <View className="items-end">
-                  <Text className="text-white/70 font-extrabold">{capturedDate || "-"}</Text>
-                  <Text className="text-white/60 font-extrabold">{capturedTime || "-"}</Text>
+                  <Text className="text-white/70 font-extrabold">
+                    {capturedDate || "-"}
+                  </Text>
+                  <Text className="text-white/60 font-extrabold">
+                    {capturedTime || "-"}
+                  </Text>
                 </View>
 
-                <Pressable onPress={onCancel} className="w-10 h-10 rounded-2xl bg-white/10 items-center justify-center">
+                <Pressable
+                  onPress={onCancel}
+                  className="w-10 h-10 rounded-2xl bg-white/10 items-center justify-center"
+                >
                   <Ionicons name="close" size={20} color="white" />
                 </Pressable>
               </View>
             </View>
           </View>
 
-          {/* BODY */}
-          <ScrollView className="flex-1" keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, flexGrow: 1 }}>
+          <ScrollView
+            className="flex-1"
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ padding: 16, flexGrow: 1 }}
+          >
             {loading && <ActivityIndicator />}
             {!!error && <Text className="text-red-400">{error}</Text>}
 
             <TwoCol>
               <View className="flex-1">
-                <Label>{t("Fish Code", "மீன் கோடு")}</Label>
+                <Label>Fish Code</Label>
                 <ReadOnly value={codeToShow || scannedCode || "—"} />
               </View>
               <View className="flex-1">
-                <Label>{t("Species", "மீன் வகை")}</Label>
+                <Label>Species</Label>
                 <ReadOnly value={speciesAuto || "-"} />
               </View>
             </TwoCol>
 
             <TwoCol>
               <View className="flex-1">
-                <Label>{t("QC Result", "QC முடிவு")}</Label>
+                <Label>QC Result</Label>
                 <Select<QcResult>
                   value={(form.qc_result || "") as QcResult | ""}
                   onValueChange={(v) => {
@@ -539,28 +598,30 @@ export default function WildInspectionModal(props: Props) {
                   }}
                   items={["PASS", "HOLD", "REJECT"] as const}
                   disabled={readOnly || submitLoading}
-                  placeholder={t("Select", "தேர்வு")}
+                  placeholder="Select"
                 />
               </View>
 
               <View className="flex-1">
-                <Label>{t("Quality Grade", "தர நிலை")}</Label>
+                <Label>Quality Grade</Label>
                 <Select<QualityGrade>
                   value={(form.quality_grade || "") as QualityGrade | ""}
                   onValueChange={(v) => setFormField("quality_grade", v)}
                   items={["A", "B", "C"] as const}
                   disabled={readOnly || submitLoading}
-                  placeholder={t("Select", "தேர்வு")}
+                  placeholder="Select"
                 />
               </View>
             </TwoCol>
 
             <TwoCol>
               <View className="flex-1">
-                <Label>{t("Weight (kg)", "எடை (kg)")}</Label>
+                <Label>Weight (kg)</Label>
                 <Input
                   value={form.weight_kg}
-                  onChangeText={(v) => setFormField("weight_kg", sanitize3DigitInt(v))}
+                  onChangeText={(v) =>
+                    setFormField("weight_kg", sanitize3DigitInt(v))
+                  }
                   keyboardType="number-pad"
                   maxLength={3}
                   disabled={readOnly || submitLoading}
@@ -569,10 +630,12 @@ export default function WildInspectionModal(props: Props) {
               </View>
 
               <View className="flex-1">
-                <Label>{t("Temp (°C)", "வெப்பநிலை (°C)")}</Label>
+                <Label>Temp (°C)</Label>
                 <Input
                   value={form.temperature_c}
-                  onChangeText={(v) => setFormField("temperature_c", sanitizeTemp(v))}
+                  onChangeText={(v) =>
+                    setFormField("temperature_c", sanitizeTemp(v))
+                  }
                   keyboardType="decimal-pad"
                   disabled={readOnly || submitLoading}
                   placeholder="Eg: 0.2"
@@ -582,42 +645,51 @@ export default function WildInspectionModal(props: Props) {
 
             <TwoCol>
               <View className="flex-1">
-                <Label>{t("Size", "அளவு")}</Label>
+                <Label>Size</Label>
                 <Select<"SMALL" | "MEDIUM" | "LARGE">
                   value={(form.size || "") as "SMALL" | "MEDIUM" | "LARGE" | ""}
                   onValueChange={(v) => setFormField("size", v)}
                   items={["SMALL", "MEDIUM", "LARGE"] as const}
                   disabled={readOnly || submitLoading}
-                  placeholder={t("Select", "தேர்வு")}
+                  placeholder="Select"
                 />
               </View>
 
               <View className="flex-1">
-                <Label>{t("Damage", "சேதம்")}</Label>
+                <Label>Damage</Label>
                 <Select<"NONE" | "MINOR" | "MODERATE" | "SEVERE">
-                  value={(form.damage || "") as "NONE" | "MINOR" | "MODERATE" | "SEVERE" | ""}
+                  value={
+                    (form.damage || "") as
+                      | "NONE"
+                      | "MINOR"
+                      | "MODERATE"
+                      | "SEVERE"
+                      | ""
+                  }
                   onValueChange={(v) => setFormField("damage", v)}
                   items={["NONE", "MINOR", "MODERATE", "SEVERE"] as const}
                   disabled={readOnly || submitLoading}
-                  placeholder={t("Select", "தேர்வு")}
+                  placeholder="Select"
                 />
               </View>
             </TwoCol>
 
-            <Label>{t("Reject Reason", "நிராகரிப்பு காரணம்")}</Label>
+            <Label>Reject Reason</Label>
             <Select<RejectReason>
               value={(form.reject_reason || "") as RejectReason | ""}
               onValueChange={(v) => setFormField("reject_reason", v)}
               items={REJECT_REASONS}
               disabled={readOnly || submitLoading || !isReject}
-              placeholder={isReject ? t("Select", "தேர்வு") : t("Only when QC Result = REJECT", "QC முடிவு = REJECT ஆனாலே")}
+              placeholder={
+                isReject ? "Select" : "Only when QC Result = REJECT"
+              }
             />
 
-            <Label>{t("Remarks", "குறிப்பு")}</Label>
+            <Label>Remarks</Label>
             <Input
               value={form.remarks}
               onChangeText={(v) => setFormField("remarks", v)}
-              placeholder={t("Write remarks", "குறிப்பு எழுதவும்")}
+              placeholder="Write remarks"
               multiline
               numberOfLines={4}
               disabled={readOnly || submitLoading}
@@ -625,54 +697,68 @@ export default function WildInspectionModal(props: Props) {
 
             <TwoCol>
               <View className="flex-1">
-                <Label>{t("Capture", "படம் எடு")}</Label>
+                <Label>Capture</Label>
                 <Pressable
                   onPress={onCaptureImage}
                   disabled={readOnly || submitLoading || wmBusy}
                   className={[
                     "mt-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3",
-                    readOnly || submitLoading || wmBusy ? "opacity-60" : "opacity-100",
+                    readOnly || submitLoading || wmBusy
+                      ? "opacity-60"
+                      : "opacity-100",
                   ].join(" ")}
                 >
                   <View className="flex-row items-center justify-center">
                     <Ionicons name="camera-outline" size={18} color="white" />
                     <Text className="text-white font-extrabold ml-2">
-                      {wmBusy ? t("Processing…", "செயலாக்கம்…") : t("Capture", "படம் எடு")}
+                      {wmBusy ? "Processing…" : "Capture"}
                     </Text>
                   </View>
                 </Pressable>
               </View>
 
               <View className="flex-1">
-                <Label>{t("Gallery", "கேலரி")}</Label>
+                <Label>Gallery</Label>
                 <Pressable
                   onPress={onPickGalleryStamped}
                   disabled={readOnly || submitLoading || wmBusy}
                   className={[
                     "mt-2 rounded-2xl border border-blue-400/30 bg-blue-500/10 px-4 py-3",
-                    readOnly || submitLoading || wmBusy ? "opacity-60" : "opacity-100",
+                    readOnly || submitLoading || wmBusy
+                      ? "opacity-60"
+                      : "opacity-100",
                   ].join(" ")}
                 >
                   <View className="flex-row items-center justify-center">
                     <Ionicons name="images-outline" size={18} color="white" />
                     <Text className="text-white font-extrabold ml-2">
-                      {t("Pick", "தேர்வு")} ({form.images.length}/{MAX_IMAGES})
+                      Pick ({form.images.length}/{MAX_IMAGES})
                     </Text>
                   </View>
                 </Pressable>
               </View>
             </TwoCol>
 
-            <ImageList uris={form.images} onRemove={onRemoveImage} disabled={readOnly || submitLoading} />
+            <ImageList
+              uris={form.images}
+              onRemove={onRemoveImage}
+              disabled={readOnly || submitLoading}
+            />
 
-            {!!submitError && <Text className="text-red-400 mt-2">{submitError}</Text>}
+            {!!submitError && (
+              <Text className="text-red-400 mt-2">{submitError}</Text>
+            )}
             <View style={{ height: 24 }} />
           </ScrollView>
 
-          {/* FOOTER */}
           <View className="p-4 border-t border-white/10 flex-row gap-3">
-            <Pressable onPress={onCancel} className="flex-1 bg-white/10 p-4 rounded-2xl">
-              <Text className="text-white text-center font-extrabold">{t("Close", "மூடு")}</Text>
+            <Pressable
+              onPress={onCancel}
+              className="flex-1 bg-white/10 p-4 rounded-2xl"
+            >
+              <Text className="text-white text-center font-extrabold">
+                Close
+              </Text>
             </Pressable>
 
             {!readOnly && (
@@ -682,14 +768,13 @@ export default function WildInspectionModal(props: Props) {
                 className="flex-1 bg-blue-500/30 p-4 rounded-2xl"
               >
                 <Text className="text-white text-center font-extrabold">
-                  {submitLoading ? t("Submitting…", "சமர்ப்பிக்கிறது…") : t("Submit", "சமர்ப்பி")}
+                  {submitLoading ? "Submitting…" : "Submit"}
                 </Text>
               </Pressable>
             )}
           </View>
         </View>
 
-        {/* ✅ WATERMARK STAGE */}
         {wmTask && (
           <View
             pointerEvents="none"
@@ -720,20 +805,51 @@ export default function WildInspectionModal(props: Props) {
             <View
               style={{
                 position: "absolute",
-                left: 18,
                 right: 18,
-                bottom: 18,
+                top: 18,
+                maxWidth: "72%",
                 paddingHorizontal: 12,
                 paddingVertical: 10,
                 borderRadius: 12,
                 backgroundColor: "rgba(0,0,0,0.55)",
+                alignItems: "flex-end",
               }}
             >
-              <Text style={{ color: "rgba(255,255,255,0.95)", fontWeight: "900", fontSize: 16, lineHeight: 20 }}>
+              <Text
+                style={{
+                  color: "rgba(255,255,255,0.95)",
+                  fontWeight: "900",
+                  fontSize: 16,
+                  lineHeight: 20,
+                  textAlign: "right",
+                }}
+              >
                 {POWERED_LINE}
               </Text>
 
-              <Text style={{ marginTop: 4, color: "white", fontWeight: "900", fontSize: 15, lineHeight: 20 }}>
+              <Text
+                style={{
+                  marginTop: 2,
+                  color: "rgba(255,255,255,0.95)",
+                  fontWeight: "900",
+                  fontSize: 15,
+                  lineHeight: 20,
+                  textAlign: "right",
+                }}
+              >
+                Quality Inspector ID: {qcInspectorId}
+              </Text>
+
+              <Text
+                style={{
+                  marginTop: 4,
+                  color: "white",
+                  fontWeight: "900",
+                  fontSize: 15,
+                  lineHeight: 20,
+                  textAlign: "right",
+                }}
+              >
                 {wmTask.text}
               </Text>
             </View>

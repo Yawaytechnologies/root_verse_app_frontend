@@ -3,19 +3,35 @@ import { Platform } from "react-native";
 
 export const API_BASE = (
   process.env.EXPO_PUBLIC_API_BASE_URL ||
-  "https://rootverse-backend-5qoo.onrender.com/"
+  "https://rootverse-backend-5qoo.onrender.com"
 ).replace(/\/$/, "");
-
-function timeout(ms: number) {
-  return new Promise((_, rej) =>
-    setTimeout(() => rej(new Error("Timeout")), ms)
-  );
-}
 
 const AUTH_TOKEN_KEY = "auth_token";
 
+// Optional in-memory token (can be set by any session bootstrap flow)
+let _authToken: string | null = null;
+
+export function setAuthToken(token: string | null) {
+  _authToken = token;
+}
+
+export function getAuthToken() {
+  return _authToken;
+}
+
+function timeout(ms: number) {
+  return new Promise((_, rej) => setTimeout(() => rej(new Error("Timeout")), ms));
+}
+
+function normalizePath(path: string) {
+  if (!path) return "/";
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
 async function withAuthHeaders(init?: RequestInit): Promise<RequestInit> {
-  const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY).catch(() => null);
+  const token =
+    _authToken || (await AsyncStorage.getItem(AUTH_TOKEN_KEY).catch(() => null));
+
   const headers = new Headers(init?.headers || {});
 
   if (!headers.has("Accept")) {
@@ -32,31 +48,37 @@ async function withAuthHeaders(init?: RequestInit): Promise<RequestInit> {
   };
 }
 
+async function parseResponse(res: Response) {
+  const text = await res.text();
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function extractErrorMessage(data: any, status: number) {
+  if (!data) return `HTTP ${status}`;
+  if (typeof data === "string") return data;
+
+  return data.message || data.error || data.msg || data.detail || `HTTP ${status}`;
+}
+
 export async function httpJson<T>(
   path: string,
   init?: RequestInit,
   ms = 15000
 ): Promise<T> {
-  const url = `${API_BASE}${path}`;
-  const requestInit = await withAuthHeaders(init);
+  const url = `${API_BASE}${normalizePath(path)}`;
+  const finalInit = await withAuthHeaders(init);
 
-  const res = (await Promise.race([
-    fetch(url, requestInit),
-    timeout(ms),
-  ])) as Response;
-
-  const text = await res.text();
-  let data: any = null;
-
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = text;
-  }
+  const res = (await Promise.race([fetch(url, finalInit), timeout(ms)])) as Response;
+  const data = await parseResponse(res);
 
   if (!res.ok) {
-    const msg = (data && (data.message || data.error)) || `HTTP ${res.status}`;
-    throw new Error(msg);
+    throw new Error(extractErrorMessage(data, res.status));
   }
 
   return data as T;
@@ -67,32 +89,21 @@ export async function httpPutForm<T>(
   form: FormData,
   ms = 20000
 ): Promise<T> {
-  const url = `${API_BASE}${path}`;
-  const requestInit = await withAuthHeaders({ method: "PUT", body: form });
+  const url = `${API_BASE}${normalizePath(path)}`;
 
-  const res = (await Promise.race([
-    fetch(url, requestInit),
-    timeout(ms),
-  ])) as Response;
+  // FormData: don't set Content-Type manually (fetch sets boundary)
+  const finalInit = await withAuthHeaders({ method: "PUT", body: form });
 
-  const text = await res.text();
-  let data: any = null;
-
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = text;
-  }
+  const res = (await Promise.race([fetch(url, finalInit), timeout(ms)])) as Response;
+  const data = await parseResponse(res);
 
   if (!res.ok) {
-    const msg = (data && (data.message || data.error)) || `HTTP ${res.status}`;
-    throw new Error(msg);
+    throw new Error(extractErrorMessage(data, res.status));
   }
 
   return data as T;
 }
 
-/** Web needs File/Blob, native can use {uri,name,type} */
 export async function appendImageToForm(
   form: FormData,
   field: string,
@@ -110,18 +121,32 @@ export async function appendImageToForm(
   form.append(field, file);
 }
 
-/** ✅ EXPORT AN OBJECT so you can do: import { http } from "@/src/http" */
 export const http = {
-  getJson: <T>(path: string, ms?: number) => httpJson<T>(path, { method: "GET" }, ms),
+  getJson: <T>(path: string, ms?: number) =>
+    httpJson<T>(path, { method: "GET" }, ms),
+
   postJson: <T>(path: string, body: any, ms?: number) =>
     httpJson<T>(
       path,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(body ?? {}),
       },
       ms
     ),
-  putForm: <T>(path: string, form: FormData, ms?: number) => httpPutForm<T>(path, form, ms),
+
+  putJson: <T>(path: string, body: any, ms?: number) =>
+    httpJson<T>(
+      path,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body ?? {}),
+      },
+      ms
+    ),
+
+  putForm: <T>(path: string, form: FormData, ms?: number) =>
+    httpPutForm<T>(path, form, ms),
 };
