@@ -304,39 +304,40 @@ export const {
 export default transportSlice.reducer;
 
 export const selectTransportSelectedDate = (state: any) =>
-  state.transport.selectedDate;
+  state?.transport?.selectedDate || "";
 
 export const selectCurrentTransport = (state: any) =>
-  state.transport.currentTransport;
+  state?.transport?.currentTransport || null;
 
 export const selectCurrentTransportOperator = (state: any) =>
-  state.transport.currentTransportOperator;
+  state?.transport?.currentTransportOperator || null;
 
-export const selectTransportStats = (state: any) => state.transport.stats;
+export const selectTransportStats = (state: any) =>
+  state?.transport?.stats || initialState.stats;
 
 export const selectAssignedCrates = (state: any) =>
-  state.transport.assignedCrates || [];
+  state?.transport?.assignedCrates || [];
 
 export const selectInTransitCrates = (state: any) =>
-  state.transport.inTransitCrates || [];
+  state?.transport?.inTransitCrates || [];
 
 export const selectTransportDashboardLoading = (state: any) =>
-  state.transport.dashboardLoading;
+  !!state?.transport?.dashboardLoading;
 
 export const selectTransportDashboardError = (state: any) =>
-  state.transport.dashboardError;
+  state?.transport?.dashboardError || null;
 
 export const selectAssignedLoading = (state: any) =>
-  state.transport.assignedLoading;
+  !!state?.transport?.assignedLoading;
 
 export const selectAssignedError = (state: any) =>
-  state.transport.assignedError;
+  state?.transport?.assignedError || null;
 
 export const selectScanPickupLoading = (state: any) =>
-  state.transport.scanPickupLoading;
+  !!state?.transport?.scanPickupLoading;
 
 export const selectScanPickupError = (state: any) =>
-  state.transport.scanPickupError;
+  state?.transport?.scanPickupError || null;
 
 export const selectLastScanMessage = (state: any) =>
-  state.transport.lastScanMessage;
+  state?.transport?.lastScanMessage || null;
