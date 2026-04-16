@@ -4,8 +4,15 @@ export function pickFirstDefined(...vals: any[]) {
   );
 }
 
+export function normalizeRole(value: any) {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+}
+
 export function pickAuthRole(...sources: any[]) {
-  return String(
+  return normalizeRole(
     pickFirstDefined(
       ...sources.flatMap((src) => [
         src?.role,
@@ -18,7 +25,7 @@ export function pickAuthRole(...sources: any[]) {
         src?.data?.user?.rootverse_type,
       ])
     ) ?? ""
-  ).toUpperCase();
+  );
 }
 
 export function pickAuthStatus(...sources: any[]) {
@@ -33,26 +40,61 @@ export function pickAuthStatus(...sources: any[]) {
         src?.data?.user?.status,
       ])
     ) ?? ""
-  ).toUpperCase();
+  )
+    .trim()
+    .toUpperCase();
 }
 
 export function getRouteForRole(role: string) {
-  const normalizedRole = String(role || "").toUpperCase();
+  const normalizedRole = normalizeRole(role);
 
-  if (normalizedRole === "QUALITY_CHECKER") return "/quality";
-  if (normalizedRole === "COLLECTION_CENTRE_OPERATOR") {
+  if (!normalizedRole) return null;
+
+  if (normalizedRole === "QUALITY_CHECKER") {
+    return "/quality";
+  }
+
+  if (
+    normalizedRole === "COLLECTION_CENTRE_OPERATOR" ||
+    normalizedRole === "COLLECTION_CENTER_OPERATOR" ||
+    normalizedRole === "CENTER_OPERATOR" ||
+    normalizedRole === "CENTRE_OPERATOR" ||
+    ((normalizedRole.includes("COLLECTION") ||
+      normalizedRole.includes("CENTER") ||
+      normalizedRole.includes("CENTRE")) &&
+      normalizedRole.includes("OPERATOR"))
+  ) {
     return "/(centre)/dashboard";
   }
-  if (normalizedRole === "TRANSPORT_OPERATOR") {
+
+  if (
+    normalizedRole === "TRANSPORT_OPERATOR" ||
+    normalizedRole === "TRANSPORTER_OPERATOR" ||
+    (normalizedRole.includes("TRANSPORT") &&
+      normalizedRole.includes("OPERATOR"))
+  ) {
     return "/(transport)/dashboard";
   }
-  if (normalizedRole === "OWNER" || normalizedRole === "CRATE_PACKER") {
+
+  if (normalizedRole === "CRATE_PACKER") {
+    return "/crate_packer/index";
+  }
+
+  if (normalizedRole === "OWNER") {
     return "/(wild)/dashboard";
   }
 
-  if (normalizedRole.includes("WILD")) return "/(wild)/dashboard";
-  if (normalizedRole.includes("AQUA")) return "/(aqua)/tabs/dashboard";
-  if (normalizedRole.includes("MARI")) return "/mariculture";
+  if (normalizedRole === "WILD_CAPTURE" || normalizedRole.includes("WILD")) {
+    return "/(wild)/dashboard";
+  }
+
+  if (normalizedRole === "AQUACULTURE" || normalizedRole.includes("AQUA")) {
+    return "/(aqua)/tabs/dashboard";
+  }
+
+  if (normalizedRole === "MARICULTURE" || normalizedRole.includes("MARI")) {
+    return "/mariculture";
+  }
 
   return null;
 }
