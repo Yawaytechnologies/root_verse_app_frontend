@@ -21,7 +21,7 @@ import {
   type TabStatus as QueueTabStatus,
 } from "../../utils/qcFillQueue";
 
-import { FullRow, TwoColRow, type Division, type Lang } from "./QualityUI";
+import { FullRow, TwoColRow, type Division } from "./QualityUI";
 
 // ✅ current QC user (to scope local queue per user)
 import { useAppSelector } from "../../store/hooks";
@@ -316,14 +316,12 @@ function fmtMonthTitle(d: Date) {
 
 export default function QcListScreen({
   division,
-  lang,
   status,
   selectedDate,
   onChangeDate,
   onEditItem,
 }: {
   division: Division;
-  lang: Lang;
   status: TabStatus;
 
   selectedDate: string; // YYYY-MM-DD

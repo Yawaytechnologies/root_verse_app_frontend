@@ -586,21 +586,35 @@ export default function MyTrips() {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
 
-  const ownerCodeFromStore: string | null =
-    useAppSelector((s: any) => s.me?.me?.owner_code) ||
-    useAppSelector((s: any) => s.me?.me?.owner_id) ||
-    useAppSelector((s: any) => s.auth?.me?.owner_code) ||
-    useAppSelector((s: any) => s.auth?.me?.owner_id) ||
-    useAppSelector((s: any) => s.login?.user?.owner_code) ||
-    useAppSelector((s: any) => s.login?.user?.owner_id) ||
-    null;
+  /**
+   * ✅ FIXED:
+   * current login/auth owner is checked FIRST
+   * stale me slice is checked LAST
+   */
+  const ownerFromStore = useAppSelector((s: any) => {
+    return (
+      s.login?.user?.owner_code ??
+      s.login?.user?.owner_id ??
+      s.auth?.me?.owner_code ??
+      s.auth?.me?.owner_id ??
+      s.me?.me?.owner_code ??
+      s.me?.me?.owner_id ??
+      null
+    );
+  });
 
-  const token: string | undefined =
-    useAppSelector((s: any) => s.login?.token) ||
-    useAppSelector((s: any) => s.auth?.token) ||
-    undefined;
+  const token: string | undefined = useAppSelector((s: any) => {
+    return s.login?.token ?? s.auth?.token ?? undefined;
+  });
 
-  const [ownerCode, setOwnerCode] = useState<string | null>(ownerCodeFromStore);
+  const initialOwner =
+    ownerFromStore !== null &&
+    ownerFromStore !== undefined &&
+    String(ownerFromStore).trim().length > 0
+      ? String(ownerFromStore).trim()
+      : null;
+
+  const [ownerCode, setOwnerCode] = useState<string | null>(initialOwner);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -628,24 +642,36 @@ export default function MyTrips() {
 
     (async () => {
       try {
-        if (ownerCodeFromStore) {
-          if (mounted) setOwnerCode(String(ownerCodeFromStore));
+        const hasStoreOwner =
+          ownerFromStore !== null &&
+          ownerFromStore !== undefined &&
+          String(ownerFromStore).trim().length > 0;
+
+        if (hasStoreOwner) {
+          if (mounted) setOwnerCode(String(ownerFromStore).trim());
           return;
         }
 
         const stored =
           (await AsyncStorage.getItem("owner_code")) || (await AsyncStorage.getItem("owner_id"));
 
-        if (mounted) setOwnerCode(stored ? String(stored) : null);
+        if (mounted) setOwnerCode(stored ? String(stored).trim() : null);
       } catch {
-        if (mounted) setOwnerCode(ownerCodeFromStore ? String(ownerCodeFromStore) : null);
+        const fallback =
+          ownerFromStore !== null &&
+          ownerFromStore !== undefined &&
+          String(ownerFromStore).trim().length > 0
+            ? String(ownerFromStore).trim()
+            : null;
+
+        if (mounted) setOwnerCode(fallback);
       }
     })();
 
     return () => {
       mounted = false;
     };
-  }, [ownerCodeFromStore]);
+  }, [ownerFromStore]);
 
   /** ✅ load vessel cache maps whenever ownerCode changes */
   useEffect(() => {
@@ -1028,15 +1054,15 @@ export default function MyTrips() {
         t?.planned_at ?? t?.plannedAt ?? t?.planned_on ?? t?.created_at ?? t?.createdAt
       ),
       completed_at: fmtDateTime(
-  t?.completed_at ??
-    t?.completedAt ??
-    t?.comleted_at ??
-    t?.comletedAt ??
-    t?.completed_on ??
-    t?.completedOn ??
-    t?.updated_at ??
-    t?.updatedAt
-),
+        t?.completed_at ??
+          t?.completedAt ??
+          t?.comleted_at ??
+          t?.comletedAt ??
+          t?.completed_on ??
+          t?.completedOn ??
+          t?.updated_at ??
+          t?.updatedAt
+      ),
       arrival_at: fmtDateTime(t?.arrival_at ?? t?.arrivalAt),
     };
   }, [detailsData, detailsTripRowId, vesselNameMap]);
@@ -1058,9 +1084,7 @@ export default function MyTrips() {
             >
               <View className="px-4 pt-4 pb-3 flex-row items-center justify-between">
                 <View className="flex-1 pr-3">
-                  <Text className="text-xl font-extrabold text-[#2b2b2b]">
-                    Trip Details
-                  </Text>
+                  <Text className="text-xl font-extrabold text-[#2b2b2b]">Trip Details</Text>
                   <Text className="mt-1 text-xs text-[#7a6f66]">
                     Row ID: {String(detailsView.id)}
                     {detailsView.trip_id && detailsView.trip_id !== "-"
@@ -1097,9 +1121,7 @@ export default function MyTrips() {
                 {detailsLoading ? (
                   <Card className="px-4 py-8 items-center">
                     <ActivityIndicator />
-                    <Text className="mt-2 text-sm text-[#7a6f66]">
-                      Loading details...
-                    </Text>
+                    <Text className="mt-2 text-sm text-[#7a6f66]">Loading details...</Text>
                   </Card>
                 ) : detailsError ? (
                   <Card className="px-4 py-4">
@@ -1118,9 +1140,7 @@ export default function MyTrips() {
                 ) : (
                   <>
                     <Card className="px-4 py-4">
-                      <Text className="text-base font-extrabold text-[#2b2b2b]">
-                        Summary
-                      </Text>
+                      <Text className="text-base font-extrabold text-[#2b2b2b]">Summary</Text>
                       <View className="mt-2">
                         <Row label="Trip Row ID" value={detailsView.id} />
                         <Row label="Trip ID" value={detailsView.trip_id} />
@@ -1147,13 +1167,13 @@ export default function MyTrips() {
                         <Row label="Landing" value={detailsView.location_name} />
                         <Row label="Planned At" value={detailsView.planned_at} />
                         {detailsView.status === "COMPLETED" ? (
-  <Row
-    label="Completed At"
-    value={detailsView.completed_at || detailsView.arrival_at}
-  />
-) : (
-  <Row label="Arrival At" value={detailsView.arrival_at} />
-)}
+                          <Row
+                            label="Completed At"
+                            value={detailsView.completed_at || detailsView.arrival_at}
+                          />
+                        ) : (
+                          <Row label="Arrival At" value={detailsView.arrival_at} />
+                        )}
                         <Row label="Created At" value={detailsView.created_at} />
                         <Row label="Updated At" value={detailsView.updated_at} />
                       </View>
@@ -1223,63 +1243,63 @@ export default function MyTrips() {
 
                       {/* ✅ if COMPLETED => no Catch Log */}
                       {/* ✅ Catch Log ONLY when APPROVED */}
-{detailsView.status === "APPROVED" ? (
-  <Pressable
-    onPress={() => {
-      const tripIdForCatch =
-        detailsView.trip_id && detailsView.trip_id !== "-"
-          ? detailsView.trip_id
-          : "";
-      if (!tripIdForCatch) {
-        Alert.alert("Trip ID missing", "trip_id not found to open Catch Log.");
-        return;
-      }
+                      {detailsView.status === "APPROVED" ? (
+                        <Pressable
+                          onPress={() => {
+                            const tripIdForCatch =
+                              detailsView.trip_id && detailsView.trip_id !== "-"
+                                ? detailsView.trip_id
+                                : "";
+                            if (!tripIdForCatch) {
+                              Alert.alert("Trip ID missing", "trip_id not found to open Catch Log.");
+                              return;
+                            }
 
-      const vesselIdForCatch =
-        detailsView.vessel_id && detailsView.vessel_id !== "-"
-          ? detailsView.vessel_id
-          : "";
-      const ownerForCatch =
-        detailsView.owner_code && detailsView.owner_code !== "-"
-          ? detailsView.owner_code
-          : String(ownerCode ?? "").trim();
+                            const vesselIdForCatch =
+                              detailsView.vessel_id && detailsView.vessel_id !== "-"
+                                ? detailsView.vessel_id
+                                : "";
+                            const ownerForCatch =
+                              detailsView.owner_code && detailsView.owner_code !== "-"
+                                ? detailsView.owner_code
+                                : String(ownerCode ?? "").trim();
 
-      const rvVesselIdForCatch =
-        normalizeText(
-          (detailsData as any)?.rv_vessel_id ??
-            (detailsData as any)?.rvVesselId ??
-            (detailsData as any)?.vessel?.rv_vessel_id ??
-            (detailsData as any)?.vessel?.rvVesselId
-        ) ||
-        (vesselIdForCatch
-          ? normalizeText(vesselRvIdMap[String(vesselIdForCatch)])
-          : "");
+                            const rvVesselIdForCatch =
+                              normalizeText(
+                                (detailsData as any)?.rv_vessel_id ??
+                                  (detailsData as any)?.rvVesselId ??
+                                  (detailsData as any)?.vessel?.rv_vessel_id ??
+                                  (detailsData as any)?.vessel?.rvVesselId
+                              ) ||
+                              (vesselIdForCatch
+                                ? normalizeText(vesselRvIdMap[String(vesselIdForCatch)])
+                                : "");
 
-      const qs =
-        `tripId=${encodeURIComponent(String(tripIdForCatch))}` +
-        (vesselIdForCatch
-          ? `&vesselId=${encodeURIComponent(String(vesselIdForCatch))}`
-          : "") +
-        (rvVesselIdForCatch
-          ? `&rvVesselId=${encodeURIComponent(String(rvVesselIdForCatch))}`
-          : "") +
-        (ownerForCatch
-          ? `&ownerCode=${encodeURIComponent(String(ownerForCatch))}`
-          : "") +
-        (detailsView.id
-          ? `&tripRowId=${encodeURIComponent(String(detailsView.id))}`
-          : "");
+                            const qs =
+                              `tripId=${encodeURIComponent(String(tripIdForCatch))}` +
+                              (vesselIdForCatch
+                                ? `&vesselId=${encodeURIComponent(String(vesselIdForCatch))}`
+                                : "") +
+                              (rvVesselIdForCatch
+                                ? `&rvVesselId=${encodeURIComponent(String(rvVesselIdForCatch))}`
+                                : "") +
+                              (ownerForCatch
+                                ? `&ownerCode=${encodeURIComponent(String(ownerForCatch))}`
+                                : "") +
+                              (detailsView.id
+                                ? `&tripRowId=${encodeURIComponent(String(detailsView.id))}`
+                                : "");
 
-      closeTripDetails();
-      router.push(`/(wild)/catch-logs/create?${qs}` as const);
-    }}
-    className="flex-1 rounded-2xl bg-[#136f2d] px-4 py-4 active:opacity-90"
-  >
-    <Text className="text-center text-base font-extrabold text-white">
-      Catch Log
-    </Text>
-  </Pressable>
-) : null}
+                            closeTripDetails();
+                            router.push(`/(wild)/catch-logs/create?${qs}` as const);
+                          }}
+                          className="flex-1 rounded-2xl bg-[#136f2d] px-4 py-4 active:opacity-90"
+                        >
+                          <Text className="text-center text-base font-extrabold text-white">
+                            Catch Log
+                          </Text>
+                        </Pressable>
+                      ) : null}
                     </View>
                   </>
                 )}
@@ -1417,10 +1437,7 @@ export default function MyTrips() {
                           >
                             {t.tripName}
                           </Text>
-                          <Text
-                            className="mt-0.5 text-sm text-[#6b625a]"
-                            numberOfLines={1}
-                          >
+                          <Text className="mt-0.5 text-sm text-[#6b625a]" numberOfLines={1}>
                             {t.method} · {t.locationCode}
                           </Text>
                         </View>
@@ -1432,9 +1449,7 @@ export default function MyTrips() {
                     {/* ✅ vessel shows name + id (same UI line) */}
                     <Text className="mt-3 text-sm text-[#7a6f66]">
                       Vessel:{" "}
-                      {normalizeText((t as any).vesselLabel) ||
-                        normalizeText(t.vesselId) ||
-                        "-"}
+                      {normalizeText((t as any).vesselLabel) || normalizeText(t.vesselId) || "-"}
                     </Text>
                     <Text className="mt-1 text-sm text-[#7a6f66]">
                       Landing: {normalizeText(t.landingCenter) || "-"}

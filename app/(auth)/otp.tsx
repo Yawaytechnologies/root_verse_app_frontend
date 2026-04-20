@@ -27,18 +27,39 @@ import Animated, {
 
 import { loginWithPhone } from "../../src/store/auth/login.slice";
 import { fetchMe } from "../../src/store/auth/me.slice";
+import {
+  getRouteForRole,
+  pickAuthRole,
+  pickAuthStatus,
+  pickFirstDefined,
+} from "../../src/store/auth/authRouting";
 import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
+import centreCrateService from "../../src/services/centre/centreCrate.service";
+import transportService from "../../src/services/transport/transportService";
 
-// ✅ persist session token (authSession)
+// persist session token
 import { persistSession } from "../../src/store/auth/authSession.slice";
 
-// ✅ QC: clear + fetch qc profile
-import { clearQc, fetchQcMe } from "../../src/store/qualityAuth/qualityAuth.slice";
+// QC: clear + fetch qc profile
+import {
+  clearQc,
+  fetchQcMe,
+} from "../../src/store/qualityAuth/qualityAuth.slice";
 
 const { height: SCREEN_H } = Dimensions.get("window");
 
-const pickFirst = (...vals: any[]) =>
-  vals.find((v) => v !== undefined && v !== null && String(v).trim() !== "");
+async function inferOperatorRoleByPhone(phoneNo: string) {
+  const [centreOperator, transportOperator] = await Promise.all([
+    centreCrateService
+      .getLoggedInCollectionCentreOperator(phoneNo)
+      .catch(() => null),
+    transportService.getLoggedInTransportOperator(phoneNo).catch(() => null),
+  ]);
+
+  if (centreOperator) return "COLLECTION_CENTRE_OPERATOR";
+  if (transportOperator) return "TRANSPORT_OPERATOR";
+  return "";
+}
 
 export default function OtpScreen() {
   const params = useLocalSearchParams<{ phone_no?: string | string[] }>();
@@ -138,14 +159,14 @@ export default function OtpScreen() {
 
     setLoading(true);
     try {
-      // NOTE: your current flow calls loginWithPhone(phone_no)
-      // If backend requires OTP verify API, replace this with verify call.
+      // Current project flow is still phone-login based.
+      // OTP is only UI-level validation here unless backend provides verify API.
       const raw: any = await dispatch(loginWithPhone(phone_no)).unwrap();
 
       const p = raw?.data ?? raw;
       const u = p?.user ?? p?.data?.user ?? p?.data ?? p;
 
-      const token = pickFirst(
+      const token = pickFirstDefined(
         p?.token,
         raw?.token,
         p?.data?.token,
@@ -161,25 +182,59 @@ export default function OtpScreen() {
         return;
       }
 
-      // ✅ make sure old code reading auth_token still works
       await AsyncStorage.setItem("auth_token", String(token));
-
-      // ✅ persist for session restore
       await dispatch(persistSession(String(token))).unwrap();
 
-      // ✅ fetch /me (this is the ONLY source for role/status)
       const me: any = await dispatch(fetchMe()).unwrap();
 
-      // ✅ QC: refresh QC profile if needed
-      const rtype = String(me?.rootverse_type || "").toUpperCase();
-      if (rtype === "QUALITY_CHECKER") {
-        dispatch(clearQc());
-        await dispatch(fetchQcMe()).unwrap().catch(() => { });
+      console.log("OTP VALUE =>", otp);
+console.log("PHONE =>", phone_no);
+console.log("ME FULL =>", me);
+console.log("ME ROLE =>", me?.rootverse_type);
+console.log("ME STATUS =>", me?.status || me?.verification_status);
+
+let rtype = pickAuthRole(me, raw, p, u, login);
+
+if (!rtype && phone_no) {
+  rtype = await inferOperatorRoleByPhone(phone_no);
+}
+
+const status = pickAuthStatus(me, raw, p, u, login);
+
+console.log("FINAL ROLE =>", rtype);
+console.log("FINAL STATUS =>", status);
+
+      if (
+        status.includes("PENDING") ||
+        status.includes("APPROVAL") ||
+        status.includes("PENDING_APPROVAL")
+      ) {
+        router.replace("/(auth)/pending" as any);
+        return;
       }
 
-      // ✅ DO NOT ROUTE HERE
-      // Let app/_layout.tsx handle routing from meState + status.
-      return;
+      if (status.includes("REJECT")) {
+        router.replace("/(auth)/rejected" as any);
+        return;
+      }
+
+      if (rtype === "QUALITY_CHECKER") {
+        dispatch(clearQc());
+        await dispatch(fetchQcMe()).unwrap().catch(() => {});
+        router.replace(getRouteForRole(rtype) as any);
+        return;
+      }
+
+      const route = getRouteForRole(rtype);
+      if (route) {
+        router.replace(route as any);
+        return;
+      }
+
+      Alert.alert(
+        "Routing error",
+        `Unknown role: ${rtype || "NO_ROLE_FROM_ME"}`
+      );
     } catch (e: any) {
       const msg = String(e?.message || e || "Login blocked");
       const m = msg.toLowerCase();
@@ -193,13 +248,19 @@ export default function OtpScreen() {
           "Waiting for approval",
           "Admin has not approved your account yet."
         );
-        return router.replace("/(auth)/pending" as any);
+        router.replace("/(auth)/pending" as any);
+        return;
       }
-      if (m.includes("reject")) return router.replace("/(auth)/rejected" as any);
+
+      if (m.includes("reject")) {
+        router.replace("/(auth)/rejected" as any);
+        return;
+      }
 
       if (m.includes("not found") || m.includes("no user")) {
         Alert.alert("Not registered", "Please register first.");
-        return router.replace("/(auth)/register" as any);
+        router.replace("/(auth)/register" as any);
+        return;
       }
 
       Alert.alert("Login blocked", msg);
@@ -258,7 +319,12 @@ export default function OtpScreen() {
         <Animated.View
           pointerEvents="none"
           style={[
-            { position: "absolute", inset: 0, backgroundColor: "black", zIndex: 5 },
+            {
+              position: "absolute",
+              inset: 0,
+              backgroundColor: "black",
+              zIndex: 5,
+            },
             dimOverlayAnim,
           ]}
         />
@@ -298,12 +364,13 @@ export default function OtpScreen() {
                     }}
                   />
                   <View
-                    className={`h-2.5 w-2.5 rounded-full ${otp.length === 0
+                    className={`h-2.5 w-2.5 rounded-full ${
+                      otp.length === 0
                         ? "bg-slate-700"
                         : otpOk
-                          ? "bg-emerald-400"
-                          : "bg-rose-400"
-                      }`}
+                        ? "bg-emerald-400"
+                        : "bg-rose-400"
+                    }`}
                   />
                 </View>
 
@@ -314,8 +381,9 @@ export default function OtpScreen() {
 
                   <Pressable onPress={onResend} disabled={sec > 0}>
                     <Text
-                      className={`text-[11px] font-semibold ${sec > 0 ? "text-slate-500" : "text-emerald-300"
-                        }`}
+                      className={`text-[11px] font-semibold ${
+                        sec > 0 ? "text-slate-500" : "text-emerald-300"
+                      }`}
                     >
                       Resend
                     </Text>
@@ -341,8 +409,9 @@ export default function OtpScreen() {
                   <Pressable
                     disabled={!canVerify}
                     onPress={onVerify}
-                    className={`rounded-3xl overflow-hidden ${!canVerify || loading ? "opacity-60" : "opacity-100"
-                      }`}
+                    className={`rounded-3xl overflow-hidden ${
+                      !canVerify || loading ? "opacity-60" : "opacity-100"
+                    }`}
                   >
                     <LinearGradient
                       colors={["#34d399", "#10b981", "#06b6d4"]}

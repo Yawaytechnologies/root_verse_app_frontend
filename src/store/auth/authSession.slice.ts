@@ -10,7 +10,8 @@ import {
 } from "./sessionStorage";
 
 const AUTH_TOKEN_KEY = "auth_token";
-const ME_CACHE_KEY = "me_cache_v1";
+const AUTH_PHONE_KEY = "auth_phone_no";
+const ME_CACHE_KEY = "me_cache_v1"; // ✅ add this
 
 type AuthSessionState = {
   token: string | null;
@@ -66,6 +67,7 @@ export const logoutSession = createAsyncThunk("authSession/logout", async () => 
 
   await AsyncStorage.multiRemove([
     AUTH_TOKEN_KEY,
+    AUTH_PHONE_KEY,
     "owner_code",
     "owner_id",
     ME_CACHE_KEY,

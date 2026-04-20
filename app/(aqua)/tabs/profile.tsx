@@ -1,327 +1,270 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Modal,
-  Pressable,
-  ScrollView,
-  Text,
-  useColorScheme,
-  View,
-} from "react-native";
+import { Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { useSelector, useDispatch } from "react-redux";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { router } from "expo-router";
 
 import { setAppLanguage } from "../../../src/components/aqua/i18n/i18n";
+import type { RootState } from "../../../src/store/auth/store";
+import { clearMe } from "../../../src/store/auth/me.slice";
+import { toggleTheme } from "../../../src/store/theme.slice";
 
 export default function Profile() {
-  const scheme = useColorScheme();
-  const isDark = scheme === "dark";
-
-  // ✅ IMPORTANT: take i18n from hook, not direct import
+  const dispatch = useDispatch();
+  const themeMode = useSelector((state: RootState) => state.theme.mode);
+  const isDark = themeMode === "DARK";
   const { t, i18n } = useTranslation();
+  const me = useSelector((state: RootState) => state.me.me);
 
   const [langOpen, setLangOpen] = useState(false);
-
-  // ✅ pending selection (does NOT apply instantly)
   const [pendingLang, setPendingLang] = useState<"en" | "ta">(
     i18n.language === "ta" ? "ta" : "en"
   );
 
-  // current app language label
-  const currentLangLabel = useMemo(() => {
-    return i18n.language === "ta" ? "தமிழ்" : "English";
-  }, [i18n.language]);
+  const initials = useMemo(() => {
+    if (!me?.username) return "U";
+    return me.username.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
+  }, [me?.username]);
+
+  const handleLogout = async () => {
+    try {
+      await AsyncStorage.multiRemove(["auth_token", "owner_id", "owner_code", "me_cache_v1"]);
+      dispatch(clearMe());
+      router.replace("/(auth)/login");
+    } catch (e) {
+      console.error("Logout failed:", e);
+    }
+  };
+
+  const C = isDark ? {
+    bg:         "#050B16",
+    card:       "#0B1220",
+    cardBorder: "rgba(255,255,255,0.08)",
+    text:       "#FFFFFF",
+    subText:    "rgba(255,255,255,0.52)",
+    iconBg:     "rgba(255,255,255,0.08)",
+    iconColor:  "rgba(255,255,255,0.85)",
+    divider:    "rgba(255,255,255,0.07)",
+    chevron:    "rgba(255,255,255,0.3)",
+    avatarBg:   "rgba(255,255,255,0.1)",
+    sectionLbl: "rgba(255,255,255,0.4)",
+    ownerBg:    "rgba(255,255,255,0.05)",
+    toggleOn:   "#2563EB",
+    toggleOff:  "rgba(255,255,255,0.15)",
+    logoutBg:   "rgba(244,63,94,0.12)",
+    logoutIcon: "#FB7185",
+    logoutText: "#FB7185",
+  } : {
+    bg:         "#E8EEF6",
+    card:       "#EEF3FF",
+    cardBorder: "#C0CEEA",
+    text:       "#0F172A",
+    subText:    "#5A6E8F",
+    iconBg:     "#D2E3F8",
+    iconColor:  "#0F172A",
+    divider:    "#D5E0F0",
+    chevron:    "#94A3B8",
+    avatarBg:   "#1E293B",
+    sectionLbl: "#94A3B8",
+    ownerBg:    "#E0EAF8",
+    toggleOn:   "#1D4ED8",
+    toggleOff:  "#C8D8EE",
+    logoutBg:   "#FDE8EC",
+    logoutIcon: "#E11D48",
+    logoutText: "#E11D48",
+  };
+
+  const Divider = () => (
+    <View style={{ height: 1, backgroundColor: C.divider, marginHorizontal: 16 }} />
+  );
 
   const Row = ({
-    icon,
-    title,
-    subtitle,
-    danger,
-    onPress,
-    rightText,
+    icon, title, subtitle, danger, onPress, rightText, rightNode,
   }: {
     icon: keyof typeof Ionicons.glyphMap;
-    title: string;
-    subtitle?: string;
-    danger?: boolean;
-    onPress?: () => void;
-    rightText?: string;
+    title: string; subtitle?: string; danger?: boolean;
+    onPress?: () => void; rightText?: string; rightNode?: React.ReactNode;
   }) => (
-    <Pressable onPress={onPress} className="flex-row items-center gap-3 px-4 py-3">
-      <View
-        className={[
-          "h-10 w-10 rounded-2xl items-center justify-center",
-          danger
-            ? "bg-rose-50 dark:bg-rose-500/15"
-            : "bg-slate-100 dark:bg-white/10",
-        ].join(" ")}
-      >
-        <Ionicons
-          name={icon}
-          size={20}
-          color={
-            danger
-              ? isDark
-                ? "#FB7185"
-                : "#E11D48"
-              : isDark
-              ? "rgba(255,255,255,0.85)"
-              : "#0F172A"
-          }
-        />
+    <Pressable onPress={onPress} style={{
+      flexDirection: "row", alignItems: "center",
+      paddingHorizontal: 16, paddingVertical: 14, gap: 12,
+    }}>
+      <View style={{
+        height: 40, width: 40, borderRadius: 13,
+        alignItems: "center", justifyContent: "center",
+        backgroundColor: danger ? C.logoutBg : C.iconBg,
+      }}>
+        <Ionicons name={icon} size={20} color={danger ? C.logoutIcon : C.iconColor} />
       </View>
-
-      <View className="flex-1">
-        <Text
-          className={[
-            "text-[15px] font-semibold",
-            danger
-              ? "text-rose-600 dark:text-rose-400"
-              : "text-slate-900 dark:text-white",
-          ].join(" ")}
-        >
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontSize: 15, fontWeight: "600", color: danger ? C.logoutText : C.text }}>
           {title}
         </Text>
-
         {subtitle ? (
-          <Text className="text-xs text-slate-500 dark:text-white/60 mt-0.5">
-            {subtitle}
-          </Text>
+          <Text style={{ fontSize: 12, color: C.subText, marginTop: 2 }}>{subtitle}</Text>
         ) : null}
       </View>
-
+      {rightNode ?? null}
       {rightText ? (
-        <Text className="text-xs text-slate-500 dark:text-white/60 mr-1">
-          {rightText}
-        </Text>
+        <Text style={{ fontSize: 12, color: C.subText, marginRight: 4 }}>{rightText}</Text>
       ) : null}
-
-      <Ionicons
-        name="chevron-forward"
-        size={18}
-        color={isDark ? "rgba(255,255,255,0.45)" : "#94A3B8"}
-      />
+      <Ionicons name="chevron-forward" size={16} color={C.chevron} />
     </Pressable>
   );
 
   return (
     <>
       <ScrollView
-        className="flex-1 bg-[#F5F7FB] dark:bg-[#050B16]"
-        contentContainerStyle={{ padding: 16, paddingBottom: 28 }}
+        style={{ flex: 1, backgroundColor: C.bg }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 24, paddingBottom: 32 }}
+        showsVerticalScrollIndicator={false}
       >
         {/* Header card */}
-        <View className="rounded-3xl bg-white dark:bg-[#0B1220] border border-slate-200 dark:border-white/10 p-4">
-          <View className="flex-row items-center gap-3">
-            {/* Avatar */}
-            <View className="h-14 w-14 rounded-2xl bg-slate-900 dark:bg-white/10 items-center justify-center">
-              <Text className="text-white font-bold text-lg">JM</Text>
+        <View style={{
+          borderRadius: 22, backgroundColor: C.card,
+          borderWidth: 1, borderColor: C.cardBorder, padding: 16,
+        }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+            <View style={{
+              height: 54, width: 54, borderRadius: 17,
+              backgroundColor: C.avatarBg,
+              alignItems: "center", justifyContent: "center",
+            }}>
+              <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 19 }}>{initials}</Text>
             </View>
-
-            <View className="flex-1">
-              <Text className="text-lg font-bold text-slate-900 dark:text-white">
-                Janarthanan.M
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 17, fontWeight: "700", color: C.text }}>
+                {me?.username || "User"}
               </Text>
-              <Text className="text-xs text-slate-500 dark:text-white/60 mt-0.5">
-                Aquaculture Operator • RootVerse
+              <Text style={{ fontSize: 12, color: C.subText, marginTop: 2 }}>
+                {me?.rootverse_type || "-"} · RootVerse
               </Text>
-            </View>
-
-            <Pressable className="h-10 w-10 rounded-2xl bg-slate-100 dark:bg-white/10 items-center justify-center">
-              <Ionicons
-                name="create-outline"
-                size={18}
-                color={isDark ? "#60A5FA" : "#2563EB"}
-              />
-            </Pressable>
-          </View>
-
-          {/* Quick stats */}
-          <View className="mt-4 flex-row gap-3">
-            <View className="flex-1 rounded-2xl bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 p-3">
-              <Text className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-white/60">
-                Farm
-              </Text>
-              <Text className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">
-                RV-AQ-00012
-              </Text>
-            </View>
-
-            <View className="flex-1 rounded-2xl bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 p-3">
-              <Text className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-white/60">
-                Scans
-              </Text>
-              <Text className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">
-                24
-              </Text>
+              {me?.phone_no ? (
+                <Text style={{ fontSize: 12, color: C.subText, marginTop: 2 }}>{me.phone_no}</Text>
+              ) : null}
             </View>
           </View>
-        </View>
 
-        {/* Account section */}
-        <View className="mt-4 rounded-3xl bg-white dark:bg-[#0B1220] border border-slate-200 dark:border-white/10 overflow-hidden">
-          <View className="px-4 pt-4 pb-2">
-            <Text className="text-xs font-semibold text-slate-500 dark:text-white/60 tracking-wide uppercase">
-              {t("profile.account")}
+          {/* Owner ID */}
+          <View style={{
+            marginTop: 14, borderRadius: 12,
+            backgroundColor: C.ownerBg, borderWidth: 1, borderColor: C.cardBorder,
+            paddingHorizontal: 14, paddingVertical: 10,
+            flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+          }}>
+            <Text style={{ fontSize: 11, color: C.subText, textTransform: "uppercase", letterSpacing: 0.6 }}>
+              Owner ID
+            </Text>
+            <Text style={{ fontSize: 14, fontWeight: "700", color: C.text }}>
+              {me?.owner_id || "—"}
             </Text>
           </View>
-
-          <Row
-            icon="person-outline"
-            title={t("profile.personal")}
-            subtitle={t("profile.personalSub")}
-          />
-          <View className="h-px bg-slate-100 dark:bg-white/10" />
-          <Row
-            icon="shield-checkmark-outline"
-            title={t("profile.security")}
-            subtitle={t("profile.securitySub")}
-          />
-          <View className="h-px bg-slate-100 dark:bg-white/10" />
-          <Row
-            icon="notifications-outline"
-            title={t("profile.notifications")}
-            subtitle={t("profile.notificationsSub")}
-          />
         </View>
 
         {/* App section */}
-        <View className="mt-4 rounded-3xl bg-white dark:bg-[#0B1220] border border-slate-200 dark:border-white/10 overflow-hidden">
-          <View className="px-4 pt-4 pb-2">
-            <Text className="text-xs font-semibold text-slate-500 dark:text-white/60 tracking-wide uppercase">
+        <View style={{
+          marginTop: 16, borderRadius: 20, backgroundColor: C.card,
+          borderWidth: 1, borderColor: C.cardBorder, overflow: "hidden",
+        }}>
+          <View style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 }}>
+            <Text style={{ fontSize: 11, fontWeight: "700", color: C.sectionLbl, textTransform: "uppercase", letterSpacing: 0.8 }}>
               {t("profile.app")}
             </Text>
           </View>
 
-          {/* ✅ Language row */}
           <Row
             icon="language-outline"
             title={t("profile.language")}
-            subtitle={t("profile.languageSub")}
-            rightText={currentLangLabel}
-            onPress={() => {
-              setPendingLang(i18n.language === "ta" ? "ta" : "en");
-              setLangOpen(true);
-            }}
+            subtitle={i18n.language === "ta" ? "தமிழ்" : "English"}
+            onPress={() => setLangOpen(true)}
           />
-
-          <View className="h-px bg-slate-100 dark:bg-white/10" />
+          <Divider />
           <Row
-            icon="help-circle-outline"
-            title={t("profile.help")}
-            subtitle={t("profile.helpSub")}
-          />
-          <View className="h-px bg-slate-100 dark:bg-white/10" />
-          <Row
-            icon="information-circle-outline"
-            title={t("profile.about")}
-            subtitle={t("profile.aboutSub")}
+            icon={isDark ? "moon-outline" : "sunny-outline"}
+            title="Theme"
+            subtitle={isDark ? "Dark mode" : "Light mode"}
+            onPress={() => dispatch(toggleTheme())}
+            rightNode={
+              <View style={{
+                width: 44, height: 26, borderRadius: 13,
+                backgroundColor: isDark ? C.toggleOn : C.toggleOff,
+                justifyContent: "center", paddingHorizontal: 3,
+                alignItems: isDark ? "flex-end" : "flex-start",
+                marginRight: 4,
+              }}>
+                <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: "#FFFFFF" }} />
+              </View>
+            }
           />
         </View>
 
         {/* Logout */}
-        <View className="mt-4 rounded-3xl bg-white dark:bg-[#0B1220] border border-slate-200 dark:border-white/10 overflow-hidden">
+        <View style={{
+          marginTop: 16, borderRadius: 20, backgroundColor: C.card,
+          borderWidth: 1, borderColor: C.cardBorder, overflow: "hidden",
+        }}>
           <Row
             icon="log-out-outline"
             title={t("profile.logout")}
             subtitle={t("profile.logoutSub")}
             danger
+            onPress={handleLogout}
           />
         </View>
 
-        <Text className="mt-4 text-center text-[11px] text-slate-400 dark:text-white/40">
-          RootVerse • Aquaculture Module
+        <Text style={{ textAlign: "center", fontSize: 11, color: C.sectionLbl, marginTop: 24 }}>
+          RootVerse · Aquaculture v1.0
         </Text>
       </ScrollView>
 
-      {/* ✅ Language Picker Modal */}
-      <Modal
-        transparent
-        visible={langOpen}
-        animationType="fade"
-        onRequestClose={() => setLangOpen(false)}
-      >
+      {/* Language Modal */}
+      <Modal transparent visible={langOpen} animationType="fade">
         <Pressable
           onPress={() => setLangOpen(false)}
-          className="flex-1 bg-black/50 justify-end"
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}
         >
-          <Pressable
-            onPress={() => {}}
-            className="bg-white dark:bg-[#0B1220] rounded-t-3xl p-4 border border-slate-200 dark:border-white/10"
-          >
-            <Text className="text-base font-bold text-slate-900 dark:text-white">
+          <Pressable style={{
+            backgroundColor: C.card, borderTopLeftRadius: 24,
+            borderTopRightRadius: 24, padding: 20,
+          }}>
+            <Text style={{ fontSize: 16, fontWeight: "700", color: C.text, marginBottom: 16 }}>
               {t("profile.language")}
             </Text>
-            <Text className="mt-1 text-xs text-slate-500 dark:text-white/60">
-              Select a language for the app
-            </Text>
-
-            <View className="mt-4 gap-2">
-              {[
-                { code: "en" as const, label: "English" },
-                { code: "ta" as const, label: "தமிழ்" },
-              ].map((lang) => {
-                const active = pendingLang === lang.code;
-
-                return (
-                  <Pressable
-                    key={lang.code}
-                    onPress={() => setPendingLang(lang.code)}
-                    className={[
-                      "rounded-2xl px-4 py-3 flex-row items-center justify-between border",
-                      active
-                        ? "bg-blue-50 dark:bg-blue-500/15 border-blue-300 dark:border-blue-400/30"
-                        : "bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10",
-                    ].join(" ")}
-                  >
-                    <Text className="text-slate-900 dark:text-white font-semibold">
-                      {lang.label}
-                    </Text>
-
-                    {active ? (
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={20}
-                        color={isDark ? "#60A5FA" : "#2563EB"}
-                      />
-                    ) : (
-                      <Ionicons
-                        name="ellipse-outline"
-                        size={20}
-                        color={isDark ? "rgba(255,255,255,0.35)" : "#CBD5E1"}
-                      />
-                    )}
-                  </Pressable>
-                );
-              })}
+            <View style={{ gap: 10 }}>
+              {[{ code: "en", label: "English" }, { code: "ta", label: "தமிழ்" }].map((lang) => (
+                <Pressable
+                  key={lang.code}
+                  onPress={() => setPendingLang(lang.code as "en" | "ta")}
+                  style={{
+                    padding: 14, borderRadius: 14, borderWidth: 1.5,
+                    borderColor: pendingLang === lang.code ? "#1D4ED8" : C.cardBorder,
+                    backgroundColor: pendingLang === lang.code
+                      ? isDark ? "rgba(29,78,216,0.15)" : "#DCEEFF"
+                      : "transparent",
+                    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+                  }}
+                >
+                  <Text style={{ fontSize: 15, fontWeight: "600", color: C.text }}>{lang.label}</Text>
+                  {pendingLang === lang.code
+                    ? <Ionicons name="checkmark-circle" size={20} color="#1D4ED8" />
+                    : null}
+                </Pressable>
+              ))}
             </View>
-
-            <View className="mt-4 flex-row gap-3">
-              <Pressable
-                onPress={() => setLangOpen(false)}
-                className="flex-1 rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 py-3 items-center"
-              >
-                <Text className="text-slate-900 dark:text-white font-extrabold tracking-wide text-xs">
-                  CANCEL
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={async () => {
-                  try {
-                    await setAppLanguage(pendingLang);
-                  } catch (e) {
-                    console.warn("Language switch failed:", e);
-                  } finally {
-                    setLangOpen(false);
-                  }
-                }}
-                className="flex-1 rounded-2xl bg-slate-900 dark:bg-white py-3 items-center"
-              >
-                <Text className="text-white dark:text-slate-900 font-extrabold tracking-wide text-xs">
-                  OK
-                </Text>
-              </Pressable>
-            </View>
+            <Pressable
+              onPress={async () => {
+                await setAppLanguage(pendingLang);
+                setLangOpen(false);
+              }}
+              style={{
+                marginTop: 16, backgroundColor: "#0F172A",
+                paddingVertical: 14, borderRadius: 14, alignItems: "center",
+              }}
+            >
+              <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 15 }}>Apply</Text>
+            </Pressable>
           </Pressable>
         </Pressable>
       </Modal>
