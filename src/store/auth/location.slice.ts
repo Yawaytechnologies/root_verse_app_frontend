@@ -1,164 +1,281 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+// src/store/auth/location.slice.ts
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import { ENV } from "../../config/env";
 
-export const TOKEN_KEY = "auth_token"; // ✅ MUST match me.slice.ts
+export type CountryItem = { id: number; name: string };
+export type StateItem = { id: number; name: string };
+export type DistrictItem = { id: number; name: string };
+export type LocationItem = { id: number; name: string };
 
-type ApprovalStatus = "APPROVED" | "PENDING_APPROVAL" | "REJECTED";
+type LocationState = {
+  countries: CountryItem[];
+  countriesLoading: boolean;
+  countriesError: string | null;
 
-export type RootverseType =
-  | "WILD_CAPTURE"
-  | "AQUACULTURE"
-  | "MARICULTURE"
-  | "QUALITY_CHECKER"
-  | "COLLECTION_CENTRE_OPERATOR"
-  | "TRANSPORT_OPERATOR";
+  states: StateItem[];
+  statesLoading: boolean;
+  statesError: string | null;
 
-type LoginRes = {
-  token?: string;
-  access_token?: string;
-  message?: string;
-  status?: ApprovalStatus;
-  rootverse_type?: RootverseType;
-  user?: {
-    status?: ApprovalStatus;
-    rootverse_type?: RootverseType;
-    [key: string]: any;
-  };
-  data?: any; // some backends wrap here
-  [key: string]: any;
+  districtsByStateId: Record<number, DistrictItem[]>;
+  districtsLoadingByStateId: Record<number, boolean>;
+  districtsErrorByStateId: Record<number, string | null>;
+
+  locationsByDistrictId: Record<number, LocationItem[]>;
+  locationsLoadingByDistrictId: Record<number, boolean>;
+  locationsErrorByDistrictId: Record<number, string | null>;
 };
 
-type LoginState = {
-  loading: boolean;
-  error: string | null;
-  token: string | null;
-  status: ApprovalStatus | null;
-  rootverse_type: RootverseType | null;
+const initialState: LocationState = {
+  countries: [],
+  countriesLoading: false,
+  countriesError: null,
+
+  states: [],
+  statesLoading: false,
+  statesError: null,
+
+  districtsByStateId: {},
+  districtsLoadingByStateId: {},
+  districtsErrorByStateId: {},
+
+  locationsByDistrictId: {},
+  locationsLoadingByDistrictId: {},
+  locationsErrorByDistrictId: {},
 };
 
-const initialState: LoginState = {
-  loading: false,
-  error: null,
-  token: null,
-  status: null,
-  rootverse_type: null,
-};
-
-/* ------------------------------------------- */
-
-function pickToken(payload: any): string | null {
-  const token =
-    payload?.token ||
-    payload?.access_token ||
-    payload?.data?.token ||
-    payload?.data?.access_token ||
-    payload?.data?.jwt ||
-    payload?.jwt ||
-    payload?.data?.data?.token ||
-    payload?.data?.data?.access_token;
-
-  return typeof token === "string" && token.length > 0 ? token : null;
+function pickArray(raw: any): any[] {
+  if (Array.isArray(raw)) return raw;
+  if (Array.isArray(raw?.data)) return raw.data;
+  if (Array.isArray(raw?.result)) return raw.result;
+  if (Array.isArray(raw?.rows)) return raw.rows;
+  if (Array.isArray(raw?.countries)) return raw.countries;
+  if (Array.isArray(raw?.states)) return raw.states;
+  if (Array.isArray(raw?.districts)) return raw.districts;
+  if (Array.isArray(raw?.locations)) return raw.locations;
+  if (Array.isArray(raw?.data?.countries)) return raw.data.countries;
+  if (Array.isArray(raw?.data?.states)) return raw.data.states;
+  if (Array.isArray(raw?.data?.districts)) return raw.data.districts;
+  if (Array.isArray(raw?.data?.locations)) return raw.data.locations;
+  if (Array.isArray(raw?.data?.data)) return raw.data.data;
+  return [];
 }
 
-export const loginWithPhone = createAsyncThunk<
-  {
-    token: string;
-    status: ApprovalStatus | null;
-    rootverse_type: RootverseType | null;
-    user?: any;
-  },
-  string,
+function mapCountry(c: any): CountryItem {
+  return {
+    id: Number(c.id ?? c.country_id ?? c.countryId),
+    name: String(c.name ?? c.country_name ?? c.countryName ?? c.country ?? ""),
+  };
+}
+
+function mapState(s: any): StateItem {
+  return {
+    id: Number(s.id ?? s.state_id ?? s.stateId),
+    name: String(s.name ?? s.state_name ?? s.stateName ?? s.state ?? ""),
+  };
+}
+
+function mapDistrict(d: any): DistrictItem {
+  return {
+    id: Number(d.id ?? d.district_id ?? d.districtId),
+    name: String(
+      d.name ?? d.district_name ?? d.districtName ?? d.district ?? "",
+    ),
+  };
+}
+
+function mapLocation(l: any): LocationItem {
+  return {
+    id: Number(l.id ?? l.location_id ?? l.locationId),
+    name: String(
+      l.name ?? l.location_name ?? l.locationName ?? l.location ?? "",
+    ),
+  };
+}
+
+export const fetchCountries = createAsyncThunk<
+  CountryItem[],
+  void,
   { rejectValue: string }
->("login/withPhone", async (phone_no, { rejectWithValue }) => {
+>("location/fetchCountries", async (_, { rejectWithValue }) => {
   try {
-    const cleanPhone = String(phone_no || "").trim();
-
-    const res = await fetch(`${ENV.API_BASE}/api/auth/login`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({ phone_no: cleanPhone }),
-    });
-
-    const text = await res.text();
-    let data: any = {};
-
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      return rejectWithValue("LOGIN_NOT_JSON");
-    }
-
+    const res = await fetch(`${ENV.API_BASE}/api/country`);
     if (!res.ok) {
-      return rejectWithValue(data?.error || data?.message || "Login failed");
+      throw new Error(`HTTP ${res.status}`);
     }
-
-    const token = pickToken(data);
-    if (!token) {
-      console.log("LOGIN_RESPONSE_NO_TOKEN =>", data);
-      return rejectWithValue("NO_TOKEN");
-    }
-
-    // ✅ save token for fetchMe()
-    await AsyncStorage.setItem(TOKEN_KEY, token);
-
-    const status: ApprovalStatus | null =
-      data?.status ?? data?.user?.status ?? null;
-
-    const rootverse_type: RootverseType | null =
-      data?.rootverse_type ?? data?.user?.rootverse_type ?? null;
-
-    return {
-      token,
-      status,
-      rootverse_type,
-      user: data?.user ?? data?.data?.user ?? null,
-    };
+    const raw = await res.json();
+    const list = pickArray(raw);
+    const countries = list
+      .map(mapCountry)
+      .filter((x) => Number.isFinite(x.id) && x.id > 0 && !!x.name);
+    return countries;
   } catch (e: any) {
-    return rejectWithValue(e?.message || "Network error");
+    return rejectWithValue(e?.message || "Failed to fetch countries");
   }
 });
 
-const loginSlice = createSlice({
-  name: "login",
+export const fetchStatesByCountry = createAsyncThunk<
+  { countryId: number; states: StateItem[] },
+  { countryId: number },
+  { rejectValue: string }
+>(
+  "location/fetchStatesByCountry",
+  async ({ countryId }, { rejectWithValue }) => {
+    try {
+      const res = await fetch(
+        `${ENV.API_BASE}/api/states/country/${countryId}`,
+      );
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const raw = await res.json();
+      const list = pickArray(raw);
+      const states = list
+        .map(mapState)
+        .filter((x) => Number.isFinite(x.id) && x.id > 0 && !!x.name);
+      return { countryId, states };
+    } catch (e: any) {
+      return rejectWithValue(e?.message || "Failed to fetch states");
+    }
+  },
+);
+
+export const fetchDistrictsByState = createAsyncThunk<
+  { stateId: number; districts: DistrictItem[] },
+  { stateId: number },
+  { rejectValue: string }
+>(
+  "location/fetchDistrictsByState",
+  async ({ stateId }, { rejectWithValue }) => {
+    try {
+      const paths = [
+        `${ENV.API_BASE}/api/states/${stateId}/districts`,
+        `${ENV.API_BASE}/api/states/${stateId}/district`,
+      ];
+      let lastErr: any = null;
+      for (const url of paths) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+          const raw = await res.json();
+          const list = pickArray(raw);
+          const districts = list
+            .map(mapDistrict)
+            .filter((x) => Number.isFinite(x.id) && x.id > 0 && !!x.name);
+          return { stateId, districts };
+        } catch (e: any) {
+          lastErr = e;
+        }
+      }
+      throw lastErr;
+    } catch (e: any) {
+      return rejectWithValue(e?.message || "Failed to fetch districts");
+    }
+  },
+);
+
+export const fetchLocationsByDistrict = createAsyncThunk<
+  { districtId: number; locations: LocationItem[] },
+  { districtId: number },
+  { rejectValue: string }
+>(
+  "location/fetchLocationsByDistrict",
+  async ({ districtId }, { rejectWithValue }) => {
+    try {
+      const res = await fetch(
+        `${ENV.API_BASE}/api/locations/district/${districtId}`,
+      );
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const raw = await res.json();
+      const list = pickArray(raw);
+      const locations = list
+        .map(mapLocation)
+        .filter((x) => Number.isFinite(x.id) && x.id > 0 && !!x.name);
+      return { districtId, locations };
+    } catch (e: any) {
+      return rejectWithValue(e?.message || "Failed to fetch locations");
+    }
+  },
+);
+
+const locationSlice = createSlice({
+  name: "location",
   initialState,
   reducers: {
-    clearLoginError(state) {
-      state.error = null;
-    },
-    logout(state) {
-      state.token = null;
-      state.status = null;
-      state.rootverse_type = null;
-      state.error = null;
-      state.loading = false;
-      AsyncStorage.removeItem(TOKEN_KEY);
+    clearLocationErrors(state) {
+      state.countriesError = null;
+      state.statesError = null;
+      Object.keys(state.districtsErrorByStateId).forEach((key) => {
+        state.districtsErrorByStateId[Number(key)] = null;
+      });
+      Object.keys(state.locationsErrorByDistrictId).forEach((key) => {
+        state.locationsErrorByDistrictId[Number(key)] = null;
+      });
     },
   },
-  extraReducers: (b) => {
-    b.addCase(loginWithPhone.pending, (s) => {
-      s.loading = true;
-      s.error = null;
-      s.status = null;
-      s.rootverse_type = null;
-    });
-
-    b.addCase(loginWithPhone.fulfilled, (s, a) => {
-      s.loading = false;
-      s.token = a.payload.token;
-      s.status = a.payload.status;
-      s.rootverse_type = a.payload.rootverse_type;
-    });
-
-    b.addCase(loginWithPhone.rejected, (s, a) => {
-      s.loading = false;
-      s.error = a.payload || "Login failed";
-    });
+  extraReducers: (builder) => {
+    builder
+      .addCase(fetchCountries.pending, (state) => {
+        state.countriesLoading = true;
+        state.countriesError = null;
+      })
+      .addCase(fetchCountries.fulfilled, (state, action) => {
+        state.countriesLoading = false;
+        state.countries = action.payload;
+      })
+      .addCase(fetchCountries.rejected, (state, action) => {
+        state.countriesLoading = false;
+        state.countriesError = action.payload || "Failed to fetch countries";
+      })
+      .addCase(fetchStatesByCountry.pending, (state) => {
+        state.statesLoading = true;
+        state.statesError = null;
+      })
+      .addCase(fetchStatesByCountry.fulfilled, (state, action) => {
+        state.statesLoading = false;
+        state.states = action.payload.states;
+      })
+      .addCase(fetchStatesByCountry.rejected, (state, action) => {
+        state.statesLoading = false;
+        state.statesError = action.payload || "Failed to fetch states";
+      })
+      .addCase(fetchDistrictsByState.pending, (state, action) => {
+        const stateId = action.meta.arg.stateId;
+        state.districtsLoadingByStateId[stateId] = true;
+        state.districtsErrorByStateId[stateId] = null;
+      })
+      .addCase(fetchDistrictsByState.fulfilled, (state, action) => {
+        const { stateId, districts } = action.payload;
+        state.districtsLoadingByStateId[stateId] = false;
+        state.districtsByStateId[stateId] = districts;
+      })
+      .addCase(fetchDistrictsByState.rejected, (state, action) => {
+        const stateId = action.meta.arg.stateId;
+        state.districtsLoadingByStateId[stateId] = false;
+        state.districtsErrorByStateId[stateId] =
+          action.payload || "Failed to fetch districts";
+      })
+      .addCase(fetchLocationsByDistrict.pending, (state, action) => {
+        const districtId = action.meta.arg.districtId;
+        state.locationsLoadingByDistrictId[districtId] = true;
+        state.locationsErrorByDistrictId[districtId] = null;
+      })
+      .addCase(fetchLocationsByDistrict.fulfilled, (state, action) => {
+        const { districtId, locations } = action.payload;
+        state.locationsLoadingByDistrictId[districtId] = false;
+        state.locationsByDistrictId[districtId] = locations;
+      })
+      .addCase(fetchLocationsByDistrict.rejected, (state, action) => {
+        const districtId = action.meta.arg.districtId;
+        state.locationsLoadingByDistrictId[districtId] = false;
+        state.locationsErrorByDistrictId[districtId] =
+          action.payload || "Failed to fetch locations";
+      });
   },
 });
 
-export const { clearLoginError, logout } = loginSlice.actions;
-export default loginSlice.reducer;
+export const { clearLocationErrors } = locationSlice.actions;
+export default locationSlice.reducer;
