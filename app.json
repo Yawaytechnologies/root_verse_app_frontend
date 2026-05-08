@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "scheme": "rootverseapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "icon": "./assets_images/icon.png",
     "ios": {
       "supportsTablet": true
@@ -16,7 +16,7 @@
         "foregroundImage": "./assets_images/icon.png",
         "backgroundColor": "#E6F4FE"
       },
-      "edgeToEdgeEnabled": true,
+      "edgeToEdgeEnabled": false,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
@@ -50,7 +50,9 @@
       ],
       "@react-native-community/datetimepicker",
       "expo-font",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-web-browser",
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true,

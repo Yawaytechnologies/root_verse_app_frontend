@@ -1,335 +1,507 @@
-import React, { useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { View, Text, Pressable, ScrollView, Alert, Image } from "react-native";
-import { router } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useSelector } from "react-redux";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  View,
+  Text,
+  Pressable,
+  Image,
+  Alert,
+  ActivityIndicator,
+} from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as Location from "expo-location";
+import { Ionicons } from "@expo/vector-icons";
+import { router, useLocalSearchParams } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-const localNow = () => {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const year = d.getFullYear();
-  const month = pad(d.getMonth() + 1);
-  const day = pad(d.getDate());
-  let hours = d.getHours();
-  const minutes = pad(d.getMinutes());
-  const ampm = hours >= 12 ? "PM" : "AM";
-  hours = hours % 12 || 12;
-  return `${year}-${month}-${day} ${pad(hours)}:${minutes} ${ampm}`;
-};
+import {
+  activateFarmQrById,
+  getAquacultureQrByCode,
+  uploadAquacultureImage,
+} from "../../../src/services/aqua/qrActivation.service";
 
-function WatermarkOverlay({
-  farmerCode,
-  farmName,
-  lat,
-  lng,
-  captureTime,
-}: {
-  farmerCode: string;
-  farmName: string;
-  lat: string;
-  lng: string;
-  captureTime: string;
-}) {
+const getParamValue = (value: string | string[] | undefined, fallback = "") =>
+  Array.isArray(value) ? String(value[0] ?? fallback) : String(value ?? fallback);
+
+const isQrActivated = (qr: any) => {
+  const status = String(qr?.status || "").toUpperCase();
+
   return (
-    <View
-      style={{
-        position: "absolute",
-        top: 8,
-        right: 8,
-        backgroundColor: "rgba(0,0,0,0.72)",
-        borderRadius: 8,
-        padding: 8,
-      }}
-    >
-      <Text
-        style={{
-          color: "#93C5FD",
-          fontSize: 8,
-          fontWeight: "700",
-          lineHeight: 13,
-          marginBottom: 3,
-          letterSpacing: 0.4,
-        }}
-      >
-        ⬡ Powered by Rootverse
-      </Text>
-      <Text style={{ color: "#FFFFFF", fontSize: 9, fontWeight: "700", lineHeight: 14 }}>
-        Farmer: {farmerCode}
-      </Text>
-      <Text style={{ color: "#FFFFFF", fontSize: 9, lineHeight: 14 }}>
-        Farm: {farmName}
-      </Text>
-      <Text style={{ color: "#CBD5E1", fontSize: 9, lineHeight: 14 }}>
-        Lat: {lat}
-      </Text>
-      <Text style={{ color: "#CBD5E1", fontSize: 9, lineHeight: 14 }}>
-        Lng: {lng}
-      </Text>
-      <Text style={{ color: "#CBD5E1", fontSize: 9, lineHeight: 14 }}>
-        Time: {captureTime}
-      </Text>
-    </View>
+    qr?.is_active === true ||
+    qr?.is_activated === true ||
+    status === "ACTIVE" ||
+    status === "ACTIVATED"
   );
-}
+};
 
 export default function CaptureFarmGateScreen() {
   const insets = useSafeAreaInsets();
-  const { t } = useTranslation();
+  const params = useLocalSearchParams();
+
+  const qrValue =
+    getParamValue(params.qrValue) ||
+    getParamValue(params.scannedValue) ||
+    getParamValue(params.code);
+
+  const farmDbId =
+    getParamValue(params.farmDbId) ||
+    getParamValue(params.farmId);
+
+  const farmName = getParamValue(params.farmName, "Farm Gate");
+  const cultureCycleId = getParamValue(params.cultureCycleId);
+  const nextTo = getParamValue(params.nextTo);
+
   const cameraRef = useRef<CameraView | null>(null);
 
-  const me = useSelector((state: any) => state.me?.me);
-  const farm = useSelector((state: any) => state.aquaRegistration?.farm);
-  const farmerCode = me?.owner_id ?? "FARMER";
-  const farmName = farm?.farmName?.trim() || "Farm";
-  const lat = farm?.latitude || farm?.gpsLat || "";
-  const lng = farm?.longitude || farm?.gpsLng || "";
-  const coordStr = lat && lng
-    ? `${parseFloat(lat).toFixed(5)}, ${parseFloat(lng).toFixed(5)}`
-    : "N/A";
-
   const [permission, requestPermission] = useCameraPermissions();
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
+
+  const [activationDone, setActivationDone] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const [activationMessage, setActivationMessage] = useState("");
+
+  const [photoUri, setPhotoUri] = useState("");
   const [capturing, setCapturing] = useState(false);
-  const [cameraReady, setCameraReady] = useState(false);
-  const [captureTime, setCaptureTime] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const handleTakePicture = async () => {
+  const [gpsLat, setGpsLat] = useState("");
+  const [gpsLng, setGpsLng] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadLocation = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+
+        if (status !== "granted") return;
+
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+
+        if (!mounted) return;
+
+        setGpsLat(String(pos.coords.latitude));
+        setGpsLng(String(pos.coords.longitude));
+      } catch {
+        // GPS failure must not redirect user.
+      }
+    };
+
+    loadLocation();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!qrValue || !farmDbId) return;
+    if (activationDone || activating) return;
+
+    activateQr();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrValue, farmDbId]);
+
+  const goAfterCapture = () => {
+    if (nextTo) {
+      router.replace({
+        pathname: nextTo as any,
+        params: {
+          code: qrValue,
+          qrValue,
+          scannedValue: qrValue,
+          farmDbId,
+          farmName,
+          cultureCycleId,
+        },
+      });
+      return;
+    }
+
+    if (qrValue) {
+      router.replace({
+        pathname: "/(aqua)/traceability/[code]",
+        params: {
+          code: qrValue,
+          qrValue,
+          scannedValue: qrValue,
+          farmDbId,
+          farmName,
+          cultureCycleId,
+        },
+      });
+      return;
+    }
+
+    router.replace("/(aqua)/tabs/dashboard");
+  };
+
+  const activateQr = async () => {
+    if (!qrValue) {
+      Alert.alert("QR Missing", "Farm QR value is missing.");
+      return;
+    }
+
+    if (!farmDbId) {
+      Alert.alert(
+        "Farm Missing",
+        "Farm database ID is missing. Scan Farm QR from a selected farm record.",
+      );
+      setActivationMessage("Farm DB ID missing.");
+      return;
+    }
+
     try {
-      if (!cameraReady) {
-        Alert.alert("Camera", "Camera is still loading. Please wait a second.");
+      setActivating(true);
+      setActivationMessage("Fetching QR details...");
+
+      const qrResponse = await getAquacultureQrByCode(qrValue);
+
+      if (!qrResponse.ok || !qrResponse.data?.id) {
+        Alert.alert("Invalid QR", qrResponse.message || "QR not found.");
+        setActivationMessage(qrResponse.message || "QR not found.");
         return;
       }
 
-      if (!cameraRef.current) {
-        Alert.alert("Camera", "Camera is not ready");
+      const qrData = qrResponse.data;
+
+      const qrType = String(qrData.qr_type || qrData.type || "").toUpperCase();
+
+      if (qrType && qrType !== "FARM") {
+        Alert.alert(
+          "Wrong QR",
+          `This is ${qrType} QR. Please scan Farm Gate QR.`,
+        );
+        setActivationMessage(`Wrong QR type: ${qrType}`);
         return;
       }
 
+      if (isQrActivated(qrData)) {
+        setActivationDone(true);
+        setActivationMessage("Farm QR already activated.");
+        return;
+      }
+
+      setActivationMessage("Activating Farm QR...");
+
+      const activateResponse = await activateFarmQrById(farmDbId, qrData.id);
+
+      if (!activateResponse.ok) {
+        Alert.alert(
+          "Activation Failed",
+          activateResponse.message || "Farm QR activation failed.",
+        );
+        setActivationMessage(
+          activateResponse.message || "Farm QR activation failed.",
+        );
+        return;
+      }
+
+      setActivationDone(true);
+      setActivationMessage("Farm QR activated successfully.");
+    } catch (error: any) {
+      Alert.alert(
+        "Activation Failed",
+        error?.message || "Farm QR activation failed.",
+      );
+      setActivationMessage(error?.message || "Farm QR activation failed.");
+    } finally {
+      setActivating(false);
+    }
+  };
+
+  const takePicture = async () => {
+    if (!activationDone) {
+      Alert.alert(
+        "QR Not Activated",
+        "Activate Farm QR first, then capture farm gate image.",
+      );
+      return;
+    }
+
+    try {
       setCapturing(true);
 
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.7,
+      const photo = await (cameraRef.current as any)?.takePictureAsync({
+        quality: 0.75,
+        skipProcessing: false,
       });
 
       if (!photo?.uri) {
-        Alert.alert("Camera", "Failed to capture image");
+        Alert.alert("Capture Failed", "Could not capture farm gate image.");
         return;
       }
 
       setPhotoUri(photo.uri);
-      setCaptureTime(localNow());
-    } catch (error) {
-      console.error("Farm image capture failed:", error);
-      Alert.alert("Camera", "Unable to capture image");
+    } catch (error: any) {
+      Alert.alert("Capture Failed", error?.message || "Camera capture failed.");
     } finally {
       setCapturing(false);
     }
   };
 
-  const handleUseImage = () => {
+  const saveImage = async () => {
     if (!photoUri) {
-      Alert.alert("Camera", "Please capture an image first");
+      Alert.alert("Image Required", "Please capture farm gate image first.");
       return;
     }
 
-    router.replace({
-      pathname: "/(aqua)/registration/farm-details",
-      params: {
-        farmImageCaptured: "true",
-        farmImageUri: photoUri,
-      },
-    });
+    try {
+      setSaving(true);
+
+      if (cultureCycleId) {
+        const uploadResponse = await uploadAquacultureImage(
+          cultureCycleId,
+          {
+            uri: photoUri,
+            name: `farm-gate-${Date.now()}.jpg`,
+            type: "image/jpeg",
+          },
+          {
+            image_type: "FARM_GATE",
+            qr_value: qrValue,
+            farm_id: farmDbId,
+            farm_name: farmName,
+            gps_latitude: gpsLat,
+            gps_longitude: gpsLng,
+            timestamp_utc: new Date().toISOString(),
+          },
+        );
+
+        if (!uploadResponse.ok) {
+          Alert.alert(
+            "Upload Failed",
+            uploadResponse.message || "Farm image upload failed.",
+          );
+          return;
+        }
+      }
+
+      Alert.alert("Success", "Farm gate image saved successfully.", [
+        {
+          text: "OK",
+          onPress: goAfterCapture,
+        },
+      ]);
+    } catch (error: any) {
+      Alert.alert("Save Failed", error?.message || "Image save failed.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (!permission) {
     return (
-      <View className="flex-1 items-center justify-center bg-[#050B16] px-6">
-        <Text className="text-white">{t("registration.cameraLoading")}</Text>
+      <View className="flex-1 items-center justify-center bg-black">
+        <ActivityIndicator size="large" color="#60A5FA" />
       </View>
     );
   }
 
   if (!permission.granted) {
     return (
-      <ScrollView
-        className="flex-1 bg-[#F5F7FB] dark:bg-[#050B16]"
-        contentContainerStyle={{
-          padding: 16,
-          paddingTop: insets.top + 8,
-          paddingBottom: 32,
-          flexGrow: 1,
-          justifyContent: "center",
+      <View
+        className="flex-1 items-center justify-center bg-black px-6"
+        style={{
+          paddingTop: insets.top,
+          paddingBottom: insets.bottom,
         }}
       >
-        <View className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-white/10 dark:bg-[#0B1220]">
-          <View className="items-center">
-            <View className="h-16 w-16 items-center justify-center rounded-full bg-slate-100 dark:bg-white/10">
-              <Ionicons name="camera-outline" size={30} color="#60A5FA" />
-            </View>
+        <Ionicons name="camera-outline" size={42} color="#60A5FA" />
 
-            <Text className="mt-4 text-center text-xl font-bold text-slate-900 dark:text-white">
-              {t("registration.cameraPermissionTitle")}
-            </Text>
+        <Text className="mt-5 text-center text-xl font-bold text-white">
+          Camera Permission Required
+        </Text>
 
-            <Text className="mt-2 text-center text-sm leading-6 text-slate-600 dark:text-white/70">
-              {t("registration.cameraPermissionDesc")}
-            </Text>
-          </View>
+        <Text className="mt-2 text-center text-sm leading-6 text-white/70">
+          Camera access is required to capture real-time farm gate image.
+        </Text>
 
-          <Pressable
-            onPress={requestPermission}
-            className="mt-6 rounded-2xl bg-slate-900 px-4 py-4 dark:bg-white"
-          >
-            <Text className="text-center font-semibold text-white dark:text-slate-900">
-              {t("registration.allowCamera")}
-            </Text>
-          </Pressable>
+        <Pressable
+          onPress={requestPermission}
+          className="mt-6 w-full rounded-2xl bg-white px-4 py-4"
+        >
+          <Text className="text-center font-bold text-slate-900">
+            Allow Camera
+          </Text>
+        </Pressable>
 
-          <Pressable
-            onPress={() => router.back()}
-            className="mt-3 rounded-2xl border border-slate-200 bg-white px-4 py-4 dark:border-white/10 dark:bg-[#0B1220]"
-          >
-            <Text className="text-center font-semibold text-slate-900 dark:text-white">
-              {t("registration.back")}
-            </Text>
-          </Pressable>
-        </View>
-      </ScrollView>
+        <Pressable
+          onPress={() => router.replace("/(aqua)/tabs/dashboard")}
+          className="mt-3 w-full rounded-2xl border border-white/20 px-4 py-4"
+        >
+          <Text className="text-center font-semibold text-white">Cancel</Text>
+        </Pressable>
+      </View>
     );
   }
 
   return (
-    <View className="flex-1 bg-[#050B16]">
-      {!photoUri ? (
-        <>
-          <View
-            style={{ paddingTop: insets.top + 8 }}
-            className="bg-[#050B16] px-4 pb-4"
-          >
-            <View className="flex-row items-center justify-between">
-              <Pressable
-                onPress={() => router.back()}
-                className="h-11 w-11 items-center justify-center rounded-full bg-white/10"
-              >
-                <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
-              </Pressable>
+    <View
+      className="flex-1 bg-black"
+      style={{
+        paddingTop: insets.top + 12,
+        paddingBottom: insets.bottom + 16,
+      }}
+    >
+      <View className="flex-row items-center px-4">
+        <Pressable
+          onPress={() => router.replace("/(aqua)/tabs/dashboard")}
+          className="h-11 w-11 items-center justify-center rounded-2xl bg-white/10"
+        >
+          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+        </Pressable>
 
-              <Text className="text-base font-semibold text-white">
-                {t("registration.captureFarmGateTitle")}
+        <View className="ml-3 flex-1">
+          <Text className="text-lg font-bold text-white">
+            Capture Farm Gate
+          </Text>
+
+          <Text className="mt-0.5 text-xs text-white/60" numberOfLines={1}>
+            Farm QR: {qrValue || "-"}
+          </Text>
+        </View>
+      </View>
+
+      <View className="flex-1 justify-center px-4">
+        {!activationDone ? (
+          <View className="rounded-3xl border border-amber-500/20 bg-amber-500/10 p-5">
+            <View className="items-center">
+              <View className="h-16 w-16 items-center justify-center rounded-full bg-amber-500/20">
+                {activating ? (
+                  <ActivityIndicator size="large" color="#F59E0B" />
+                ) : (
+                  <Ionicons name="qr-code-outline" size={34} color="#F59E0B" />
+                )}
+              </View>
+
+              <Text className="mt-4 text-center text-xl font-bold text-white">
+                Activate Farm QR
               </Text>
 
-              <View className="h-11 w-11" />
+              <Text className="mt-2 text-center text-sm leading-6 text-white/70">
+                Farm QR must be activated before capturing farm gate image.
+              </Text>
+
+              <View className="mt-4 w-full rounded-2xl border border-white/10 bg-black/30 p-4">
+                <Text className="text-xs text-white/70">Farm DB ID</Text>
+                <Text className="mt-1 text-base font-bold text-white">
+                  {farmDbId || "Missing"}
+                </Text>
+
+                <Text className="mt-3 text-xs text-white/70">QR Value</Text>
+                <Text className="mt-1 text-base font-bold text-white">
+                  {qrValue || "Missing"}
+                </Text>
+
+                {activationMessage ? (
+                  <>
+                    <Text className="mt-3 text-xs text-white/70">Status</Text>
+                    <Text className="mt-1 text-sm font-semibold text-amber-300">
+                      {activationMessage}
+                    </Text>
+                  </>
+                ) : null}
+              </View>
+
+              <Pressable
+                onPress={activateQr}
+                disabled={activating || !qrValue || !farmDbId}
+                className={`mt-5 w-full rounded-2xl px-4 py-4 ${
+                  activating || !qrValue || !farmDbId
+                    ? "bg-slate-500"
+                    : "bg-white"
+                }`}
+              >
+                <Text className="text-center font-bold text-slate-900">
+                  {activating ? "Activating..." : "Activate Farm QR"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <>
+            <View className="mb-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
+              <Text className="text-sm font-bold text-emerald-300">
+                Farm QR Activated
+              </Text>
+              <Text className="mt-1 text-xs leading-5 text-white/70">
+                Now capture the real-time farm gate image.
+              </Text>
             </View>
 
-            <Text className="mt-3 text-center text-sm text-white/70">
-              {cameraReady
-                ? t("registration.cameraReadyCapture")
-                : t("registration.cameraLoading")}
-            </Text>
-          </View>
+            <View className="overflow-hidden rounded-3xl border border-white/10 bg-[#0B1220]">
+              {photoUri ? (
+                <View>
+                  <Image
+                    source={{ uri: photoUri }}
+                    className="h-[430px] w-full"
+                    resizeMode="cover"
+                  />
 
-          <View className="flex-1 overflow-hidden rounded-t-3xl">
-            <CameraView
-              ref={cameraRef}
-              style={{ flex: 1 }}
-              facing="back"
-              onCameraReady={() => setCameraReady(true)}
-            />
-          </View>
+                  <View className="absolute bottom-0 left-0 right-0 bg-black/65 p-3">
+                    <Text className="text-xs font-semibold text-white">
+                      Farm: {farmName}
+                    </Text>
+                    <Text className="mt-1 text-xs text-white/80">
+                      QR: {qrValue || "-"}
+                    </Text>
+                    <Text className="mt-1 text-xs text-white/80">
+                      GPS: {gpsLat || "-"}, {gpsLng || "-"}
+                    </Text>
+                    <Text className="mt-1 text-xs text-white/80">
+                      Time: {new Date().toISOString()}
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <CameraView
+                  ref={cameraRef}
+                  style={{ height: 430, width: "100%" }}
+                />
+              )}
+            </View>
+          </>
+        )}
+      </View>
 
-          <View className="bg-[#050B16] px-6 pb-8 pt-5">
+      {activationDone ? (
+        <View className="px-4">
+          {photoUri ? (
+            <View className="flex-row gap-3">
+              <Pressable
+                onPress={() => setPhotoUri("")}
+                disabled={saving}
+                className="flex-1 rounded-2xl border border-white/20 px-4 py-4"
+              >
+                <Text className="text-center font-semibold text-white">
+                  Retake
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={saveImage}
+                disabled={saving}
+                className="flex-1 rounded-2xl bg-white px-4 py-4"
+              >
+                <Text className="text-center font-bold text-slate-900">
+                  {saving ? "Saving..." : "Save Image"}
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
             <Pressable
-              onPress={handleTakePicture}
-              disabled={capturing || !cameraReady}
-              className="self-center h-20 w-20 items-center justify-center rounded-full border-4 border-white bg-white/10"
+              onPress={takePicture}
+              disabled={capturing}
+              className="rounded-2xl bg-white px-4 py-4"
             >
-              <View className="h-14 w-14 rounded-full bg-white" />
+              <Text className="text-center font-bold text-slate-900">
+                {capturing ? "Capturing..." : "Capture Farm Gate Image"}
+              </Text>
             </Pressable>
-
-            <Text className="mt-4 text-center text-sm text-white/70">
-              {capturing
-                ? t("registration.capturing")
-                : cameraReady
-                  ? t("registration.tapToCapture")
-                  : t("registration.preparingCamera")}
-            </Text>
-          </View>
-        </>
-      ) : (
-        <ScrollView
-          className="flex-1 bg-[#F5F7FB] dark:bg-[#050B16]"
-          contentContainerStyle={{
-            padding: 16,
-            paddingTop: insets.top + 8,
-            paddingBottom: 32,
-          }}
-        >
-          <View className="rounded-2xl border border-slate-900 bg-slate-900 p-5 dark:border-white/10 dark:bg-[#0B1220]">
-            <View className="flex-row items-center gap-3">
-              <View className="h-10 w-10 items-center justify-center rounded-2xl bg-white/10">
-                <Ionicons name="image-outline" size={20} color="#60A5FA" />
-              </View>
-
-              <View className="flex-1">
-                <Text className="text-[11px] uppercase tracking-wide text-white opacity-80">
-                  {t("registration.farmGateImage")}
-                </Text>
-                <Text className="mt-1 text-lg font-bold text-white">
-                  {t("registration.reviewImage")}
-                </Text>
-                <Text className="mt-1 text-sm text-white/80">
-                  {t("registration.retakeOrUse")}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={{ position: "relative" }} className="mt-5">
-            <Image
-              source={{ uri: photoUri }}
-              className="h-[420px] w-full rounded-2xl"
-              resizeMode="cover"
-            />
-            <WatermarkOverlay
-              farmerCode={farmerCode}
-              farmName={farmName}
-              lat={lat ? parseFloat(lat).toFixed(5) : "N/A"}
-              lng={lng ? parseFloat(lng).toFixed(5) : "N/A"}
-              captureTime={captureTime}
-            />
-          </View>
-
-          <View className="mt-5 flex-row gap-3">
-            <View className="flex-1">
-              <Pressable
-                onPress={() => {
-                  setPhotoUri(null);
-                  setCameraReady(false);
-                }}
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-4 dark:border-white/10 dark:bg-[#0B1220]"
-              >
-                <Text className="text-center font-semibold text-slate-900 dark:text-white">
-                  {t("registration.retake")}
-                </Text>
-              </Pressable>
-            </View>
-
-            <View className="flex-1">
-              <Pressable
-                onPress={handleUseImage}
-                className="rounded-2xl bg-slate-900 px-4 py-4 dark:bg-white"
-              >
-                <Text className="text-center font-semibold text-white dark:text-slate-900">
-                  {t("registration.useThisImage")}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        </ScrollView>
-      )}
+          )}
+        </View>
+      ) : null}
     </View>
   );
 }

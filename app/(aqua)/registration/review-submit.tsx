@@ -1,19 +1,23 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
 
 import type { AppDispatch } from "../../../src/store/auth/store";
+import type { AquaPondData } from "../../../src/types/aqua";
 import { selectAquaRegistration } from "../../../src/features/aqua/registration/registration.selectors";
 import {
   submitRegistrationFailure,
   submitRegistrationStart,
   submitRegistrationSuccess,
 } from "../../../src/features/aqua/registration/registration.slice";
-import { submitFarmRegistration } from "../../../src/services/aqua/registration.service";
+import {
+  submitFarmRegistration,
+  submitPondRegistration,
+} from "../../../src/services/aqua/registration.service";
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
@@ -31,6 +35,9 @@ function InfoRow({ label, value }: { label: string; value: string }) {
     </View>
   );
 }
+
+const getParamValue = (value: string | string[] | undefined, fallback = "") =>
+  Array.isArray(value) ? String(value[0] ?? fallback) : String(value ?? fallback);
 
 function toNumber(value: any, fallback = 0) {
   const num = Number(value);
@@ -72,13 +79,10 @@ function safeJsonParse(value: string | null) {
 
 async function getStoredUserId() {
   const values = await AsyncStorage.multiGet([
-    "auth_token",
     "user_id",
     "owner_id",
     "auth_user_id",
     "id",
-    "phone_no",
-    "auth_phone_no",
     "me_cache_v1",
     "login_user",
     "auth_user",
@@ -140,12 +144,33 @@ function buildFarmPrefix(farm: any) {
   return `${countryCode}-${stateCode}-${districtCode}`;
 }
 
-export default function FarmReviewSubmitScreen() {
+function parsePonds(pondsJson: string, fallback: AquaPondData[]) {
+  if (!pondsJson) return fallback;
+
+  try {
+    const parsed = JSON.parse(pondsJson);
+
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed as AquaPondData[];
+    }
+
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function buildPondGps(lat: string, lng: string) {
+  return `https://maps.google.com/?q=${lat},${lng}`;
+}
+
+export default function AquaReviewSubmitScreen() {
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams();
   const dispatch = useDispatch<AppDispatch>();
 
   const registration = useSelector(selectAquaRegistration);
-  const { farmer, farm, submission } = registration;
+  const { farmer, farm, ponds, submission } = registration;
 
   const me = useSelector((state: any) => state.me?.me);
   const loginState = useSelector((state: any) => state.login);
@@ -154,10 +179,17 @@ export default function FarmReviewSubmitScreen() {
   const qualityAuthState = useSelector((state: any) => state.qualityAuth);
 
   const [loggedUserId, setLoggedUserId] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const [loadingUserId, setLoadingUserId] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
-  const farmAny = farm as any;
+  const pondsJson = getParamValue(params.pondsJson, "");
+
+  const finalPonds = useMemo(
+    () => parsePonds(pondsJson, ponds),
+    [pondsJson, ponds],
+  );
+
+  const farmPrefix = useMemo(() => buildFarmPrefix(farm), [farm]);
 
   useEffect(() => {
     let mounted = true;
@@ -179,9 +211,6 @@ export default function FarmReviewSubmitScreen() {
         loginState?.data?.user_id,
         loginState?.data?.id,
         loginState?.data?.owner_id,
-        loginState?.loginData?.user_id,
-        loginState?.loginData?.id,
-        loginState?.loginData?.owner_id,
 
         authState?.user_id,
         authState?.id,
@@ -210,10 +239,10 @@ export default function FarmReviewSubmitScreen() {
         qualityAuthState?.user?.id,
         qualityAuthState?.user?.owner_id,
 
-        farmAny?.ownerId,
-        farmAny?.owner_id,
-        farmAny?.userId,
-        farmAny?.user_id,
+        (farm as any)?.ownerId,
+        (farm as any)?.owner_id,
+        (farm as any)?.userId,
+        (farm as any)?.user_id,
       );
 
       if (reduxUserId) {
@@ -244,123 +273,168 @@ export default function FarmReviewSubmitScreen() {
     authState,
     authSessionState,
     qualityAuthState,
-    farmAny?.ownerId,
-    farmAny?.owner_id,
-    farmAny?.userId,
-    farmAny?.user_id,
+    farm,
   ]);
 
-  const farmPrefix = useMemo(() => buildFarmPrefix(farmAny), [farmAny]);
-
-  const handleSubmit = async () => {
+  const validateBeforeSubmit = () => {
     if (loadingUserId) {
       Alert.alert("Please wait", "User details are still loading.");
-      return;
+      return false;
     }
 
     if (!loggedUserId) {
-      console.log("USER_ID_DEBUG:", {
-        me,
-        loginState,
-        authState,
-        authSessionState,
-        qualityAuthState,
-        farmOwnerId: farmAny?.ownerId,
-        farmOwnerIdSnake: farmAny?.owner_id,
-        farmUserId: farmAny?.userId,
-        farmUserIdSnake: farmAny?.user_id,
-      });
-
       Alert.alert(
         "Error",
-        "User ID is missing. Login user details are not loaded. Please logout and login again.",
+        "User ID is missing. Please logout and login again.",
       );
-      return;
+      return false;
     }
 
     if (!farm.farmName?.trim()) {
       Alert.alert("Validation", "Farm name is required");
-      return;
+      return false;
     }
 
     if (!farm.farmAddress?.trim()) {
       Alert.alert("Validation", "Farm address is required");
-      return;
+      return false;
     }
 
     if (!farm.waterSource?.trim()) {
       Alert.alert("Validation", "Water source is required");
-      return;
+      return false;
     }
 
     if (!farm.farmArea?.trim()) {
       Alert.alert("Validation", "Farm area is required");
-      return;
+      return false;
     }
 
     if (!farm.latitude?.trim() || !farm.longitude?.trim()) {
       Alert.alert("Validation", "Farm GPS location is required");
-      return;
+      return false;
     }
 
-    const farmArea = toNumber(farm.farmArea);
-    const latitude = toNumber(farm.latitude);
-    const longitude = toNumber(farm.longitude);
-
-    if (farmArea <= 0) {
-      Alert.alert("Validation", "Farm area must be greater than 0");
-      return;
+    if (!finalPonds.length) {
+      Alert.alert("Validation", "At least one pond is required");
+      return false;
     }
 
-    if (!latitude || !longitude) {
-      Alert.alert("Validation", "Valid latitude and longitude are required");
-      return;
+    for (let i = 0; i < finalPonds.length; i += 1) {
+      const pond = finalPonds[i];
+
+      if (!pond.pondName?.trim()) {
+        Alert.alert("Validation", `Pond ${i + 1} name is required`);
+        return false;
+      }
+
+      if (!pond.pondArea?.trim()) {
+        Alert.alert("Validation", `Pond ${i + 1} area is required`);
+        return false;
+      }
+
+      if (!pond.speciesId?.trim()) {
+        Alert.alert("Validation", `Pond ${i + 1} species is required`);
+        return false;
+      }
+
+      const lat = pond.gpsLat || farm.latitude;
+      const lng = pond.gpsLng || farm.longitude;
+
+      if (!lat || !lng) {
+        Alert.alert("Validation", `Pond ${i + 1} GPS is required`);
+        return false;
+      }
     }
 
-    const payload = {
+    return true;
+  };
+
+  const handleSubmit = async () => {
+    if (!validateBeforeSubmit()) return;
+
+    const farmPayload = {
       user_id: Number(loggedUserId),
       farm_prefix: farmPrefix,
       farm_name: farm.farmName.trim(),
       address: farm.farmAddress.trim(),
-      farm_gate_latitude: latitude,
-      farm_gate_longitude: longitude,
+      farm_gate_latitude: toNumber(farm.latitude),
+      farm_gate_longitude: toNumber(farm.longitude),
       water_source: farm.waterSource.trim(),
-      farm_area_acres: farmArea,
+      farm_area_acres: toNumber(farm.farmArea),
     };
-
-    console.log("FARM_SUBMIT_PAYLOAD:", payload);
 
     try {
       setSubmitting(true);
       dispatch(submitRegistrationStart());
 
-      const response = await submitFarmRegistration(payload);
+      console.log("COMBINED_FARM_PAYLOAD:", farmPayload);
 
-      if (!response.ok) {
-        const errMsg = response.message || "Farm registration failed";
+      const farmResponse = await submitFarmRegistration(farmPayload);
+
+      if (!farmResponse.ok || !farmResponse.data?.id) {
+        const errMsg =
+          farmResponse.message || "Farm registration submission failed";
 
         dispatch(submitRegistrationFailure(errMsg));
         Alert.alert("Submission Failed", errMsg);
         return;
       }
 
+      const createdFarmDbId = farmResponse.data.id;
+
+      const pondResults = [];
+
+      for (const pond of finalPonds) {
+        const pondLat = pond.gpsLat || farm.latitude;
+        const pondLng = pond.gpsLng || farm.longitude;
+
+        const pondPayload = {
+          farm_id: Number(createdFarmDbId),
+          pond_name: pond.pondName.trim(),
+          pond_type: "Earthen",
+          water_spread_area_acres: toNumber(pond.pondArea),
+          volume: null,
+          pond_status: "Inactive",
+          verification_status: "Unverified",
+          pond_gps: buildPondGps(pondLat, pondLng),
+        };
+
+        console.log("COMBINED_POND_PAYLOAD:", pondPayload);
+
+        const pondResponse = await submitPondRegistration(pondPayload);
+
+        if (!pondResponse.ok) {
+          const errMsg =
+            pondResponse.message ||
+            `Pond ${pond.pondName} registration failed`;
+
+          dispatch(submitRegistrationFailure(errMsg));
+          Alert.alert("Submission Failed", errMsg);
+          return;
+        }
+
+        pondResults.push(pondResponse.data);
+      }
+
       dispatch(
         submitRegistrationSuccess(
-          response.message || "Farm registered successfully",
+          "Farm and pond details submitted successfully for field verification",
         ),
       );
 
       router.replace({
-        pathname: "/(aqua)/registration/farm-pending",
+        pathname: "/(aqua)/registration/success",
         params: {
-          farmDbId: String(response.data?.id ?? ""),
-          farmName: String(response.data?.farm_name ?? farm.farmName),
-          tempFarmCode: String(response.data?.farm_id ?? ""),
+          farmName: farm.farmName,
+          pondCount: String(finalPonds.length),
+          farmDbId: String(createdFarmDbId),
           userId: String(loggedUserId),
         },
       });
     } catch (error: any) {
-      const errMsg = error?.message || "Farm registration failed";
+      const errMsg =
+        error?.message || "Farm and pond registration submission failed";
 
       dispatch(submitRegistrationFailure(errMsg));
       Alert.alert("Submission Failed", errMsg);
@@ -387,11 +461,11 @@ export default function FarmReviewSubmitScreen() {
 
           <View className="flex-1">
             <Text className="text-[11px] uppercase tracking-wide text-white opacity-80">
-              Farm Registration
+              Aquaculture Registration
             </Text>
 
             <Text className="mt-1 text-lg font-bold text-white">
-              Review & Submit
+              Review Farm & Pond Details
             </Text>
           </View>
         </View>
@@ -399,15 +473,15 @@ export default function FarmReviewSubmitScreen() {
 
       <View className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/20 dark:bg-amber-500/10">
         <Text className="text-base font-bold text-amber-800 dark:text-amber-300">
-          Pending Field Verification Flow
+          PDF Requirement Flow
         </Text>
 
         <Text className="mt-2 text-sm leading-6 text-amber-700 dark:text-amber-200/80">
+          • Farm and ponds are submitted together{"\n"}
           • No official Farm ID is generated now{"\n"}
-          • Image capture is not required before activation{"\n"}
-          • Farm QR becomes the official Farm ID only after field verification
-          and QR scan{"\n"}
-          • Daily logs must remain locked until QR activation
+          • No official Pond ID is generated now{"\n"}
+          • Status becomes Pending Field Verification{"\n"}
+          • QR activation creates official Farm ID and Pond ID later
         </Text>
       </View>
 
@@ -417,6 +491,9 @@ export default function FarmReviewSubmitScreen() {
         </Text>
 
         <View className="rounded-2xl border border-slate-100 bg-slate-50 px-3 dark:border-white/5 dark:bg-white/5">
+          <InfoRow label="User ID" value={loadingUserId ? "Loading..." : loggedUserId || "Not found"} />
+          <View className="h-px bg-slate-100 dark:bg-white/5" />
+
           <InfoRow label="Farmer Name" value={farmer.farmerName} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
@@ -436,16 +513,6 @@ export default function FarmReviewSubmitScreen() {
         </Text>
 
         <View className="rounded-2xl border border-slate-100 bg-slate-50 px-3 dark:border-white/5 dark:bg-white/5">
-          <InfoRow
-            label="User ID"
-            value={
-              loadingUserId
-                ? "Loading..."
-                : loggedUserId || "Not found"
-            }
-          />
-          <View className="h-px bg-slate-100 dark:bg-white/5" />
-
           <InfoRow label="Farm Prefix" value={farmPrefix} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
@@ -470,10 +537,7 @@ export default function FarmReviewSubmitScreen() {
           <InfoRow label="Water Source" value={farm.waterSource} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="Number of Ponds" value={farm.pondCount} />
-          <View className="h-px bg-slate-100 dark:bg-white/5" />
-
-          <InfoRow label="Total Farm Area" value={farm.farmArea} />
+          <InfoRow label="Farm Area Acres" value={farm.farmArea} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
           <InfoRow label="Latitude" value={farm.latitude} />
@@ -483,24 +547,36 @@ export default function FarmReviewSubmitScreen() {
         </View>
       </View>
 
+      <View className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#0B1220]">
+        <Text className="mb-3 text-base font-semibold text-slate-900 dark:text-white">
+          Pond Details
+        </Text>
+
+        <View className="gap-3">
+          {finalPonds.map((pond, index) => (
+            <View
+              key={pond.id || `pond-${index + 1}`}
+              className="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 dark:border-white/5 dark:bg-white/5"
+            >
+              <InfoRow label="Pond Name" value={pond.pondName} />
+              <View className="h-px bg-slate-100 dark:bg-white/5" />
+
+              <InfoRow label="Pond Area Acres" value={pond.pondArea} />
+              <View className="h-px bg-slate-100 dark:bg-white/5" />
+
+              <InfoRow label="Species" value={pond.speciesName} />
+              <View className="h-px bg-slate-100 dark:bg-white/5" />
+
+              <InfoRow label="Official Pond ID" value="Not activated yet" />
+            </View>
+          ))}
+        </View>
+      </View>
+
       {submission.message ? (
         <View className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#0B1220]">
           <Text className="text-sm text-slate-700 dark:text-white/80">
             {submission.message}
-          </Text>
-        </View>
-      ) : null}
-
-      {!loadingUserId && !loggedUserId ? (
-        <View className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 dark:border-rose-500/20 dark:bg-rose-500/10">
-          <Text className="text-sm font-bold text-rose-700 dark:text-rose-300">
-            User ID not found
-          </Text>
-
-          <Text className="mt-1 text-xs leading-5 text-rose-600 dark:text-rose-200/80">
-            The login response is not available in Redux or AsyncStorage. Logout
-            and login again. If this still shows, update login to save owner_id
-            or id.
           </Text>
         </View>
       ) : null}
@@ -531,7 +607,7 @@ export default function FarmReviewSubmitScreen() {
                 ? "Loading..."
                 : submitting
                   ? "Submitting..."
-                  : "Submit Farm"}
+                  : "Submit All"}
             </Text>
           </Pressable>
         </View>

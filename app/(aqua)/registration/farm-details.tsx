@@ -8,10 +8,9 @@ import {
   ScrollView,
   Pressable,
   Alert,
-  Image,
   Modal,
 } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
@@ -24,7 +23,6 @@ import {
 import {
   setFarmerField,
   setFarmField,
-  setFarmImage,
 } from "../../../src/features/aqua/registration/registration.slice";
 
 import {
@@ -33,74 +31,6 @@ import {
   fetchDistrictsByState,
   fetchLocationsByDistrict,
 } from "../../../src/store/auth/location.slice";
-
-const localNow = () => {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const year = d.getFullYear();
-  const month = pad(d.getMonth() + 1);
-  const day = pad(d.getDate());
-  let hours = d.getHours();
-  const minutes = pad(d.getMinutes());
-  const ampm = hours >= 12 ? "PM" : "AM";
-  hours = hours % 12 || 12;
-  return `${year}-${month}-${day} ${pad(hours)}:${minutes} ${ampm}`;
-};
-
-function WatermarkOverlay({
-  farmerCode,
-  farmName,
-  lat,
-  lng,
-  captureTime,
-}: {
-  farmerCode: string;
-  farmName: string;
-  lat: string;
-  lng: string;
-  captureTime: string;
-}) {
-  return (
-    <View
-      style={{
-        position: "absolute",
-        top: 8,
-        right: 8,
-        backgroundColor: "rgba(0,0,0,0.72)",
-        borderRadius: 8,
-        padding: 8,
-      }}
-    >
-      <Text
-        style={{
-          color: "#93C5FD",
-          fontSize: 8,
-          fontWeight: "700",
-          lineHeight: 13,
-          marginBottom: 3,
-          letterSpacing: 0.4,
-        }}
-      >
-        ⬡ Powered by Rootverse
-      </Text>
-      <Text style={{ color: "#FFFFFF", fontSize: 9, fontWeight: "700", lineHeight: 14 }}>
-        Farmer: {farmerCode}
-      </Text>
-      <Text style={{ color: "#FFFFFF", fontSize: 9, lineHeight: 14 }}>
-        Farm: {farmName}
-      </Text>
-      <Text style={{ color: "#CBD5E1", fontSize: 9, lineHeight: 14 }}>
-        Lat: {lat}
-      </Text>
-      <Text style={{ color: "#CBD5E1", fontSize: 9, lineHeight: 14 }}>
-        Lng: {lng}
-      </Text>
-      <Text style={{ color: "#CBD5E1", fontSize: 9, lineHeight: 14 }}>
-        Time: {captureTime}
-      </Text>
-    </View>
-  );
-}
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MOBILE_REGEX = /^\d{10}$/;
@@ -240,7 +170,6 @@ function SelectField({
 
 export default function FarmDetailsScreen() {
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams();
   const dispatch = useDispatch<AppDispatch>();
   const { t } = useTranslation();
 
@@ -271,14 +200,7 @@ export default function FarmDetailsScreen() {
       Number(farm.districtId || 0)
     ] ?? false;
 
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [pickerType, setPickerType] = useState<PickerType>(null);
-  const [captureTime, setCaptureTime] = useState(localNow());
-
-  const returnedFarmImageCaptured =
-    String(params.farmImageCaptured ?? "false") === "true";
-  const returnedFarmImageUri = String(params.farmImageUri ?? "");
-
   // Auto-set owner id from logged-in user
   useEffect(() => {
     if (ownerId) {
@@ -336,22 +258,6 @@ export default function FarmDetailsScreen() {
   useEffect(() => {
     dispatch(fetchCountries());
   }, [dispatch]);
-
-  useEffect(() => {
-    if (
-      returnedFarmImageCaptured &&
-      returnedFarmImageUri &&
-      returnedFarmImageUri !== farm.farmImageUri
-    ) {
-      dispatch(setFarmImage({ uri: returnedFarmImageUri, captured: true }));
-      setCaptureTime(localNow());
-    }
-  }, [
-    dispatch,
-    returnedFarmImageCaptured,
-    returnedFarmImageUri,
-    farm.farmImageUri,
-  ]);
 
   const currentPickerTitle = useMemo(() => {
     if (pickerType === "country") return t("registration.selectCountry");
@@ -563,16 +469,11 @@ export default function FarmDetailsScreen() {
       return;
     }
 
-    if (!farm.farmImageCaptured) {
-      Alert.alert("Validation", "Please capture farm image");
-      return;
-    }
-
     if (!farm.talukId.trim()) {
       dispatch(setFarmField({ key: "talukId", value: "0" }));
     }
 
-    router.push("/(aqua)/registration/farm-review-submit");
+    router.push("/(aqua)/registration/pond-details");
   };
 
   return (
@@ -701,17 +602,29 @@ export default function FarmDetailsScreen() {
               <SelectField
                 label={t("registration.country")}
                 value={farm.countryName}
-                placeholder={countriesLoading ? t("registration.loading") : t("registration.selectCountry")}
+                placeholder={
+                  countriesLoading
+                    ? t("registration.loading")
+                    : t("registration.selectCountry")
+                }
                 onPress={() => setPickerType("country")}
                 disabled={countriesLoading}
               />
               <SelectField
                 label={t("registration.state")}
                 value={farm.stateName}
-                placeholder={statesLoading ? t("registration.loading") : t("registration.selectState")}
+                placeholder={
+                  statesLoading
+                    ? t("registration.loading")
+                    : t("registration.selectState")
+                }
                 onPress={() => setPickerType("state")}
                 disabled={!farm.countryId || statesLoading}
-                helperText={!farm.countryId ? t("registration.selectCountryFirst") : undefined}
+                helperText={
+                  !farm.countryId
+                    ? t("registration.selectCountryFirst")
+                    : undefined
+                }
               />
             </View>
 
@@ -720,18 +633,32 @@ export default function FarmDetailsScreen() {
               <SelectField
                 label={t("registration.district")}
                 value={farm.district}
-                placeholder={districtsLoading ? t("registration.loading") : t("registration.selectDistrict")}
+                placeholder={
+                  districtsLoading
+                    ? t("registration.loading")
+                    : t("registration.selectDistrict")
+                }
                 onPress={() => setPickerType("district")}
                 disabled={!farm.stateId || districtsLoading}
-                helperText={!farm.stateId ? t("registration.selectStateFirst") : undefined}
+                helperText={
+                  !farm.stateId ? t("registration.selectStateFirst") : undefined
+                }
               />
               <SelectField
                 label={t("registration.location")}
                 value={farm.locationName}
-                placeholder={locationsLoading ? t("registration.loading") : t("registration.selectLocation")}
+                placeholder={
+                  locationsLoading
+                    ? t("registration.loading")
+                    : t("registration.selectLocation")
+                }
                 onPress={() => setPickerType("location")}
                 disabled={!farm.districtId || locationsLoading}
-                helperText={!farm.districtId ? t("registration.selectDistrictFirst") : undefined}
+                helperText={
+                  !farm.districtId
+                    ? t("registration.selectDistrictFirst")
+                    : undefined
+                }
               />
             </View>
 
@@ -776,13 +703,21 @@ export default function FarmDetailsScreen() {
             <View className="flex-row gap-3">
               <Field
                 label={t("registration.latitude")}
-                placeholder={locationFetching ? t("registration.coordsFetching") : t("registration.autoDetected")}
+                placeholder={
+                  locationFetching
+                    ? t("registration.coordsFetching")
+                    : t("registration.autoDetected")
+                }
                 value={farm.latitude}
                 editable={false}
               />
               <Field
                 label={t("registration.longitude")}
-                placeholder={locationFetching ? t("registration.coordsFetching") : t("registration.autoDetected")}
+                placeholder={
+                  locationFetching
+                    ? t("registration.coordsFetching")
+                    : t("registration.autoDetected")
+                }
                 value={farm.longitude}
                 editable={false}
               />
@@ -818,57 +753,24 @@ export default function FarmDetailsScreen() {
           </View>
         </View>
 
-        {/* ── Farm Gate Image ── */}
-        <View className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#0B1220]">
-          <Text className="text-base font-semibold text-slate-900 dark:text-white">
-            {t("registration.farmGateImage")}
-          </Text>
-          <Text className="mt-1 text-sm text-slate-600 dark:text-white/60">
-            {t("registration.farmGateDesc")}
-          </Text>
-
-          <Pressable
-            onPress={() =>
-              router.push("/(aqua)/registration/capture-farm-gate")
-            }
-            className="mt-3 rounded-xl bg-slate-900 px-4 py-3 dark:bg-white"
-          >
-            <Text className="text-center font-semibold text-white dark:text-slate-900">
-              {farm.farmImageCaptured
-                ? t("registration.retakeBtn")
-                : t("registration.captureBtn")}
-            </Text>
-          </Pressable>
-
-          {farm.farmImageCaptured && (
-            <View className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-500/20 dark:bg-emerald-500/10">
-              <Text className="text-sm font-medium text-emerald-800 dark:text-emerald-300">
-                {t("registration.imageCapturedSuccess")}
-              </Text>
-
-              {farm.farmImageUri ? (
-                <Pressable onPress={() => setPreviewOpen(true)} className="mt-3">
-                  <View style={{ position: "relative" }}>
-                    <Image
-                      source={{ uri: farm.farmImageUri }}
-                      className="h-40 w-full rounded-xl"
-                      resizeMode="cover"
-                    />
-                    <WatermarkOverlay
-                      farmerCode={ownerId || "FARMER"}
-                      farmName={farm.farmName?.trim() || "Farm"}
-                      lat={farm.latitude ? parseFloat(farm.latitude).toFixed(5) : "N/A"}
-                      lng={farm.longitude ? parseFloat(farm.longitude).toFixed(5) : "N/A"}
-                      captureTime={captureTime}
-                    />
-                  </View>
-                  <Text className="mt-2 text-center text-xs font-medium text-emerald-700 dark:text-emerald-200/80">
-                    {t("registration.tapToPreview")}
-                  </Text>
-                </Pressable>
-              ) : null}
+        {/* ── QR Activation Notice ── */}
+        <View className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/20 dark:bg-amber-500/10">
+          <View className="flex-row items-start gap-3">
+            <View className="h-10 w-10 items-center justify-center rounded-2xl bg-amber-100 dark:bg-amber-500/20">
+              <Ionicons name="qr-code-outline" size={20} color="#D97706" />
             </View>
-          )}
+            <View className="flex-1">
+              <Text className="text-base font-semibold text-amber-800 dark:text-amber-300">
+                Farm Gate Image Not Required Now
+              </Text>
+              <Text className="mt-2 text-sm leading-6 text-amber-700 dark:text-amber-200/80">
+                Farm Gate image must be captured only after field verification
+                and Farm QR activation. At this stage, submit farm details only.
+                The pre-printed QR value will become the official Farm ID after
+                scanning.
+              </Text>
+            </View>
+          </View>
         </View>
 
         {/* ── Footer Nav ── */}
@@ -893,50 +795,6 @@ export default function FarmDetailsScreen() {
           </View>
         </View>
       </ScrollView>
-
-      {/* ── Full-screen Image Preview Modal ── */}
-      <Modal
-        visible={previewOpen}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setPreviewOpen(false)}
-      >
-        <View className="flex-1 bg-black/95">
-          <View
-            className="flex-row items-center justify-between px-4"
-            style={{ paddingTop: insets.top + 8, paddingBottom: 12 }}
-          >
-            <Text className="text-base font-semibold text-white">
-              {t("registration.farmGateImage")}
-            </Text>
-            <Pressable
-              onPress={() => setPreviewOpen(false)}
-              className="h-10 w-10 items-center justify-center rounded-full bg-white/10"
-            >
-              <Ionicons name="close" size={22} color="#FFFFFF" />
-            </Pressable>
-          </View>
-
-          <View className="flex-1 items-center justify-center px-4 pb-6">
-            {farm.farmImageUri ? (
-              <View style={{ position: "relative", width: "100%", height: "100%" }}>
-                <Image
-                  source={{ uri: farm.farmImageUri }}
-                  style={{ width: "100%", height: "100%", borderRadius: 16 }}
-                  resizeMode="contain"
-                />
-                <WatermarkOverlay
-                  farmerCode={ownerId || "FARMER"}
-                  farmName={farm.farmName?.trim() || "Farm"}
-                  lat={farm.latitude ? parseFloat(farm.latitude).toFixed(5) : "N/A"}
-                  lng={farm.longitude ? parseFloat(farm.longitude).toFixed(5) : "N/A"}
-                  captureTime={captureTime}
-                />
-              </View>
-            ) : null}
-          </View>
-        </View>
-      </Modal>
 
       {/* ── Location Picker Modal ── */}
       <Modal
