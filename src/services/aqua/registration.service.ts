@@ -255,7 +255,9 @@ function formDataToObject(formData: FormData): Record<string, any> {
     if (value && typeof value === "object" && value.uri) return;
 
     if (obj[key] !== undefined) {
-      obj[key] = Array.isArray(obj[key]) ? [...obj[key], value] : [obj[key], value];
+      obj[key] = Array.isArray(obj[key])
+        ? [...obj[key], value]
+        : [obj[key], value];
       return;
     }
 
@@ -349,7 +351,9 @@ function normalizePondPayload(
       ),
     ),
     volume: toNullableNumber(raw.volume),
-    pond_status: String(pickFirstDefined(raw.pond_status, raw.pondStatus, "Active")),
+    pond_status: String(
+      pickFirstDefined(raw.pond_status, raw.pondStatus, "Inactive"),
+    ),
     verification_status: String(
       pickFirstDefined(
         raw.verification_status,
@@ -1027,6 +1031,7 @@ export async function submitAquaRegistration(
   return {
     ok: true,
     status: "pending",
-    message: "Registration submitted successfully and waiting for field verification",
+    message:
+      "Registration submitted successfully and waiting for field verification",
   };
 }

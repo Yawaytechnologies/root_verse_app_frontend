@@ -4,7 +4,20 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { resources } from "./translations";
 
 const STORAGE_KEY = "app_language";
+
 let initPromise: Promise<void> | null = null;
+
+export type AppLanguage = "en" | "ta";
+
+function normalizeLanguage(lang?: string | null): AppLanguage {
+  const value = String(lang ?? "").toLowerCase();
+
+  if (value === "ta" || value.startsWith("ta-")) {
+    return "ta";
+  }
+
+  return "en";
+}
 
 export async function initI18n() {
   if (i18n.isInitialized) return;
@@ -12,26 +25,30 @@ export async function initI18n() {
 
   initPromise = (async () => {
     let saved: string | null = null;
+
     try {
       saved = await AsyncStorage.getItem(STORAGE_KEY);
-    } catch (e) {
-      console.warn("get language failed:", e);
+    } catch (error) {
+      console.warn("get language failed:", error);
     }
 
-    const lng = saved === "ta" ? "ta" : "en";
+    const lng = normalizeLanguage(saved);
 
     await i18n.use(initReactI18next).init({
       resources,
       lng,
       fallbackLng: "en",
-
-      // ✅ important
       ns: ["translation"],
       defaultNS: "translation",
-
-      interpolation: { escapeValue: false },
+      compatibilityJSON: "v3",
+      interpolation: {
+        escapeValue: false,
+      },
       returnNull: false,
       returnEmptyString: false,
+      react: {
+        useSuspense: false,
+      },
     });
   })();
 
@@ -42,18 +59,24 @@ export async function initI18n() {
   }
 }
 
-export async function setAppLanguage(lang: "en" | "ta") {
-  if (!i18n.isInitialized) await initI18n();
+export async function setAppLanguage(lang: AppLanguage) {
+  if (!i18n.isInitialized) {
+    await initI18n();
+  }
 
-  const safeLang: "en" | "ta" = lang === "ta" ? "ta" : "en";
+  const safeLang = normalizeLanguage(lang);
 
   try {
     await AsyncStorage.setItem(STORAGE_KEY, safeLang);
-  } catch (e) {
-    console.warn("save language failed:", e);
+  } catch (error) {
+    console.warn("save language failed:", error);
   }
 
   await i18n.changeLanguage(safeLang);
+}
+
+export function getCurrentLanguage(): AppLanguage {
+  return normalizeLanguage(i18n.language);
 }
 
 export default i18n;

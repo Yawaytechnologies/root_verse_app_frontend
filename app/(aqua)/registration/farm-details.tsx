@@ -66,7 +66,39 @@ function extractLabel(item: any): string {
   );
 }
 
-// ─── Standalone reusable field components (must be outside the screen) ────────
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function toYmd(year: number, month: number, day: number) {
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+function getDaysInMonth(year: number, month: number) {
+  return new Date(year, month, 0).getDate();
+}
+
+function parseYmd(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  if (!year || !month || !day) return null;
+
+  return { year, month, day };
+}
+
+function formatDobForUi(value: string) {
+  const parsed = parseYmd(value);
+
+  if (!parsed) return "";
+
+  return `${pad2(parsed.day)}-${pad2(parsed.month)}-${parsed.year}`;
+}
 
 function Field({
   label,
@@ -90,6 +122,7 @@ function Field({
       <Text className="text-sm font-medium text-slate-900 dark:text-white">
         {label}
       </Text>
+
       <TextInput
         value={value}
         onChangeText={onChangeText}
@@ -153,6 +186,7 @@ function SelectField({
           >
             {value || placeholder}
           </Text>
+
           <Ionicons name="chevron-down" size={16} color="#94A3B8" />
         </View>
       </Pressable>
@@ -166,20 +200,101 @@ function SelectField({
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+function DateSelectField({
+  label,
+  value,
+  placeholder,
+  onPress,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  onPress: () => void;
+}) {
+  return (
+    <View className="flex-1 gap-2">
+      <Text className="text-sm font-medium text-slate-900 dark:text-white">
+        {label}
+      </Text>
+
+      <Pressable
+        onPress={onPress}
+        className="rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-white/10 dark:bg-[#0B1220]"
+      >
+        <View className="flex-row items-center justify-between">
+          <Text
+            className={`flex-1 text-sm ${
+              value
+                ? "text-slate-900 dark:text-white"
+                : "text-slate-400 dark:text-white/40"
+            }`}
+            numberOfLines={1}
+          >
+            {value || placeholder}
+          </Text>
+
+          <Ionicons name="calendar-outline" size={18} color="#94A3B8" />
+        </View>
+      </Pressable>
+    </View>
+  );
+}
+
+function DateOption({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className={`mb-2 rounded-xl border px-3 py-2 ${
+        active
+          ? "border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-500/20"
+          : "border-slate-200 bg-white dark:border-white/10 dark:bg-white/5"
+      }`}
+    >
+      <Text
+        className={`text-center text-sm font-semibold ${
+          active
+            ? "text-blue-700 dark:text-blue-200"
+            : "text-slate-700 dark:text-white/70"
+        }`}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
 
 export default function FarmDetailsScreen() {
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch<AppDispatch>();
   const { t } = useTranslation();
 
+  const tr = (key: string, fallback: string) => {
+    return t(key, { defaultValue: fallback });
+  };
+
   const farmer = useSelector(selectAquaFarmer);
   const farm = useSelector(selectAquaFarm);
 
-  // Owner ID — same source as Profile page (state.me.me.owner_id)
   const me = useSelector((state: any) => state.me?.me);
-  const ownerId = String(me?.owner_id ?? "");
+  const ownerId = String(me?.owner_id ?? me?.id ?? me?.user_id ?? "");
+
   const [locationFetching, setLocationFetching] = useState(false);
+  const [pickerType, setPickerType] = useState<PickerType>(null);
+
+  const currentYear = new Date().getFullYear();
+
+  const [dobModalVisible, setDobModalVisible] = useState(false);
+  const [dobYear, setDobYear] = useState(currentYear - 25);
+  const [dobMonth, setDobMonth] = useState(1);
+  const [dobDay, setDobDay] = useState(1);
 
   const locationState = useSelector((state: any) => state.location);
 
@@ -200,40 +315,93 @@ export default function FarmDetailsScreen() {
       Number(farm.districtId || 0)
     ] ?? false;
 
-  const [pickerType, setPickerType] = useState<PickerType>(null);
-  // Auto-set owner id from logged-in user
+  const yearOptions = useMemo(() => {
+    return Array.from({ length: 91 }, (_, index) => currentYear - index);
+  }, [currentYear]);
+
+  const monthOptions = useMemo(() => {
+    return Array.from({ length: 12 }, (_, index) => index + 1);
+  }, []);
+
+  const dayOptions = useMemo(() => {
+    const days = getDaysInMonth(dobYear, dobMonth);
+
+    return Array.from({ length: days }, (_, index) => index + 1);
+  }, [dobYear, dobMonth]);
+
+  useEffect(() => {
+    const maxDay = getDaysInMonth(dobYear, dobMonth);
+
+    if (dobDay > maxDay) {
+      setDobDay(maxDay);
+    }
+  }, [dobDay, dobMonth, dobYear]);
+
   useEffect(() => {
     if (ownerId) {
       dispatch(setFarmField({ key: "ownerId", value: ownerId }));
     }
   }, [dispatch, ownerId]);
 
-  // Fetch device GPS coordinates directly via expo-location
   useEffect(() => {
-    if (farm.latitude && farm.longitude) return; // already set, skip
+    if (!(farm as any).technicianName) {
+      dispatch(
+        setFarmField({
+          key: "technicianName" as any,
+          value: "Sriram D",
+        }),
+      );
+    }
+
+    if (!(farm as any).technicianMobileNumber) {
+      dispatch(
+        setFarmField({
+          key: "technicianMobileNumber" as any,
+          value: "6374484558",
+        }),
+      );
+    }
+  }, [
+    dispatch,
+    (farm as any).technicianName,
+    (farm as any).technicianMobileNumber,
+  ]);
+
+  useEffect(() => {
+    if (farm.latitude && farm.longitude) return;
+
     let cancelled = false;
 
     const fetchCoords = async () => {
       setLocationFetching(true);
+
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
+
         if (status !== "granted") {
           Alert.alert(
-            "Location Permission",
-            "Location access is needed to auto-fill farm coordinates.",
+            tr("registration.locationPermission", "Location Permission"),
+            tr(
+              "registration.locationPermissionDesc",
+              "Location access is needed to auto-fill farm coordinates.",
+            ),
           );
           return;
         }
+
         const pos = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.High,
         });
+
         if (cancelled) return;
+
         dispatch(
           setFarmField({
             key: "latitude",
             value: String(pos.coords.latitude),
           }),
         );
+
         dispatch(
           setFarmField({
             key: "longitude",
@@ -242,7 +410,13 @@ export default function FarmDetailsScreen() {
         );
       } catch {
         if (!cancelled) {
-          Alert.alert("Location Error", "Could not fetch device coordinates.");
+          Alert.alert(
+            tr("registration.locationError", "Location Error"),
+            tr(
+              "registration.locationErrorDesc",
+              "Could not fetch device coordinates.",
+            ),
+          );
         }
       } finally {
         if (!cancelled) setLocationFetching(false);
@@ -250,21 +424,34 @@ export default function FarmDetailsScreen() {
     };
 
     fetchCoords();
+
     return () => {
       cancelled = true;
     };
-  }, [dispatch]);
+  }, [dispatch, farm.latitude, farm.longitude]);
 
   useEffect(() => {
     dispatch(fetchCountries());
   }, [dispatch]);
 
   const currentPickerTitle = useMemo(() => {
-    if (pickerType === "country") return t("registration.selectCountry");
-    if (pickerType === "state") return t("registration.selectState");
-    if (pickerType === "district") return t("registration.selectDistrict");
-    if (pickerType === "location") return t("registration.selectLocation");
-    return t("registration.select") || "Select";
+    if (pickerType === "country") {
+      return tr("registration.selectCountry", "Select Country");
+    }
+
+    if (pickerType === "state") {
+      return tr("registration.selectState", "Select State");
+    }
+
+    if (pickerType === "district") {
+      return tr("registration.selectDistrict", "Select District");
+    }
+
+    if (pickerType === "location") {
+      return tr("registration.selectLocation", "Select Location");
+    }
+
+    return tr("registration.select", "Select");
   }, [pickerType, t]);
 
   const currentPickerItems = useMemo(() => {
@@ -272,8 +459,36 @@ export default function FarmDetailsScreen() {
     if (pickerType === "state") return states;
     if (pickerType === "district") return districts;
     if (pickerType === "location") return locations;
+
     return [];
   }, [pickerType, countries, states, districts, locations]);
+
+  const openDobModal = () => {
+    const existing = parseYmd(String((farmer as any).dateOfBirth ?? ""));
+
+    if (existing) {
+      setDobYear(existing.year);
+      setDobMonth(existing.month);
+      setDobDay(existing.day);
+    } else {
+      setDobYear(currentYear - 25);
+      setDobMonth(1);
+      setDobDay(1);
+    }
+
+    setDobModalVisible(true);
+  };
+
+  const saveDob = () => {
+    dispatch(
+      setFarmerField({
+        key: "dateOfBirth" as any,
+        value: toYmd(dobYear, dobMonth, dobDay),
+      }),
+    );
+
+    setDobModalVisible(false);
+  };
 
   const handleCountrySelect = async (item: any) => {
     const id = String(extractId(item));
@@ -347,24 +562,32 @@ export default function FarmDetailsScreen() {
       handleCountrySelect(item);
       return;
     }
+
     if (pickerType === "state") {
       handleStateSelect(item);
       return;
     }
+
     if (pickerType === "district") {
       handleDistrictSelect(item);
       return;
     }
+
     if (pickerType === "location") {
       handleLocationSelect(item);
     }
   };
 
   const handleNext = () => {
-    const farmerName = farmer.farmerName.trim();
-    const mobile = farmer.mobileNumber.trim();
-    const email = (farmer.email ?? "").trim();
-    const aadhaar = (farmer.aadhaarNumber ?? "").trim();
+    const farmerName = String(farmer.farmerName ?? "").trim();
+    const mobile = String(farmer.mobileNumber ?? "").trim();
+    const email = String(farmer.email ?? "").trim();
+    const aadhaar = String(farmer.aadhaarNumber ?? "").trim();
+
+    const fatherName = String((farmer as any).fatherName ?? "").trim();
+    const dob = String((farmer as any).dateOfBirth ?? "").trim();
+    const farmerLicense = String((farmer as any).farmerLicense ?? "").trim();
+    const farmerAddress = String((farmer as any).farmerAddress ?? "").trim();
 
     if (!farmerName) {
       Alert.alert("Validation", "Please enter farmer name");
@@ -386,6 +609,34 @@ export default function FarmDetailsScreen() {
 
     if (!MOBILE_REGEX.test(mobile)) {
       Alert.alert("Validation", "Mobile number must be exactly 10 digits");
+      return;
+    }
+
+    if (!fatherName) {
+      Alert.alert("Validation", "Please enter father name");
+      return;
+    }
+
+    if (!ALPHA_SPACE_REGEX.test(fatherName)) {
+      Alert.alert(
+        "Validation",
+        "Father name should contain only letters and spaces",
+      );
+      return;
+    }
+
+    if (!dob) {
+      Alert.alert("Validation", "Please select date of birth");
+      return;
+    }
+
+    if (!farmerLicense) {
+      Alert.alert("Validation", "Please enter farmer license");
+      return;
+    }
+
+    if (!farmerAddress) {
+      Alert.alert("Validation", "Please enter farmer address");
       return;
     }
 
@@ -411,6 +662,26 @@ export default function FarmDetailsScreen() {
 
     if (!farm.farmAddress.trim()) {
       Alert.alert("Validation", "Please enter farm address");
+      return;
+    }
+
+    if (!String((farm as any).technicianName ?? "").trim()) {
+      Alert.alert("Validation", "Please enter technician name");
+      return;
+    }
+
+    if (!String((farm as any).technicianMobileNumber ?? "").trim()) {
+      Alert.alert("Validation", "Please enter technician mobile number");
+      return;
+    }
+
+    if (
+      !MOBILE_REGEX.test(String((farm as any).technicianMobileNumber ?? ""))
+    ) {
+      Alert.alert(
+        "Validation",
+        "Technician mobile number must be exactly 10 digits",
+      );
       return;
     }
 
@@ -486,35 +757,42 @@ export default function FarmDetailsScreen() {
           paddingBottom: 32,
         }}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        {/* ── Header ── */}
         <View className="rounded-2xl border border-slate-900 bg-slate-900 p-5 dark:border-white/10 dark:bg-[#0B1220]">
           <View className="flex-row items-center gap-3">
             <View className="h-10 w-10 items-center justify-center rounded-2xl bg-white/10">
               <Ionicons name="business-outline" size={20} color="#60A5FA" />
             </View>
+
             <View className="flex-1">
               <Text className="text-[11px] uppercase tracking-wide text-white opacity-80">
-                {t("registration.farmRegistrationHeader")}
+                {tr("registration.farmRegistrationHeader", "Farm Registration")}
               </Text>
+
               <Text className="mt-1 text-lg font-bold text-white">
-                {t("registration.farmRegistrationSubheader")}
+                {tr(
+                  "registration.farmRegistrationSubheader",
+                  "Farmer, farm and pond details",
+                )}
               </Text>
             </View>
           </View>
         </View>
 
-        {/* ── Farmer Details ── */}
         <View className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#0B1220]">
           <Text className="text-base font-semibold text-slate-900 dark:text-white">
-            {t("registration.farmerSection")}
+            {tr("registration.farmerSection", "Farmer Profile")}
           </Text>
 
           <View className="mt-4 gap-4">
             <View className="flex-row gap-3">
               <Field
-                label={t("registration.farmerName")}
-                placeholder={t("registration.farmerNamePlaceholder")}
+                label={tr("registration.farmerName", "Farmer Name")}
+                placeholder={tr(
+                  "registration.farmerNamePlaceholder",
+                  "Enter farmer name",
+                )}
                 value={farmer.farmerName}
                 onChangeText={(text) =>
                   dispatch(
@@ -525,9 +803,13 @@ export default function FarmDetailsScreen() {
                   )
                 }
               />
+
               <Field
-                label={t("registration.mobileNumber")}
-                placeholder={t("registration.mobileNumberPlaceholder")}
+                label={tr("registration.contactNumber", "Contact Number")}
+                placeholder={tr(
+                  "registration.mobileNumberPlaceholder",
+                  "Enter 10 digit mobile",
+                )}
                 value={farmer.mobileNumber}
                 onChangeText={(text) =>
                   dispatch(
@@ -543,17 +825,116 @@ export default function FarmDetailsScreen() {
 
             <View className="flex-row gap-3">
               <Field
-                label={t("registration.email")}
-                placeholder={t("registration.emailPlaceholder")}
+                label={tr("registration.fatherName", "Father Name")}
+                placeholder={tr(
+                  "registration.fatherNamePlaceholder",
+                  "Enter father name",
+                )}
+                value={(farmer as any).fatherName ?? ""}
+                onChangeText={(text) =>
+                  dispatch(
+                    setFarmerField({
+                      key: "fatherName" as any,
+                      value: sanitizeAlphaText(text),
+                    }),
+                  )
+                }
+              />
+
+              <DateSelectField
+                label={tr("registration.dateOfBirth", "Date of Birth")}
+                placeholder={tr("registration.selectDate", "Select date")}
+                value={formatDobForUi(
+                  String((farmer as any).dateOfBirth ?? ""),
+                )}
+                onPress={openDobModal}
+              />
+            </View>
+
+            <Field
+              label={tr("registration.farmerLicense", "Farmer License")}
+              placeholder={tr(
+                "registration.farmerLicensePlaceholder",
+                "Enter farmer license number",
+              )}
+              value={(farmer as any).farmerLicense ?? ""}
+              onChangeText={(text) =>
+                dispatch(
+                  setFarmerField({
+                    key: "farmerLicense" as any,
+                    value: text,
+                  }),
+                )
+              }
+            />
+
+            <Field
+              label={tr("registration.farmerAddress", "Farmer Address")}
+              placeholder={tr(
+                "registration.farmerAddressPlaceholder",
+                "Enter farmer address",
+              )}
+              value={(farmer as any).farmerAddress ?? ""}
+              onChangeText={(text) =>
+                dispatch(
+                  setFarmerField({
+                    key: "farmerAddress" as any,
+                    value: text,
+                  }),
+                )
+              }
+              multiline
+            />
+
+            <View className="flex-row gap-3">
+              <Field
+                label={tr("registration.experienceYears", "Years")}
+                placeholder="0"
+                value={(farmer as any).farmingExperienceYears ?? ""}
+                onChangeText={(text) =>
+                  dispatch(
+                    setFarmerField({
+                      key: "farmingExperienceYears" as any,
+                      value: text.replace(/\D/g, ""),
+                    }),
+                  )
+                }
+                keyboardType="numeric"
+              />
+
+              <Field
+                label={tr("registration.experienceMonths", "Months")}
+                placeholder="0"
+                value={(farmer as any).farmingExperienceMonths ?? ""}
+                onChangeText={(text) =>
+                  dispatch(
+                    setFarmerField({
+                      key: "farmingExperienceMonths" as any,
+                      value: text.replace(/\D/g, "").slice(0, 2),
+                    }),
+                  )
+                }
+                keyboardType="numeric"
+              />
+            </View>
+
+            <View className="flex-row gap-3">
+              <Field
+                label={tr("registration.email", "Email")}
+                placeholder={tr("registration.emailPlaceholder", "Enter email")}
                 value={farmer.email ?? ""}
                 onChangeText={(text) =>
                   dispatch(setFarmerField({ key: "email", value: text }))
                 }
                 keyboardType="email-address"
               />
+
               <Field
-                label={t("registration.aadhaarNumber")}
-                placeholder={t("registration.aadhaarPlaceholder")}
+                label={tr("registration.aadhaarNumber", "Aadhaar Number")}
+                placeholder={tr(
+                  "registration.aadhaarPlaceholder",
+                  "Enter 12 digit Aadhaar",
+                )}
                 value={farmer.aadhaarNumber ?? ""}
                 onChangeText={(text) =>
                   dispatch(
@@ -569,27 +950,30 @@ export default function FarmDetailsScreen() {
           </View>
         </View>
 
-        {/* ── Farm Details ── */}
         <View className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#0B1220]">
           <Text className="text-base font-semibold text-slate-900 dark:text-white">
-            {t("registration.farmSection")}
+            {tr("registration.farmSection", "Farm Details")}
           </Text>
 
           <View className="mt-4 gap-4">
-            {/* Farm Name */}
             <Field
-              label={t("registration.farmName")}
-              placeholder={t("registration.farmNamePlaceholder")}
+              label={tr("registration.farmName", "Farm Name")}
+              placeholder={tr(
+                "registration.farmNamePlaceholder",
+                "Example: RootVerse Aquaculture Farms",
+              )}
               value={farm.farmName}
               onChangeText={(text) =>
                 dispatch(setFarmField({ key: "farmName", value: text }))
               }
             />
 
-            {/* Farm Address */}
             <Field
-              label={t("registration.farmAddress")}
-              placeholder={t("registration.farmAddressPlaceholder")}
+              label={tr("registration.farmAddress", "Address")}
+              placeholder={tr(
+                "registration.farmAddressPlaceholder",
+                "Enter full farm address",
+              )}
               value={farm.farmAddress}
               onChangeText={(text) =>
                 dispatch(setFarmField({ key: "farmAddress", value: text }))
@@ -597,86 +981,149 @@ export default function FarmDetailsScreen() {
               multiline
             />
 
-            {/* Country | State — side by side */}
+            <View className="rounded-2xl border border-blue-100 bg-blue-50 p-4 dark:border-blue-500/20 dark:bg-blue-500/10">
+              <Text className="mb-3 text-base font-semibold text-blue-900 dark:text-blue-200">
+                {tr("registration.technician", "Technician")}
+              </Text>
+
+              <View className="flex-row gap-3">
+                <Field
+                  label={tr(
+                    "registration.technicianName",
+                    "Technician Name",
+                  )}
+                  placeholder={tr(
+                    "registration.technicianNamePlaceholder",
+                    "Example: Sriram D",
+                  )}
+                  value={(farm as any).technicianName ?? "Sriram D"}
+                  onChangeText={(text) =>
+                    dispatch(
+                      setFarmField({
+                        key: "technicianName" as any,
+                        value: text,
+                      }),
+                    )
+                  }
+                />
+
+                <Field
+                  label={tr(
+                    "registration.technicianMobileNumber",
+                    "Technician Mobile Number",
+                  )}
+                  placeholder={tr(
+                    "registration.technicianMobilePlaceholder",
+                    "Example: 6374484558",
+                  )}
+                  value={
+                    (farm as any).technicianMobileNumber ?? "6374484558"
+                  }
+                  onChangeText={(text) =>
+                    dispatch(
+                      setFarmField({
+                        key: "technicianMobileNumber" as any,
+                        value: text.replace(/\D/g, "").slice(0, 10),
+                      }),
+                    )
+                  }
+                  keyboardType="phone-pad"
+                />
+              </View>
+            </View>
+
             <View className="flex-row gap-3">
               <SelectField
-                label={t("registration.country")}
+                label={tr("registration.country", "Country")}
                 value={farm.countryName}
                 placeholder={
                   countriesLoading
-                    ? t("registration.loading")
-                    : t("registration.selectCountry")
+                    ? tr("registration.loading", "Loading...")
+                    : tr("registration.selectCountry", "Select Country")
                 }
                 onPress={() => setPickerType("country")}
                 disabled={countriesLoading}
               />
+
               <SelectField
-                label={t("registration.state")}
+                label={tr("registration.state", "State")}
                 value={farm.stateName}
                 placeholder={
                   statesLoading
-                    ? t("registration.loading")
-                    : t("registration.selectState")
+                    ? tr("registration.loading", "Loading...")
+                    : tr("registration.selectState", "Select State")
                 }
                 onPress={() => setPickerType("state")}
                 disabled={!farm.countryId || statesLoading}
                 helperText={
                   !farm.countryId
-                    ? t("registration.selectCountryFirst")
+                    ? tr(
+                        "registration.selectCountryFirst",
+                        "Select country first",
+                      )
                     : undefined
                 }
               />
             </View>
 
-            {/* District | Location — side by side */}
             <View className="flex-row gap-3">
               <SelectField
-                label={t("registration.district")}
+                label={tr("registration.district", "District")}
                 value={farm.district}
                 placeholder={
                   districtsLoading
-                    ? t("registration.loading")
-                    : t("registration.selectDistrict")
+                    ? tr("registration.loading", "Loading...")
+                    : tr("registration.selectDistrict", "Select District")
                 }
                 onPress={() => setPickerType("district")}
                 disabled={!farm.stateId || districtsLoading}
                 helperText={
-                  !farm.stateId ? t("registration.selectStateFirst") : undefined
+                  !farm.stateId
+                    ? tr("registration.selectStateFirst", "Select state first")
+                    : undefined
                 }
               />
+
               <SelectField
-                label={t("registration.location")}
+                label={tr("registration.location", "Location")}
                 value={farm.locationName}
                 placeholder={
                   locationsLoading
-                    ? t("registration.loading")
-                    : t("registration.selectLocation")
+                    ? tr("registration.loading", "Loading...")
+                    : tr("registration.selectLocation", "Select Location")
                 }
                 onPress={() => setPickerType("location")}
                 disabled={!farm.districtId || locationsLoading}
                 helperText={
                   !farm.districtId
-                    ? t("registration.selectDistrictFirst")
+                    ? tr(
+                        "registration.selectDistrictFirst",
+                        "Select district first",
+                      )
                     : undefined
                 }
               />
             </View>
 
-            {/* Water Source — full width */}
             <Field
-              label={t("registration.waterSource")}
-              placeholder={t("registration.waterSourcePlaceholder")}
+              label={tr("registration.waterSource", "Water Source")}
+              placeholder={tr(
+                "registration.waterSourcePlaceholder",
+                "Example: Fresh Water / Vellayar",
+              )}
               value={farm.waterSource}
               onChangeText={(text) =>
                 dispatch(setFarmField({ key: "waterSource", value: text }))
               }
             />
 
-            {/* Pond Count | Total Farm Area — side by side */}
             <View className="flex-row gap-3">
               <Field
-                label={t("registration.pondCount")}
-                placeholder={t("registration.pondCountPlaceholder")}
+                label={tr("registration.pondCount", "Pond Count")}
+                placeholder={tr(
+                  "registration.pondCountPlaceholder",
+                  "Example: 2",
+                )}
                 value={farm.pondCount}
                 onChangeText={(text) =>
                   dispatch(
@@ -688,9 +1135,13 @@ export default function FarmDetailsScreen() {
                 }
                 keyboardType="numeric"
               />
+
               <Field
-                label={t("registration.farmArea")}
-                placeholder={t("registration.farmAreaPlaceholder")}
+                label={tr("registration.farmArea", "Farm Area")}
+                placeholder={tr(
+                  "registration.farmAreaPlaceholder",
+                  "Example: 4.2",
+                )}
                 value={farm.farmArea}
                 onChangeText={(text) =>
                   dispatch(setFarmField({ key: "farmArea", value: text }))
@@ -699,43 +1150,48 @@ export default function FarmDetailsScreen() {
               />
             </View>
 
-            {/* Lat / Long — auto-fetched, read-only */}
             <View className="flex-row gap-3">
               <Field
-                label={t("registration.latitude")}
+                label={tr("registration.latitude", "Latitude")}
                 placeholder={
                   locationFetching
-                    ? t("registration.coordsFetching")
-                    : t("registration.autoDetected")
+                    ? tr("registration.coordsFetching", "Fetching...")
+                    : tr("registration.autoDetected", "Auto detected")
                 }
                 value={farm.latitude}
                 editable={false}
               />
+
               <Field
-                label={t("registration.longitude")}
+                label={tr("registration.longitude", "Longitude")}
                 placeholder={
                   locationFetching
-                    ? t("registration.coordsFetching")
-                    : t("registration.autoDetected")
+                    ? tr("registration.coordsFetching", "Fetching...")
+                    : tr("registration.autoDetected", "Auto detected")
                 }
                 value={farm.longitude}
                 editable={false}
               />
             </View>
 
-            {/* Coordinates info banner */}
             {locationFetching ? (
               <View className="flex-row items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-500/20 dark:bg-blue-500/10">
                 <Ionicons name="locate-outline" size={16} color="#2563EB" />
                 <Text className="flex-1 text-xs text-blue-700 dark:text-blue-300">
-                  {t("registration.gpsDetecting")}
+                  {tr(
+                    "registration.gpsDetecting",
+                    "Detecting GPS location...",
+                  )}
                 </Text>
               </View>
             ) : !farm.latitude || !farm.longitude ? (
               <View className="flex-row items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">
                 <Ionicons name="location-outline" size={16} color="#D97706" />
                 <Text className="flex-1 text-xs text-amber-700 dark:text-amber-300">
-                  {t("registration.gpsNoCoords")}
+                  {tr(
+                    "registration.gpsNoCoords",
+                    "GPS coordinates are not available yet.",
+                  )}
                 </Text>
               </View>
             ) : (
@@ -746,39 +1202,45 @@ export default function FarmDetailsScreen() {
                   color="#059669"
                 />
                 <Text className="flex-1 text-xs text-emerald-700 dark:text-emerald-300">
-                  {t("registration.gpsSuccess")}
+                  {tr(
+                    "registration.gpsSuccess",
+                    "GPS captured successfully.",
+                  )}
                 </Text>
               </View>
             )}
           </View>
         </View>
 
-        {/* ── QR Activation Notice ── */}
         <View className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/20 dark:bg-amber-500/10">
           <View className="flex-row items-start gap-3">
             <View className="h-10 w-10 items-center justify-center rounded-2xl bg-amber-100 dark:bg-amber-500/20">
               <Ionicons name="qr-code-outline" size={20} color="#D97706" />
             </View>
+
             <View className="flex-1">
               <Text className="text-base font-semibold text-amber-800 dark:text-amber-300">
-                Farm Gate Image Not Required Now
+                {tr(
+                  "registration.farmIdPrePrintedQr",
+                  "Farm ID: Pre-printed QR Linking",
+                )}
               </Text>
+
               <Text className="mt-2 text-sm leading-6 text-amber-700 dark:text-amber-200/80">
-                Farm Gate image must be captured only after field verification
-                and Farm QR activation. At this stage, submit farm details only.
-                The pre-printed QR value will become the official Farm ID after
-                scanning.
+                {tr(
+                  "registration.farmIdPrePrintedQrDesc",
+                  "Do not enter Farm ID manually. The official Farm ID will be activated later by scanning the pre-printed Farm Gate QR.",
+                )}
               </Text>
             </View>
           </View>
         </View>
 
-        {/* ── Footer Nav ── */}
         <View className="mt-5 flex-row gap-3">
           <View className="flex-1">
             <View className="rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-white/10 dark:bg-[#0B1220]">
               <Text className="text-center text-slate-500 dark:text-white/60">
-                {t("registration.step1of2")}
+                {tr("registration.step1of2", "Step 1 of 2")}
               </Text>
             </View>
           </View>
@@ -789,14 +1251,128 @@ export default function FarmDetailsScreen() {
               className="rounded-2xl bg-slate-900 px-4 py-3 dark:bg-white"
             >
               <Text className="text-center font-semibold text-white dark:text-slate-900">
-                {t("registration.next")}
+                {tr("registration.next", "Next")}
               </Text>
             </Pressable>
           </View>
         </View>
       </ScrollView>
 
-      {/* ── Location Picker Modal ── */}
+      <Modal
+        visible={dobModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDobModalVisible(false)}
+      >
+        <View className="flex-1 justify-end bg-black/40">
+          <View className="rounded-t-3xl bg-white p-5 dark:bg-[#0B1220]">
+            <View className="mb-4 flex-row items-center justify-between">
+              <Text className="text-lg font-bold text-slate-900 dark:text-white">
+                {tr(
+                  "registration.selectDateOfBirth",
+                  "Select Date of Birth",
+                )}
+              </Text>
+
+              <Pressable
+                onPress={() => setDobModalVisible(false)}
+                className="h-9 w-9 items-center justify-center rounded-full bg-slate-100 dark:bg-white/10"
+              >
+                <Ionicons name="close" size={20} color="#64748B" />
+              </Pressable>
+            </View>
+
+            <View className="mb-4 rounded-2xl border border-blue-100 bg-blue-50 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
+              <Text className="text-center text-sm font-bold text-blue-700 dark:text-blue-200">
+                {`${pad2(dobDay)}-${pad2(dobMonth)}-${dobYear}`}
+              </Text>
+            </View>
+
+            <View className="flex-row gap-3">
+              <View className="flex-1">
+                <Text className="mb-2 text-center text-sm font-bold text-slate-700 dark:text-white/80">
+                  {tr("registration.year", "Year")}
+                </Text>
+
+                <ScrollView
+                  style={{ maxHeight: 220 }}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {yearOptions.map((year) => (
+                    <DateOption
+                      key={year}
+                      label={String(year)}
+                      active={dobYear === year}
+                      onPress={() => setDobYear(year)}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
+
+              <View className="flex-1">
+                <Text className="mb-2 text-center text-sm font-bold text-slate-700 dark:text-white/80">
+                  {tr("registration.month", "Month")}
+                </Text>
+
+                <ScrollView
+                  style={{ maxHeight: 220 }}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {monthOptions.map((month) => (
+                    <DateOption
+                      key={month}
+                      label={pad2(month)}
+                      active={dobMonth === month}
+                      onPress={() => setDobMonth(month)}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
+
+              <View className="flex-1">
+                <Text className="mb-2 text-center text-sm font-bold text-slate-700 dark:text-white/80">
+                  {tr("registration.day", "Day")}
+                </Text>
+
+                <ScrollView
+                  style={{ maxHeight: 220 }}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {dayOptions.map((day) => (
+                    <DateOption
+                      key={day}
+                      label={pad2(day)}
+                      active={dobDay === day}
+                      onPress={() => setDobDay(day)}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+
+            <View className="mt-5 flex-row gap-3">
+              <Pressable
+                onPress={() => setDobModalVisible(false)}
+                className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 dark:border-white/10 dark:bg-white/5"
+              >
+                <Text className="text-center text-base font-bold text-slate-700 dark:text-white">
+                  {tr("common.cancel", "Cancel")}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={saveDob}
+                className="flex-1 rounded-2xl bg-blue-600 py-3"
+              >
+                <Text className="text-center text-base font-bold text-white">
+                  {tr("common.save", "Save")}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal
         visible={pickerType !== null}
         animationType="slide"
@@ -809,6 +1385,7 @@ export default function FarmDetailsScreen() {
               <Text className="text-base font-semibold text-slate-900 dark:text-white">
                 {currentPickerTitle}
               </Text>
+
               <Pressable
                 onPress={() => setPickerType(null)}
                 className="h-10 w-10 items-center justify-center rounded-full bg-slate-100 dark:bg-white/10"
@@ -838,7 +1415,7 @@ export default function FarmDetailsScreen() {
               ) : (
                 <View className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/5">
                   <Text className="text-sm text-slate-600 dark:text-white/60">
-                    {t("registration.noOptions")}
+                    {tr("registration.noOptions", "No options found")}
                   </Text>
                 </View>
               )}

@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
@@ -43,6 +44,18 @@ function toNumber(value: any, fallback = 0) {
   const num = Number(value);
 
   if (!Number.isFinite(num)) return fallback;
+
+  return num;
+}
+
+function toNullableNumber(value: any) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+
+  const num = Number(value);
+
+  if (!Number.isFinite(num)) return null;
 
   return num;
 }
@@ -168,6 +181,7 @@ export default function AquaReviewSubmitScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const dispatch = useDispatch<AppDispatch>();
+  const { t } = useTranslation();
 
   const registration = useSelector(selectAquaRegistration);
   const { farmer, farm, ponds, submission } = registration;
@@ -328,8 +342,18 @@ export default function AquaReviewSubmitScreen() {
         return false;
       }
 
+      if (!String((pond as any).pondType ?? "").trim()) {
+        Alert.alert("Validation", `Pond ${i + 1} type is required`);
+        return false;
+      }
+
       if (!pond.pondArea?.trim()) {
         Alert.alert("Validation", `Pond ${i + 1} area is required`);
+        return false;
+      }
+
+      if (!String((pond as any).volume ?? "").trim()) {
+        Alert.alert("Validation", `Pond ${i + 1} volume is required`);
         return false;
       }
 
@@ -392,9 +416,9 @@ export default function AquaReviewSubmitScreen() {
         const pondPayload = {
           farm_id: Number(createdFarmDbId),
           pond_name: pond.pondName.trim(),
-          pond_type: "Earthen",
+          pond_type: String((pond as any).pondType || "Earthen"),
           water_spread_area_acres: toNumber(pond.pondArea),
-          volume: null,
+          volume: toNullableNumber((pond as any).volume),
           pond_status: "Inactive",
           verification_status: "Unverified",
           pond_gps: buildPondGps(pondLat, pondLng),
@@ -461,11 +485,11 @@ export default function AquaReviewSubmitScreen() {
 
           <View className="flex-1">
             <Text className="text-[11px] uppercase tracking-wide text-white opacity-80">
-              Aquaculture Registration
+              {t("registration.farmRegistry")}
             </Text>
 
             <Text className="mt-1 text-lg font-bold text-white">
-              Review Farm & Pond Details
+              {t("registration.reviewSubmit")}
             </Text>
           </View>
         </View>
@@ -473,103 +497,125 @@ export default function AquaReviewSubmitScreen() {
 
       <View className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/20 dark:bg-amber-500/10">
         <Text className="text-base font-bold text-amber-800 dark:text-amber-300">
-          PDF Requirement Flow
+          {t("registration.pendingFieldVerification")}
         </Text>
 
         <Text className="mt-2 text-sm leading-6 text-amber-700 dark:text-amber-200/80">
-          • Farm and ponds are submitted together{"\n"}
-          • No official Farm ID is generated now{"\n"}
-          • No official Pond ID is generated now{"\n"}
-          • Status becomes Pending Field Verification{"\n"}
-          • QR activation creates official Farm ID and Pond ID later
+          {t("registration.registrationReviewRule")}
         </Text>
       </View>
 
       <View className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#0B1220]">
         <Text className="mb-3 text-base font-semibold text-slate-900 dark:text-white">
-          Farmer Details
+          {t("registration.farmerProfile")}
         </Text>
 
         <View className="rounded-2xl border border-slate-100 bg-slate-50 px-3 dark:border-white/5 dark:bg-white/5">
-          <InfoRow label="User ID" value={loadingUserId ? "Loading..." : loggedUserId || "Not found"} />
+          <InfoRow label={t("registration.farmerName")} value={farmer.farmerName} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="Farmer Name" value={farmer.farmerName} />
+          <InfoRow label={t("registration.fatherName")} value={String((farmer as any).fatherName ?? "")} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="Mobile Number" value={farmer.mobileNumber} />
+          <InfoRow label={t("registration.dateOfBirth")} value={String((farmer as any).dateOfBirth ?? "")} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="Email" value={farmer.email ?? ""} />
+          <InfoRow label={t("registration.farmerLicense")} value={String((farmer as any).farmerLicense ?? "")} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="Aadhaar Number" value={farmer.aadhaarNumber ?? ""} />
+          <InfoRow label={t("registration.contactNumber")} value={farmer.mobileNumber} />
+          <View className="h-px bg-slate-100 dark:bg-white/5" />
+
+          <InfoRow label={t("registration.farmerAddress")} value={String((farmer as any).farmerAddress ?? "")} />
+          <View className="h-px bg-slate-100 dark:bg-white/5" />
+
+          <InfoRow
+            label={t("registration.farmingExperience")}
+            value={`${String((farmer as any).farmingExperienceYears ?? "0")} ${t("registration.experienceYears")} ${String((farmer as any).farmingExperienceMonths ?? "0")} ${t("registration.experienceMonths")}`}
+          />
         </View>
       </View>
 
       <View className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#0B1220]">
         <Text className="mb-3 text-base font-semibold text-slate-900 dark:text-white">
-          Farm Details
+          {t("registration.farmSection")}
         </Text>
 
         <View className="rounded-2xl border border-slate-100 bg-slate-50 px-3 dark:border-white/5 dark:bg-white/5">
-          <InfoRow label="Farm Prefix" value={farmPrefix} />
+          <InfoRow label={t("registration.officialFarmIdPendingLabel")} value={t("registration.officialFarmIdPending")} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="Farm Name" value={farm.farmName} />
+          <InfoRow label={t("registration.farmName")} value={farm.farmName} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="Farm Address" value={farm.farmAddress} />
+          <InfoRow label={t("registration.farmAddress")} value={farm.farmAddress} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="Country" value={farm.countryName} />
+          <InfoRow label={t("registration.country")} value={farm.countryName} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="State" value={farm.stateName} />
+          <InfoRow label={t("registration.state")} value={farm.stateName} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="District" value={farm.district} />
+          <InfoRow label={t("registration.district")} value={farm.district} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="Location" value={farm.locationName} />
+          <InfoRow label={t("registration.location")} value={farm.locationName} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="Water Source" value={farm.waterSource} />
+          <InfoRow label={t("registration.waterSource")} value={farm.waterSource} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="Farm Area Acres" value={farm.farmArea} />
+          <InfoRow label={t("registration.farmArea")} value={`${farm.farmArea} Acres`} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="Latitude" value={farm.latitude} />
+          <InfoRow label={t("registration.farmGateGps")} value={`https://maps.google.com/?q=${farm.latitude},${farm.longitude}`} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label="Longitude" value={farm.longitude} />
+          <InfoRow label={t("registration.technicianName")} value={String((farm as any).technicianName ?? "Sriram D")} />
+          <View className="h-px bg-slate-100 dark:bg-white/5" />
+
+          <InfoRow label={t("registration.technicianMobileNumber")} value={String((farm as any).technicianMobileNumber ?? "6374484558")} />
         </View>
       </View>
 
       <View className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#0B1220]">
         <Text className="mb-3 text-base font-semibold text-slate-900 dark:text-white">
-          Pond Details
+          {t("registration.pondDetails")}
         </Text>
 
         <View className="gap-3">
-          {finalPonds.map((pond, index) => (
-            <View
-              key={pond.id || `pond-${index + 1}`}
-              className="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 dark:border-white/5 dark:bg-white/5"
-            >
-              <InfoRow label="Pond Name" value={pond.pondName} />
-              <View className="h-px bg-slate-100 dark:bg-white/5" />
+          {finalPonds.map((pond, index) => {
+            const pondLat = pond.gpsLat || farm.latitude;
+            const pondLng = pond.gpsLng || farm.longitude;
 
-              <InfoRow label="Pond Area Acres" value={pond.pondArea} />
-              <View className="h-px bg-slate-100 dark:bg-white/5" />
+            return (
+              <View
+                key={pond.id || `pond-${index + 1}`}
+                className="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 dark:border-white/5 dark:bg-white/5"
+              >
+                <InfoRow label={t("registration.pondIdQrLinking")} value={t("registration.officialPondIdPending")} />
+                <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-              <InfoRow label="Species" value={pond.speciesName} />
-              <View className="h-px bg-slate-100 dark:bg-white/5" />
+                <InfoRow label={t("registration.pondName")} value={pond.pondName} />
+                <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-              <InfoRow label="Official Pond ID" value="Not activated yet" />
-            </View>
-          ))}
+                <InfoRow label={t("registration.pondType")} value={String((pond as any).pondType || "Earthen")} />
+                <View className="h-px bg-slate-100 dark:bg-white/5" />
+
+                <InfoRow label={t("registration.waterSpreadAreaAcres")} value={`${pond.pondArea} Acres`} />
+                <View className="h-px bg-slate-100 dark:bg-white/5" />
+
+                <InfoRow label={t("registration.volumeCubicMeter")} value={`${String((pond as any).volume || "-")} m³`} />
+                <View className="h-px bg-slate-100 dark:bg-white/5" />
+
+                <InfoRow label={t("registration.species")} value={pond.speciesName} />
+                <View className="h-px bg-slate-100 dark:bg-white/5" />
+
+                <InfoRow label={t("registration.pondGpsMap")} value={buildPondGps(pondLat, pondLng)} />
+              </View>
+            );
+          })}
         </View>
       </View>
 

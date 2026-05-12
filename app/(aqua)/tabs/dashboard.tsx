@@ -28,11 +28,11 @@ import {
 } from "../../../src/features/aqua/approvals/approvals.selectors";
 import { clearMe } from "../../../src/store/auth/me.slice";
 import { toggleTheme } from "../../../src/store/theme.slice";
-import { setAppLanguage } from "../../../src/components/aqua/i18n/i18n";
 
 const SCREEN_W = Dimensions.get("window").width;
 const PANEL_W = SCREEN_W * 0.62;
 const TOKEN_KEY = "auth_token";
+const LANGUAGE_KEY = "app_language";
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -99,7 +99,6 @@ function toNumericUserId(value: any) {
     return String(Number(raw));
   }
 
-  // OWN-0085 => 85
   const digits = raw.replace(/\D/g, "");
 
   if (!digits) return "";
@@ -112,7 +111,14 @@ function normalizeList<T = any>(items: T[]) {
   const seen = new Set<string>();
 
   items.forEach((item: any, index) => {
-    const key = String(item?.id ?? item?.farm_id ?? item?.pond_id ?? index);
+    const key = String(
+      item?.id ??
+        item?.farm_id ??
+        item?.pond_id ??
+        item?.farm_code ??
+        item?.pond_code ??
+        index,
+    );
 
     if (seen.has(key)) return;
 
@@ -121,6 +127,105 @@ function normalizeList<T = any>(items: T[]) {
   });
 
   return unique;
+}
+
+function cleanStatus(value: any) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+}
+
+function isTruthyFlag(value: any) {
+  return value === true || value === 1 || value === "1" || value === "true";
+}
+
+function isFarmActivated(farm: any) {
+  const status = cleanStatus(
+    pickName(
+      farm?.qr_status,
+      farm?.farm_qr_status,
+      farm?.activation_status,
+      farm?.farm_status,
+      farm?.status,
+      farm?.verification_status,
+    ),
+  );
+
+  if (
+    ["active", "activated", "qr_activated", "linked", "verified"].includes(
+      status,
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    isTruthyFlag(farm?.is_active) ||
+    isTruthyFlag(farm?.is_activated) ||
+    isTruthyFlag(farm?.qr_activated) ||
+    isTruthyFlag(farm?.farm_qr_activated)
+  ) {
+    return true;
+  }
+
+  if (
+    pickName(
+      farm?.farm_qr_id,
+      farm?.farm_qr_code,
+      farm?.activated_qr_code,
+      farm?.qr_code,
+      farm?.qr_value,
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function isPondActivated(pond: any) {
+  const status = cleanStatus(
+    pickName(
+      pond?.qr_status,
+      pond?.pond_qr_status,
+      pond?.activation_status,
+      pond?.pond_status,
+      pond?.status,
+      pond?.verification_status,
+    ),
+  );
+
+  if (
+    ["active", "activated", "qr_activated", "linked", "verified"].includes(
+      status,
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    isTruthyFlag(pond?.is_active) ||
+    isTruthyFlag(pond?.is_activated) ||
+    isTruthyFlag(pond?.qr_activated) ||
+    isTruthyFlag(pond?.pond_qr_activated)
+  ) {
+    return true;
+  }
+
+  if (
+    pickName(
+      pond?.pond_qr_id,
+      pond?.pond_qr_code,
+      pond?.activated_qr_code,
+      pond?.qr_code,
+      pond?.qr_value,
+    )
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 async function getJson(path: string) {
@@ -158,11 +263,26 @@ export default function Dashboard() {
   const themeMode = useSelector((state: RootState) => state.theme.mode);
   const dark = themeMode === "DARK";
 
+  const tr = useCallback(
+    (key: string, defaultValue: string, options?: Record<string, any>) =>
+      t(key, { defaultValue, ...(options || {}) }),
+    [t],
+  );
+
+  const currentLanguage = String(i18n.resolvedLanguage || i18n.language || "en")
+    .split("-")[0]
+    .toLowerCase();
+
+  const handleLanguageChange = async (lang: "en" | "ta") => {
+    await AsyncStorage.setItem(LANGUAGE_KEY, lang);
+    await i18n.changeLanguage(lang);
+  };
+
   const numericOwnerId = toNumericUserId(
     pickId(
       (me as any)?.user_id,
       (me as any)?.id,
-      me?.owner_id,
+      (me as any)?.owner_id,
       (me as any)?.owner_code,
     ),
   );
@@ -191,7 +311,7 @@ export default function Dashboard() {
       const ownFarms = numericOwnerId
         ? farms.filter((farm) => {
             const farmUserId = toNumericUserId(
-              pickId(farm.user_id, farm.owner_id),
+              pickId(farm?.user_id, farm?.owner_id),
             );
 
             return !!farmUserId && sameId(farmUserId, numericOwnerId);
@@ -199,16 +319,16 @@ export default function Dashboard() {
         : farms;
 
       const ownFarmIds = new Set(
-        ownFarms.map((farm: any) => String(farm.id)).filter(Boolean),
+        ownFarms.map((farm: any) => String(farm?.id)).filter(Boolean),
       );
 
       const ownPonds = numericOwnerId
         ? ponds.filter((pond) => {
-            const pondUserId = toNumericUserId(pickId(pond.user_id));
+            const pondUserId = toNumericUserId(pickId(pond?.user_id));
 
             if (pondUserId && sameId(pondUserId, numericOwnerId)) return true;
 
-            if (pond.farm_id && ownFarmIds.has(String(pond.farm_id))) {
+            if (pond?.farm_id && ownFarmIds.has(String(pond.farm_id))) {
               return true;
             }
 
@@ -225,8 +345,7 @@ export default function Dashboard() {
             `/api/aquaculture/culture-cycles/user/${numericOwnerId}`,
           );
 
-          const cycles = extractArray<any>(cyclesRes);
-          setApiCultureCycles(cycles);
+          setApiCultureCycles(extractArray<any>(cyclesRes));
         } catch (error) {
           console.log("Culture cycle load failed:", error);
           setApiCultureCycles([]);
@@ -275,6 +394,21 @@ export default function Dashboard() {
     ]);
   }, [reduxApprovedPonds, reduxPendingPonds, apiPonds]);
 
+  const totalFarms = allRegisteredFarms.length;
+  const totalPonds = allRegisteredPonds.length;
+  const totalCultureCycles = apiCultureCycles.length;
+
+  const activatedFarms = useMemo(() => {
+    return allRegisteredFarms.filter(isFarmActivated).length;
+  }, [allRegisteredFarms]);
+
+  const activatedPonds = useMemo(() => {
+    return allRegisteredPonds.filter(isPondActivated).length;
+  }, [allRegisteredPonds]);
+
+  const pendingFarmActivation = Math.max(totalFarms - activatedFarms, 0);
+  const pendingPondActivation = Math.max(totalPonds - activatedPonds, 0);
+
   const firstRegisteredFarm = allRegisteredFarms[0] ?? null;
   const firstRegisteredPond = allRegisteredPonds[0] ?? null;
 
@@ -283,7 +417,7 @@ export default function Dashboard() {
 
     if (firstRegisteredPond?.id) {
       const pondCycle = apiCultureCycles.find((cycle) =>
-        sameId(cycle.pond_id, firstRegisteredPond.id),
+        sameId(cycle?.pond_id, firstRegisteredPond.id),
       );
 
       if (pondCycle) return pondCycle;
@@ -291,7 +425,7 @@ export default function Dashboard() {
 
     if (firstRegisteredFarm?.id) {
       const farmCycle = apiCultureCycles.find((cycle) =>
-        sameId(cycle.farm_id, firstRegisteredFarm.id),
+        sameId(cycle?.farm_id, firstRegisteredFarm.id),
       );
 
       if (farmCycle) return farmCycle;
@@ -300,26 +434,37 @@ export default function Dashboard() {
     return apiCultureCycles[0] ?? null;
   }, [apiCultureCycles, firstRegisteredFarm, firstRegisteredPond]);
 
-  const totalFarms = allRegisteredFarms.length;
-  const totalPonds = allRegisteredPonds.length;
-  const totalCultureCycles = apiCultureCycles.length;
-
   const canCreatePond = !!firstRegisteredFarm;
   const canCreateCultureCycle = !!firstRegisteredFarm && !!firstRegisteredPond;
-
   const canActivateFarmQr = !!firstRegisteredFarm && !!firstCultureCycle;
   const canActivatePondQr = !!firstRegisteredPond && !!firstCultureCycle;
+  const canAddStocking =
+    !!firstRegisteredPond && !!firstCultureCycle && activatedPonds > 0;
+
+  const farmNameForAction = pickName(
+    firstRegisteredFarm?.farm_name,
+    firstRegisteredFarm?.name,
+    tr("dashboard.registeredFarm", "registered farm"),
+  );
+
+  const pondNameForAction = pickName(
+    firstRegisteredPond?.pond_name,
+    firstRegisteredPond?.name,
+    tr("dashboard.registeredPond", "registered pond"),
+  );
 
   const initials = useMemo(() => {
-    if (!me?.username) return "U";
+    const username = String((me as any)?.username || "").trim();
 
-    return me.username
+    if (!username) return "U";
+
+    return username
       .split(" ")
       .map((n: string) => n[0])
       .join("")
       .toUpperCase()
       .slice(0, 2);
-  }, [me?.username]);
+  }, [me]);
 
   const [profileVisible, setProfileVisible] = useState(false);
   const panelAnim = useRef(new Animated.Value(PANEL_W)).current;
@@ -330,8 +475,6 @@ export default function Dashboard() {
         screenBg: "#050B16",
         cardBg: "#0B1220",
         cardBorder: "rgba(255,255,255,0.08)",
-        heroBg: "#0B1220",
-        heroBorder: "rgba(255,255,255,0.08)",
         text: "#FFFFFF",
         subText: "rgba(255,255,255,0.52)",
         iconBg: "rgba(255,255,255,0.08)",
@@ -357,8 +500,6 @@ export default function Dashboard() {
         screenBg: "#E8EEF6",
         cardBg: "#EEF3FF",
         cardBorder: "#C0CEEA",
-        heroBg: "#1E293B",
-        heroBorder: "#1E293B",
         text: "#0F172A",
         subText: "#5A6E8F",
         iconBg: "#D2E3F8",
@@ -473,7 +614,6 @@ export default function Dashboard() {
           firstRegisteredFarm.name,
           "Farm",
         ),
-
         pondDbId: String(firstRegisteredPond.id ?? ""),
         pondId: String(firstRegisteredPond.id ?? ""),
         pondName: pickName(
@@ -481,7 +621,6 @@ export default function Dashboard() {
           firstRegisteredPond.name,
           "Pond",
         ),
-
         userId: numericOwnerId,
       },
     } as any);
@@ -495,9 +634,7 @@ export default function Dashboard() {
       params: {
         purpose: "FARM_ACTIVATION",
         returnTo: "/(aqua)/registration/capture-farm-gate",
-
         cultureCycleId: String(firstCultureCycle.id ?? ""),
-
         farmDbId: String(firstRegisteredFarm.id ?? ""),
         farmId: String(firstRegisteredFarm.id ?? ""),
         farmName: pickName(
@@ -505,7 +642,6 @@ export default function Dashboard() {
           firstRegisteredFarm.name,
           "Farm",
         ),
-
         userId: numericOwnerId,
       },
     } as any);
@@ -525,9 +661,7 @@ export default function Dashboard() {
       params: {
         purpose: "POND_ACTIVATION",
         returnTo: "/(aqua)/registration/capture-pond-image",
-
         cultureCycleId: String(firstCultureCycle.id ?? ""),
-
         pondDbId: String(firstRegisteredPond.id ?? ""),
         pondId: String(firstRegisteredPond.id ?? ""),
         pondName: pickName(
@@ -535,11 +669,40 @@ export default function Dashboard() {
           firstRegisteredPond.name,
           "Pond",
         ),
-
         farmDbId: linkedFarmId,
         farmId: linkedFarmId,
+        userId: numericOwnerId,
+      },
+    } as any);
+  };
+
+  const goAddStocking = () => {
+    router.push({
+      pathname: "/(aqua)/tabs/qr-scanner",
+      params: {
+        purpose: "STOCKING_ENTRY",
+        returnTo: "/(aqua)/stocking/add",
+
+        cultureCycleId: String(firstCultureCycle?.id ?? ""),
+
+        pondDbId: String(firstRegisteredPond?.id ?? ""),
+        pondId: String(firstRegisteredPond?.id ?? ""),
+        pondName: pickName(
+          firstRegisteredPond?.pond_name,
+          firstRegisteredPond?.name,
+          "Pond",
+        ),
+
+        farmDbId: String(firstRegisteredFarm?.id ?? ""),
+        farmId: String(firstRegisteredFarm?.id ?? ""),
+        farmName: pickName(
+          firstRegisteredFarm?.farm_name,
+          firstRegisteredFarm?.name,
+          "Farm",
+        ),
 
         userId: numericOwnerId,
+        farmerId: numericOwnerId,
       },
     } as any);
   };
@@ -558,68 +721,42 @@ export default function Dashboard() {
     value,
     sub,
     icon,
-    onPress,
   }: {
     title: string;
-    value: string;
+    value: number;
     sub: string;
     icon: IconName;
-    onPress?: () => void;
   }) => {
-    const Wrap = onPress ? Pressable : View;
-
     return (
-      <Wrap
-        onPress={onPress}
+      <View
         style={{
           flex: 1,
           borderRadius: 16,
           borderWidth: 1,
           borderColor: C.cardBorder,
           backgroundColor: C.cardBg,
-          paddingHorizontal: 13,
-          paddingVertical: 12,
+          padding: 14,
+          minHeight: 116,
         }}
       >
         <View
           style={{
-            flexDirection: "row",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
+            height: 38,
+            width: 38,
+            borderRadius: 12,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: C.iconBg,
+            marginBottom: 10,
           }}
         >
-          <Text
-            style={{
-              fontSize: 10,
-              textTransform: "uppercase",
-              letterSpacing: 0.5,
-              color: C.subText,
-              flex: 1,
-              marginRight: 4,
-            }}
-          >
-            {title}
-          </Text>
-
-          <View
-            style={{
-              height: 32,
-              width: 32,
-              borderRadius: 10,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: C.iconBg,
-            }}
-          >
-            <Ionicons name={icon} size={17} color={C.iconColor} />
-          </View>
+          <Ionicons name={icon} size={20} color={C.iconColor} />
         </View>
 
         <Text
           style={{
-            marginTop: 6,
-            fontSize: 22,
-            fontWeight: "700",
+            fontSize: 24,
+            fontWeight: "900",
             color: C.text,
           }}
         >
@@ -628,28 +765,28 @@ export default function Dashboard() {
 
         <Text
           style={{
-            marginTop: 2,
-            fontSize: 10,
-            color: C.subText,
-            lineHeight: 14,
+            marginTop: 3,
+            fontSize: 13,
+            fontWeight: "800",
+            color: C.text,
           }}
+          numberOfLines={1}
+        >
+          {title}
+        </Text>
+
+        <Text
+          style={{
+            marginTop: 4,
+            fontSize: 11,
+            color: C.subText,
+            lineHeight: 16,
+          }}
+          numberOfLines={2}
         >
           {sub}
         </Text>
-
-        {onPress ? (
-          <Text
-            style={{
-              marginTop: 5,
-              fontSize: 10,
-              fontWeight: "600",
-              color: C.tapHint,
-            }}
-          >
-            Tap to view →
-          </Text>
-        ) : null}
-      </Wrap>
+      </View>
     );
   };
 
@@ -670,14 +807,14 @@ export default function Dashboard() {
     disabled?: boolean;
     badge?: string;
   }) => {
-    const dk = variant === "dark";
+    const isDarkCard = variant === "dark";
 
-    const bg = dk ? C.actionDarkBg : C.actionLightBg;
-    const border = dk ? C.actionDarkBorder : C.actionLightBorder;
-    const titleCol = dk ? "#FFFFFF" : C.text;
-    const subCol = dk ? "rgba(255,255,255,0.68)" : C.subText;
-    const iconBgC = dk ? "rgba(255,255,255,0.1)" : C.iconBg;
-    const iconC = dk ? "#60A5FA" : C.iconColor;
+    const bg = isDarkCard ? C.actionDarkBg : C.actionLightBg;
+    const border = isDarkCard ? C.actionDarkBorder : C.actionLightBorder;
+    const titleCol = isDarkCard ? "#FFFFFF" : C.text;
+    const subCol = isDarkCard ? "rgba(255,255,255,0.68)" : C.subText;
+    const iconBgC = isDarkCard ? "rgba(255,255,255,0.1)" : C.iconBg;
+    const iconC = isDarkCard ? "#60A5FA" : C.iconColor;
 
     return (
       <Pressable
@@ -710,9 +847,9 @@ export default function Dashboard() {
             >
               <Text
                 style={{
-                  fontWeight: "600",
+                  fontWeight: "700",
                   color: titleCol,
-                  fontSize: 14,
+                  fontSize: 16,
                 }}
                 numberOfLines={1}
               >
@@ -743,9 +880,9 @@ export default function Dashboard() {
 
             <Text
               style={{
-                fontSize: 12,
-                marginTop: 4,
-                lineHeight: 18,
+                fontSize: 14,
+                marginTop: 6,
+                lineHeight: 21,
                 color: subCol,
               }}
             >
@@ -755,15 +892,15 @@ export default function Dashboard() {
 
           <View
             style={{
-              height: 38,
-              width: 38,
-              borderRadius: 12,
+              height: 44,
+              width: 44,
+              borderRadius: 14,
               alignItems: "center",
               justifyContent: "center",
               backgroundColor: iconBgC,
             }}
           >
-            <Ionicons name={icon} size={19} color={iconC} />
+            <Ionicons name={icon} size={22} color={iconC} />
           </View>
         </View>
       </Pressable>
@@ -787,36 +924,38 @@ export default function Dashboard() {
             justifyContent: "space-between",
           }}
         >
-          <View>
+          <View style={{ flex: 1, paddingRight: 12 }}>
             <Text
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 color: C.subText,
                 textTransform: "uppercase",
-                letterSpacing: 0.9,
+                letterSpacing: 1,
               }}
             >
-              OneBlue Aquaculture
+              {tr("dashboard.oneBlueAquaculture", "OneBlue Aquaculture")}
             </Text>
 
             <Text
               style={{
-                fontSize: 20,
-                fontWeight: "700",
+                fontSize: 28,
+                fontWeight: "800",
                 color: C.text,
-                marginTop: 2,
+                marginTop: 4,
               }}
+              numberOfLines={1}
             >
-              {me?.username || "Dashboard"}
+              {(me as any)?.username ||
+                tr("dashboard.dashboardFallback", "Dashboard")}
             </Text>
           </View>
 
           <Pressable
             onPress={openPanel}
             style={{
-              height: 44,
-              width: 44,
-              borderRadius: 14,
+              height: 58,
+              width: 58,
+              borderRadius: 18,
               backgroundColor: C.avatarBg,
               alignItems: "center",
               justifyContent: "center",
@@ -825,8 +964,8 @@ export default function Dashboard() {
             <Text
               style={{
                 color: "#FFFFFF",
-                fontWeight: "700",
-                fontSize: 15,
+                fontWeight: "800",
+                fontSize: 20,
               }}
             >
               {initials}
@@ -847,105 +986,53 @@ export default function Dashboard() {
       >
         <Text
           style={{
-            marginTop: 8,
-            fontSize: 14,
-            fontWeight: "700",
+            marginTop: 16,
+            fontSize: 20,
+            fontWeight: "800",
             color: C.text,
           }}
         >
-          {t("dashboard.quickActions") || "Quick Actions"}
+          {tr("dashboard.registrationSummary", "Registration Summary")}
         </Text>
 
-        <View style={{ marginTop: 10, gap: 10 }}>
-          <ActionCard
-            title="Register Farm & Pond"
-            sub="Register farmer, farm and pond details together for field verification"
-            icon="add-circle-outline"
-            variant="dark"
-            onPress={goRegisterFarm}
-          />
+        <View style={{ marginTop: 14, gap: 10 }}>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <StatCard
+              title={tr("dashboard.farmsRegistered", "Farms Registered")}
+              value={totalFarms}
+              sub={tr("dashboard.farmsRegisteredSub", "Total farms submitted")}
+              icon="business-outline"
+            />
 
-          <ActionCard
-            title="Create Culture Cycle"
-            sub={
-              canCreateCultureCycle
-                ? "Create culture cycle before QR activation and image capture"
-                : "Register farm and pond first before creating culture cycle"
-            }
-            icon="sync-circle-outline"
-            variant="dark"
-            disabled={!canCreateCultureCycle}
-            badge={!canCreateCultureCycle ? "LOCKED" : undefined}
-            onPress={goCreateCultureCycle}
-          />
+            <StatCard
+              title={tr("dashboard.farmsActivated", "Farms Activated")}
+              value={activatedFarms}
+              sub={tr("dashboard.farmsActivatedSub", "Farm QR activated")}
+              icon="qr-code-outline"
+            />
+          </View>
 
-          <ActionCard
-            title="Activate Farm QR"
-            sub={
-              canActivateFarmQr
-                ? `Scan Farm Gate QR for ${pickName(
-                    firstRegisteredFarm?.farm_name,
-                    firstRegisteredFarm?.name,
-                    "registered farm",
-                  )}`
-                : "Create culture cycle first, then activate Farm QR"
-            }
-            icon="qr-code-outline"
-            variant="dark"
-            disabled={!canActivateFarmQr}
-            badge={!canActivateFarmQr ? "LOCKED" : undefined}
-            onPress={goActivateFarmQr}
-          />
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <StatCard
+              title={tr("dashboard.pondsRegistered", "Ponds Registered")}
+              value={totalPonds}
+              sub={tr("dashboard.pondsRegisteredSub", "Total ponds submitted")}
+              icon="water-outline"
+            />
 
-          <ActionCard
-            title="Activate Pond QR"
-            sub={
-              canActivatePondQr
-                ? `Scan Pond QR for ${pickName(
-                    firstRegisteredPond?.pond_name,
-                    firstRegisteredPond?.name,
-                    "registered pond",
-                  )}`
-                : "Create culture cycle first, then activate Pond QR"
-            }
-            icon="scan-outline"
-            variant="light"
-            disabled={!canActivatePondQr}
-            badge={!canActivatePondQr ? "LOCKED" : undefined}
-            onPress={goActivatePondQr}
-          />
-
-          <ActionCard
-            title="Add Extra Pond"
-            sub={
-              canCreatePond
-                ? `Add another pond under ${pickName(
-                    firstRegisteredFarm?.farm_name,
-                    firstRegisteredFarm?.name,
-                    "registered farm",
-                  )}`
-                : "Register a farm before adding extra pond"
-            }
-            icon="water-outline"
-            variant="light"
-            disabled={!canCreatePond}
-            badge={!canCreatePond ? "LOCKED" : undefined}
-            onPress={goCreatePond}
-          />
-
-          <ActionCard
-            title={t("dashboard.qrScanner") || "QR Scanner"}
-            sub="Scan QR for traceability view only"
-            icon="barcode-outline"
-            variant="light"
-            onPress={goTraceabilityScanner}
-          />
+            <StatCard
+              title={tr("dashboard.pondsActivated", "Ponds Activated")}
+              value={activatedPonds}
+              sub={tr("dashboard.pondsActivatedSub", "Pond QR activated")}
+              icon="scan-outline"
+            />
+          </View>
         </View>
 
         <View
           style={{
-            marginTop: 18,
-            borderRadius: 18,
+            marginTop: 14,
+            borderRadius: 16,
             borderWidth: 1,
             borderColor: C.cardBorder,
             backgroundColor: C.cardBg,
@@ -954,37 +1041,236 @@ export default function Dashboard() {
         >
           <Text
             style={{
-              color: C.text,
               fontSize: 14,
               fontWeight: "800",
+              color: C.text,
             }}
           >
-            Correct Workflow
+            {tr("dashboard.activationPending", "Activation Pending")}
           </Text>
 
           <Text
             style={{
               marginTop: 6,
+              fontSize: 13,
+              lineHeight: 20,
               color: C.subText,
-              fontSize: 12,
-              lineHeight: 18,
             }}
           >
-            Farm + Pond Register → Create Culture Cycle → Activate Farm/Pond QR
-            → Capture Image → Daily Logs.
+            {tr(
+              "dashboard.activationPendingSub",
+              "Farm QR pending: {{farms}} | Pond QR pending: {{ponds}}",
+              {
+                farms: pendingFarmActivation,
+                ponds: pendingPondActivation,
+              },
+            )}
+          </Text>
+
+          <Text
+            style={{
+              marginTop: 6,
+              fontSize: 13,
+              lineHeight: 20,
+              color: C.subText,
+            }}
+          >
+            {tr(
+              "dashboard.totalSummary",
+              "Farms: {{farms}} | Ponds: {{ponds}} | Culture Cycles: {{cycles}}",
+              {
+                farms: totalFarms,
+                ponds: totalPonds,
+                cycles: totalCultureCycles,
+              },
+            )}
+          </Text>
+        </View>
+
+        <Text
+          style={{
+            marginTop: 22,
+            fontSize: 20,
+            fontWeight: "800",
+            color: C.text,
+          }}
+        >
+          {tr("dashboard.quickActions", "Quick Actions")}
+        </Text>
+
+        <View style={{ marginTop: 18, gap: 12 }}>
+          <ActionCard
+            title={tr("dashboard.registerFarmPond", "Register Farm & Pond")}
+            sub={tr(
+              "dashboard.registerFarmPondSub",
+              "Register farmer, farm and pond details together for field verification",
+            )}
+            icon="add-circle-outline"
+            variant="dark"
+            onPress={goRegisterFarm}
+          />
+
+          <ActionCard
+            title={tr("dashboard.createCultureCycle", "Create Culture Cycle")}
+            sub={
+              canCreateCultureCycle
+                ? tr(
+                    "dashboard.createCultureCycleSub",
+                    "Create culture cycle before QR activation and image capture",
+                  )
+                : tr(
+                    "dashboard.createCultureCycleLockedSub",
+                    "Register farm and pond first before creating culture cycle",
+                  )
+            }
+            icon="sync-circle-outline"
+            variant="dark"
+            disabled={!canCreateCultureCycle}
+            badge={
+              !canCreateCultureCycle
+                ? tr("common.locked", "LOCKED")
+                : undefined
+            }
+            onPress={goCreateCultureCycle}
+          />
+
+          <ActionCard
+            title={tr("dashboard.activateFarmQr", "Activate Farm QR")}
+            sub={
+              canActivateFarmQr
+                ? tr(
+                    "dashboard.activateFarmQrSubNamed",
+                    "Scan Farm Gate QR for {{farmName}}",
+                    {
+                      farmName: farmNameForAction,
+                    },
+                  )
+                : tr(
+                    "dashboard.activateFarmQrLockedSub",
+                    "Create culture cycle first, then activate Farm QR",
+                  )
+            }
+            icon="qr-code-outline"
+            variant="dark"
+            disabled={!canActivateFarmQr}
+            badge={
+              !canActivateFarmQr ? tr("common.locked", "LOCKED") : undefined
+            }
+            onPress={goActivateFarmQr}
+          />
+
+          <ActionCard
+            title={tr("dashboard.activatePondQr", "Activate Pond QR")}
+            sub={
+              canActivatePondQr
+                ? tr(
+                    "dashboard.activatePondQrSubNamed",
+                    "Scan Pond QR for {{pondName}}",
+                    {
+                      pondName: pondNameForAction,
+                    },
+                  )
+                : tr(
+                    "dashboard.activatePondQrLockedSub",
+                    "Create culture cycle first, then activate Pond QR",
+                  )
+            }
+            icon="scan-outline"
+            variant="light"
+            disabled={!canActivatePondQr}
+            badge={
+              !canActivatePondQr ? tr("common.locked", "LOCKED") : undefined
+            }
+            onPress={goActivatePondQr}
+          />
+
+          <ActionCard
+            title={tr("dashboard.addStockingDetails", "Add Stocking Details")}
+            sub={
+              canAddStocking
+                ? tr(
+                    "dashboard.addStockingDetailsSub",
+                    "Scan Pond QR and enter stocking details",
+                  )
+                : tr(
+                    "dashboard.addStockingDetailsLockedSub",
+                    "Activate Pond QR first, then add stocking details",
+                  )
+            }
+            icon="fish-outline"
+            variant="dark"
+            disabled={!canAddStocking}
+            badge={!canAddStocking ? tr("common.locked", "LOCKED") : undefined}
+            onPress={goAddStocking}
+          />
+
+          <ActionCard
+            title={tr("dashboard.addExtraPond", "Add Extra Pond")}
+            sub={
+              canCreatePond
+                ? tr(
+                    "dashboard.addExtraPondSubNamed",
+                    "Add another pond under {{farmName}}",
+                    {
+                      farmName: farmNameForAction,
+                    },
+                  )
+                : tr(
+                    "dashboard.addExtraPondLockedSub",
+                    "Register a farm before adding extra pond",
+                  )
+            }
+            icon="water-outline"
+            variant="light"
+            disabled={!canCreatePond}
+            badge={!canCreatePond ? tr("common.locked", "LOCKED") : undefined}
+            onPress={goCreatePond}
+          />
+
+          <ActionCard
+            title={tr("dashboard.qrScanner", "QR Scanner")}
+            sub={tr(
+              "dashboard.qrScannerSub",
+              "Scan QR for traceability view only",
+            )}
+            icon="barcode-outline"
+            variant="light"
+            onPress={goTraceabilityScanner}
+          />
+        </View>
+
+        <View
+          style={{
+            marginTop: 24,
+            borderRadius: 18,
+            borderWidth: 1,
+            borderColor: C.cardBorder,
+            backgroundColor: C.cardBg,
+            padding: 16,
+          }}
+        >
+          <Text
+            style={{
+              color: C.text,
+              fontSize: 18,
+              fontWeight: "800",
+            }}
+          >
+            {tr("dashboard.correctWorkflow", "Correct Workflow")}
           </Text>
 
           <Text
             style={{
               marginTop: 10,
               color: C.subText,
-              fontSize: 12,
-              lineHeight: 18,
+              fontSize: 15,
+              lineHeight: 24,
             }}
           >
-            Login numeric user ID: {numericOwnerId || "missing"}{"\n"}
-            Farms: {totalFarms} | Ponds: {totalPonds} | Culture Cycles:{" "}
-            {totalCultureCycles}
+            {tr(
+              "dashboard.correctWorkflowSub",
+              "Farm + Pond Register → Create Culture Cycle → Activate Farm/Pond QR → Capture Image → Add Stocking → Daily Logs.",
+            )}
           </Text>
         </View>
       </ScrollView>
@@ -1056,7 +1342,7 @@ export default function Dashboard() {
                   <Text
                     style={{
                       color: "#FFFFFF",
-                      fontWeight: "700",
+                      fontWeight: "800",
                       fontSize: 22,
                     }}
                   >
@@ -1068,12 +1354,13 @@ export default function Dashboard() {
                   style={{
                     marginTop: 10,
                     fontSize: 16,
-                    fontWeight: "700",
+                    fontWeight: "800",
                     color: C.text,
                     textAlign: "center",
                   }}
                 >
-                  {me?.username || "User"}
+                  {(me as any)?.username ||
+                    tr("dashboard.profileUserFallback", "User")}
                 </Text>
 
                 <Text
@@ -1084,7 +1371,7 @@ export default function Dashboard() {
                     textAlign: "center",
                   }}
                 >
-                  {me?.rootverse_type || "-"} · RootVerse
+                  {(me as any)?.rootverse_type || "-"} · RootVerse
                 </Text>
 
                 <View
@@ -1110,13 +1397,13 @@ export default function Dashboard() {
                       letterSpacing: 0.6,
                     }}
                   >
-                    Numeric User ID
+                    {tr("dashboard.profileId", "User ID")}
                   </Text>
 
                   <Text
                     style={{
                       fontSize: 13,
-                      fontWeight: "700",
+                      fontWeight: "800",
                       color: C.text,
                     }}
                   >
@@ -1164,11 +1451,11 @@ export default function Dashboard() {
                   <Text
                     style={{
                       fontSize: 14,
-                      fontWeight: "600",
+                      fontWeight: "700",
                       color: C.text,
                     }}
                   >
-                    Theme
+                    {tr("dashboard.theme", "Theme")}
                   </Text>
 
                   <Text
@@ -1178,7 +1465,9 @@ export default function Dashboard() {
                       marginTop: 1,
                     }}
                   >
-                    {dark ? "Dark mode" : "Light mode"}
+                    {dark
+                      ? tr("dashboard.darkMode", "Dark mode")
+                      : tr("dashboard.lightMode", "Light mode")}
                   </Text>
                 </View>
 
@@ -1241,27 +1530,31 @@ export default function Dashboard() {
                   <Text
                     style={{
                       fontSize: 14,
-                      fontWeight: "600",
+                      fontWeight: "700",
                       color: C.text,
                     }}
                   >
-                    Language
+                    {tr("dashboard.language", "Language")}
                   </Text>
                 </View>
 
                 <View style={{ flexDirection: "row", gap: 8 }}>
                   {[
-                    { code: "en", label: "English" },
-                    { code: "ta", label: "தமிழ்" },
+                    {
+                      code: "en" as const,
+                      label: tr("dashboard.english", "English"),
+                    },
+                    {
+                      code: "ta" as const,
+                      label: tr("dashboard.tamil", "தமிழ்"),
+                    },
                   ].map((lang) => {
-                    const active = i18n.language === lang.code;
+                    const active = currentLanguage === lang.code;
 
                     return (
                       <Pressable
                         key={lang.code}
-                        onPress={() =>
-                          setAppLanguage(lang.code as "en" | "ta")
-                        }
+                        onPress={() => handleLanguageChange(lang.code)}
                         style={{
                           flex: 1,
                           paddingVertical: 9,
@@ -1279,7 +1572,7 @@ export default function Dashboard() {
                         <Text
                           style={{
                             fontSize: 12,
-                            fontWeight: "700",
+                            fontWeight: "800",
                             color: active ? C.tapHint : C.subText,
                           }}
                         >
@@ -1329,11 +1622,11 @@ export default function Dashboard() {
                 <Text
                   style={{
                     fontSize: 14,
-                    fontWeight: "600",
+                    fontWeight: "700",
                     color: C.logoutText,
                   }}
                 >
-                  Logout
+                  {tr("dashboard.logout", "Logout")}
                 </Text>
               </Pressable>
             </ScrollView>

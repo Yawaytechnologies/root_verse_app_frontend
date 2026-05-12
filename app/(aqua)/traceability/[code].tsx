@@ -35,6 +35,7 @@ type QrRecord = {
 type FarmRecord = {
   id?: number | string;
   farm_id?: string;
+  farm_code?: string;
   farm_qr_id?: string;
   farm_name?: string;
   name?: string;
@@ -52,6 +53,7 @@ type PondRecord = {
   id?: number | string;
   farm_id?: number | string;
   pond_id?: string;
+  pond_code?: string;
   pond_qr_id?: string;
   pond_name?: string;
   name?: string;
@@ -67,10 +69,17 @@ type PondRecord = {
 type CultureCycleRecord = {
   id?: number | string;
   user_id?: number | string;
+  culture_code?: string;
   farm_id?: number | string;
   pond_id?: number | string;
+  farm_code?: string;
+  farm_name?: string;
+  pond_code?: string;
+  pond_name?: string;
   verification_status?: string;
   status?: string;
+  start_date?: string;
+  end_date?: string;
   created_at?: string;
   updated_at?: string;
   [key: string]: any;
@@ -94,6 +103,27 @@ function apiUrl(path: string) {
   return `${base}${cleanPath}`;
 }
 
+function formatDateTime(value?: string) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+
+  return date.toLocaleString();
+}
+
+function formatTime(value?: string) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function extractArray<T = any>(data: any): T[] {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.data)) return data.data;
@@ -102,6 +132,8 @@ function extractArray<T = any>(data: any): T[] {
   if (Array.isArray(data?.farms)) return data.farms;
   if (Array.isArray(data?.ponds)) return data.ponds;
   if (Array.isArray(data?.images)) return data.images;
+  if (Array.isArray(data?.culture_cycles)) return data.culture_cycles;
+  if (Array.isArray(data?.cultureCycles)) return data.cultureCycles;
   return [];
 }
 
@@ -117,15 +149,8 @@ function extractObject<T = any>(data: any): T {
   if (data?.cultureCycle && typeof data.cultureCycle === "object") {
     return data.cultureCycle;
   }
+
   return data;
-}
-
-function sameId(a: any, b: any) {
-  if (a === undefined || a === null || b === undefined || b === null) {
-    return false;
-  }
-
-  return String(a) === String(b);
 }
 
 function getQrCode(qr: QrRecord | null, fallback = "") {
@@ -149,28 +174,62 @@ function isActivated(qr: QrRecord | null) {
   );
 }
 
-function formatTime(value?: string) {
-  if (!value) return "-";
+function sameId(a: any, b: any) {
+  if (a === undefined || a === null || b === undefined || b === null) {
+    return false;
+  }
 
-  const date = new Date(value);
+  return String(a) === String(b);
+}
 
-  if (Number.isNaN(date.getTime())) return "-";
+function pickId(...values: any[]) {
+  const found = values.find((value) => {
+    if (value === undefined || value === null) return false;
 
-  return date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
+    const text = String(value).trim();
+
+    return (
+      text !== "" &&
+      text !== "0" &&
+      text !== "undefined" &&
+      text !== "null"
+    );
   });
+
+  return found ? String(found) : "";
+}
+
+function toNumericUserId(value: any) {
+  const raw = String(value ?? "").trim();
+
+  if (!raw) return "";
+
+  if (/^\d+$/.test(raw)) {
+    return String(Number(raw));
+  }
+
+  const digits = raw.replace(/\D/g, "");
+
+  if (!digits) return "";
+
+  return String(Number(digits));
+}
+
+async function getHeaders() {
+  const token = await AsyncStorage.getItem(TOKEN_KEY);
+
+  return {
+    Accept: "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 }
 
 async function getJson(path: string) {
-  const token = await AsyncStorage.getItem(TOKEN_KEY);
+  const headers = await getHeaders();
 
   const response = await fetch(apiUrl(path), {
     method: "GET",
-    headers: {
-      Accept: "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers,
   });
 
   let data: any = null;
@@ -182,30 +241,31 @@ async function getJson(path: string) {
   }
 
   if (!response.ok) {
-    throw new Error(
+    const message =
       data?.message ||
-        data?.detail ||
-        data?.error ||
-        `Request failed: ${response.status}`,
-    );
+      data?.detail ||
+      data?.error ||
+      `Request failed: ${response.status}`;
+
+    throw new Error(message);
   }
 
   return data;
 }
 
-export default function TraceabilityCodeScreen() {
+export default function TraceabilityScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
 
   const scannedCode =
-    getParamValue(params.code) ||
     getParamValue(params.qrValue) ||
     getParamValue(params.scannedValue) ||
+    getParamValue(params.code) ||
     getParamValue(params.qrCode) ||
     getParamValue(params.value);
 
   const paramCultureCycleId = getParamValue(params.cultureCycleId);
-  const paramUserId = getParamValue(params.userId);
+  const paramUserId = toNumericUserId(getParamValue(params.userId));
 
   const paramFarmDbId =
     getParamValue(params.farmDbId) || getParamValue(params.farmId);
@@ -275,6 +335,8 @@ export default function TraceabilityCodeScreen() {
 
         qrData = extractObject<QrRecord>(qrRes);
         setQr(qrData);
+      } else {
+        setQr(null);
       }
 
       const [farmsRes, pondsRes] = await Promise.all([
@@ -308,6 +370,7 @@ export default function TraceabilityCodeScreen() {
               (item) =>
                 sameId(item.id, qrData?.farm_id) ||
                 item.farm_id === currentQrCode ||
+                item.farm_code === currentQrCode ||
                 item.farm_qr_id === currentQrCode,
             ) || null;
         }
@@ -318,6 +381,7 @@ export default function TraceabilityCodeScreen() {
               (item) =>
                 sameId(item.id, qrData?.pond_id) ||
                 item.pond_id === currentQrCode ||
+                item.pond_code === currentQrCode ||
                 item.pond_qr_id === currentQrCode,
             ) || null;
         }
@@ -338,9 +402,6 @@ export default function TraceabilityCodeScreen() {
           farms.find((item) => sameId(item.id, linkedPond?.farm_id)) || null;
       }
 
-      setFarm(linkedFarm);
-      setPond(linkedPond);
-
       let linkedCultureCycle: CultureCycleRecord | null = null;
 
       if (paramCultureCycleId) {
@@ -350,14 +411,14 @@ export default function TraceabilityCodeScreen() {
 
         linkedCultureCycle = extractObject<CultureCycleRecord>(cycleRes);
       } else {
-        const userId =
-          paramUserId ||
-          String(
-            linkedPond?.user_id ||
-              linkedFarm?.user_id ||
-              linkedFarm?.owner_id ||
-              "",
-          );
+        const userId = toNumericUserId(
+          pickId(
+            paramUserId,
+            linkedPond?.user_id,
+            linkedFarm?.user_id,
+            linkedFarm?.owner_id,
+          ),
+        );
 
         if (userId) {
           const cyclesRes = await getJson(
@@ -376,19 +437,64 @@ export default function TraceabilityCodeScreen() {
                 return true;
               }
 
+              if (qrData?.pond_id && sameId(cycle.pond_id, qrData.pond_id)) {
+                return true;
+              }
+
+              if (qrData?.farm_id && sameId(cycle.farm_id, qrData.farm_id)) {
+                return true;
+              }
+
               return false;
-            }) || null;
+            }) ||
+            cycles[0] ||
+            null;
         }
       }
 
+      if (linkedCultureCycle) {
+        if (!linkedFarm && linkedCultureCycle.farm_id) {
+          linkedFarm =
+            farms.find((item) => sameId(item.id, linkedCultureCycle?.farm_id)) ||
+            {
+              id: linkedCultureCycle.farm_id,
+              farm_id: linkedCultureCycle.farm_code,
+              farm_code: linkedCultureCycle.farm_code,
+              farm_name: linkedCultureCycle.farm_name || "Linked Farm",
+              name: linkedCultureCycle.farm_name || "Linked Farm",
+              user_id: linkedCultureCycle.user_id,
+            };
+        }
+
+        if (!linkedPond && linkedCultureCycle.pond_id) {
+          linkedPond =
+            ponds.find((item) => sameId(item.id, linkedCultureCycle?.pond_id)) ||
+            {
+              id: linkedCultureCycle.pond_id,
+              farm_id: linkedCultureCycle.farm_id,
+              pond_id: linkedCultureCycle.pond_code,
+              pond_code: linkedCultureCycle.pond_code,
+              pond_name: linkedCultureCycle.pond_name || "Linked Pond",
+              name: linkedCultureCycle.pond_name || "Linked Pond",
+              user_id: linkedCultureCycle.user_id,
+            };
+        }
+      }
+
+      setFarm(linkedFarm);
+      setPond(linkedPond);
       setCultureCycle(linkedCultureCycle);
 
       if (linkedCultureCycle?.id) {
-        const imagesRes = await getJson(
-          `/api/aquaculture/imageUpload/${linkedCultureCycle.id}/images`,
-        );
+        try {
+          const imagesRes = await getJson(
+            `/api/aquaculture/imageUpload/${linkedCultureCycle.id}/images`,
+          );
 
-        setImages(extractArray(imagesRes));
+          setImages(extractArray(imagesRes));
+        } catch {
+          setImages([]);
+        }
       } else {
         setImages([]);
       }
@@ -442,7 +548,12 @@ export default function TraceabilityCodeScreen() {
     if (farm) {
       items.push({
         title: "Farm Linked",
-        description: farm.farm_name || farm.name || "Farm record linked",
+        description:
+          farm.farm_name ||
+          farm.name ||
+          farm.farm_code ||
+          farm.farm_id ||
+          "Farm record linked",
         time: formatTime(farm.created_at),
         status: "DONE",
       });
@@ -451,7 +562,12 @@ export default function TraceabilityCodeScreen() {
     if (pond) {
       items.push({
         title: "Pond Linked",
-        description: pond.pond_name || pond.name || "Pond record linked",
+        description:
+          pond.pond_name ||
+          pond.name ||
+          pond.pond_code ||
+          pond.pond_id ||
+          "Pond record linked",
         time: formatTime(pond.created_at),
         status: "DONE",
       });
@@ -460,7 +576,7 @@ export default function TraceabilityCodeScreen() {
     if (cultureCycle) {
       items.push({
         title: "Culture Cycle",
-        description: `Status: ${
+        description: `${cultureCycle.culture_code || `ID ${cultureCycle.id}`} • Status: ${
           cultureCycle.verification_status || cultureCycle.status || "Available"
         }`,
         time: formatTime(cultureCycle.created_at),
@@ -535,7 +651,7 @@ export default function TraceabilityCodeScreen() {
               <Ionicons name="qr-code-outline" size={36} color="#D97706" />
 
               <Text className="mt-3 text-center text-lg font-bold text-amber-800 dark:text-amber-300">
-                QR Scan Required
+                Traceability Not Found
               </Text>
 
               <Text className="mt-2 text-center text-sm leading-6 text-amber-700 dark:text-amber-200/80">
@@ -591,21 +707,72 @@ export default function TraceabilityCodeScreen() {
 
               <InfoRow
                 label="Farm"
-                value={farm?.farm_name || farm?.name || "Not linked"}
+                value={
+                  farm?.farm_name ||
+                  farm?.name ||
+                  cultureCycle?.farm_name ||
+                  "Not linked"
+                }
+              />
+
+              <Divider />
+
+              <InfoRow
+                label="Farm Code"
+                value={
+                  farm?.farm_code ||
+                  farm?.farm_id ||
+                  cultureCycle?.farm_code ||
+                  "-"
+                }
               />
 
               <Divider />
 
               <InfoRow
                 label="Pond"
-                value={pond?.pond_name || pond?.name || "Not linked"}
+                value={
+                  pond?.pond_name ||
+                  pond?.name ||
+                  cultureCycle?.pond_name ||
+                  "Not linked"
+                }
+              />
+
+              <Divider />
+
+              <InfoRow
+                label="Pond Code"
+                value={
+                  pond?.pond_code ||
+                  pond?.pond_id ||
+                  cultureCycle?.pond_code ||
+                  "-"
+                }
               />
 
               <Divider />
 
               <InfoRow
                 label="Culture Cycle"
-                value={cultureCycle?.id ? String(cultureCycle.id) : "Not found"}
+                value={
+                  cultureCycle?.culture_code ||
+                  (cultureCycle?.id ? String(cultureCycle.id) : "Not found")
+                }
+              />
+
+              <Divider />
+
+              <InfoRow
+                label="Cycle Start"
+                value={formatDateTime(cultureCycle?.start_date)}
+              />
+
+              <Divider />
+
+              <InfoRow
+                label="Cycle End"
+                value={formatDateTime(cultureCycle?.end_date)}
               />
 
               <Divider />

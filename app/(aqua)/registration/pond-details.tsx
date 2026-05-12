@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import * as Location from "expo-location";
 import { router } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
@@ -32,6 +33,8 @@ type FishTypeItem = {
   fish_code?: string;
   fish_type_url?: string;
 };
+
+const POND_TYPES = ["Earthen", "HDPE", "Concrete"];
 
 function Field({
   label,
@@ -135,9 +138,41 @@ function SelectTrigger({
   );
 }
 
+function TypeButton({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className={`flex-1 rounded-2xl border px-3 py-3 ${
+        active
+          ? "border-emerald-300 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10"
+          : "border-slate-200 bg-white dark:border-white/10 dark:bg-[#0B1220]"
+      }`}
+    >
+      <Text
+        className={`text-center text-sm font-semibold ${
+          active
+            ? "text-emerald-700 dark:text-emerald-300"
+            : "text-slate-700 dark:text-white/70"
+        }`}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 export default function PondDetailsScreen() {
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch<AppDispatch>();
+  const { t } = useTranslation();
 
   const registration = useSelector(selectAquaRegistration);
   const { farm, ponds } = registration;
@@ -285,6 +320,11 @@ export default function PondDetailsScreen() {
         return false;
       }
 
+      if (!String((pond as any).pondType ?? "").trim()) {
+        Alert.alert("Validation", `Please select pond type for Pond ${i + 1}`);
+        return false;
+      }
+
       if (!pond.pondArea.trim()) {
         Alert.alert("Validation", `Please enter pond area for Pond ${i + 1}`);
         return false;
@@ -294,6 +334,18 @@ export default function PondDetailsScreen() {
 
       if (!Number.isFinite(area) || area <= 0) {
         Alert.alert("Validation", `Enter valid pond area for Pond ${i + 1}`);
+        return false;
+      }
+
+      if (!String((pond as any).volume ?? "").trim()) {
+        Alert.alert("Validation", `Please enter volume for Pond ${i + 1}`);
+        return false;
+      }
+
+      const volume = Number((pond as any).volume);
+
+      if (!Number.isFinite(volume) || volume <= 0) {
+        Alert.alert("Validation", `Enter valid volume for Pond ${i + 1}`);
         return false;
       }
 
@@ -320,6 +372,8 @@ export default function PondDetailsScreen() {
     const cleanPonds = ponds.map((pond, index) => ({
       ...pond,
       id: pond.id || `pond-${index + 1}`,
+      pondType: String((pond as any).pondType || "Earthen"),
+      volume: String((pond as any).volume || ""),
       gpsLat: pond.gpsLat || gpsLat || farm.latitude || "",
       gpsLng: pond.gpsLng || gpsLng || farm.longitude || "",
       pondImageCaptured: false,
@@ -391,11 +445,11 @@ export default function PondDetailsScreen() {
 
             <View className="flex-1">
               <Text className="text-[11px] uppercase tracking-wide text-white opacity-80">
-                Pond Registration
+                {t("registration.pondDetails")}
               </Text>
 
               <Text className="mt-1 text-lg font-bold text-white">
-                Add Pond Details
+                {t("registration.addPondDetails")}
               </Text>
             </View>
           </View>
@@ -409,13 +463,11 @@ export default function PondDetailsScreen() {
 
             <View className="flex-1">
               <Text className="text-base font-semibold text-amber-800 dark:text-amber-300">
-                No Official Pond ID Now
+                {t("registration.pondIdQrLinking")}
               </Text>
 
               <Text className="mt-2 text-sm leading-6 text-amber-700 dark:text-amber-200/80">
-                Pond details are collected together with farm registration.
-                Official Pond ID will be created only after field verification
-                and pre-printed Pond QR activation.
+                {t("registration.pondIdQrLinkingDesc")}
               </Text>
             </View>
           </View>
@@ -448,11 +500,11 @@ export default function PondDetailsScreen() {
                 <View className="mb-4 flex-row items-center justify-between">
                   <View className="flex-1 pr-3">
                     <Text className="text-base font-semibold text-slate-900 dark:text-white">
-                      Pond Details {index + 1}
+                      {t("registration.pondDetails")} {index + 1}
                     </Text>
 
                     <Text className="text-xs text-slate-400 dark:text-white/40">
-                      Official Pond ID activates after QR scan
+                      {t("registration.officialPondIdPending")}
                     </Text>
                   </View>
 
@@ -462,32 +514,73 @@ export default function PondDetailsScreen() {
                       className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 dark:border-rose-500/20 dark:bg-rose-500/10"
                     >
                       <Text className="text-sm font-semibold text-rose-700 dark:text-rose-300">
-                        Remove
+                        {t("common.remove")}
                       </Text>
                     </Pressable>
                   ) : null}
                 </View>
 
                 <View className="gap-4">
+                  <View className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/20 dark:bg-amber-500/10">
+                    <Text className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                      {t("registration.pondIdQrLinking")}
+                    </Text>
+
+                    <Text className="mt-2 text-sm leading-6 text-amber-700 dark:text-amber-200/80">
+                      {t("registration.officialPondIdPending")}
+                    </Text>
+                  </View>
+
+                  <Field
+                    label={t("registration.pondName")}
+                    placeholder={t("registration.pondNamePlaceholder")}
+                    value={pond.pondName}
+                    onChangeText={(text) =>
+                      dispatch(
+                        setPondField({
+                          index,
+                          key: "pondName",
+                          value: text,
+                        }),
+                      )
+                    }
+                  />
+
+                  <View className="gap-2">
+                    <Text className="text-sm font-medium text-slate-900 dark:text-white">
+                      {t("registration.pondType")}
+                    </Text>
+
+                    <View className="flex-row gap-2">
+                      {POND_TYPES.map((type) => (
+                        <TypeButton
+                          key={type}
+                          label={
+                            type === "Earthen"
+                              ? t("registration.pondTypeEarthen")
+                              : type === "HDPE"
+                                ? t("registration.pondTypeHdpe")
+                                : t("registration.pondTypeConcrete")
+                          }
+                          active={String((pond as any).pondType || "Earthen") === type}
+                          onPress={() =>
+                            dispatch(
+                              setPondField({
+                                index,
+                                key: "pondType" as any,
+                                value: type,
+                              }),
+                            )
+                          }
+                        />
+                      ))}
+                    </View>
+                  </View>
+
                   <View className="flex-row gap-3">
                     <Field
-                      label="Pond Name"
-                      placeholder="Example: P1"
-                      value={pond.pondName}
-                      onChangeText={(text) =>
-                        dispatch(
-                          setPondField({
-                            index,
-                            key: "pondName",
-                            value: text,
-                          }),
-                        )
-                      }
-                    />
-
-                    <Field
-                      label="Pond Area Acres"
-                      placeholder="Example: 0.9"
+                      label={t("registration.waterSpreadAreaAcres")}
+                      placeholder={t("registration.pondAreaPlaceholder")}
                       value={pond.pondArea}
                       onChangeText={(text) =>
                         dispatch(
@@ -500,11 +593,27 @@ export default function PondDetailsScreen() {
                       }
                       keyboardType="numeric"
                     />
+
+                    <Field
+                      label={t("registration.volumeCubicMeter")}
+                      placeholder="7500"
+                      value={String((pond as any).volume ?? "")}
+                      onChangeText={(text) =>
+                        dispatch(
+                          setPondField({
+                            index,
+                            key: "volume" as any,
+                            value: text.replace(/[^0-9.]/g, ""),
+                          }),
+                        )
+                      }
+                      keyboardType="numeric"
+                    />
                   </View>
 
                   <SelectTrigger
-                    label="Species"
-                    placeholder="Select species"
+                    label={t("registration.species")}
+                    placeholder={t("registration.selectSpecies")}
                     selectedLabel={pond.speciesName || undefined}
                     selectedSub={
                       pond.speciesCode ? `Code: ${pond.speciesCode}` : undefined
@@ -530,10 +639,22 @@ export default function PondDetailsScreen() {
                     </View>
                   ) : null}
 
+                  <View className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/5">
+                    <Text className="text-sm font-semibold text-slate-900 dark:text-white">
+                      {t("registration.pondGpsMap")}
+                    </Text>
+
+                    <Text className="mt-2 text-sm leading-6 text-slate-600 dark:text-white/60">
+                      {lat && lng
+                        ? `https://maps.google.com/?q=${lat},${lng}`
+                        : t("registration.gpsFetching")}
+                    </Text>
+                  </View>
+
                   <View className="flex-row gap-3">
                     <View className="flex-1 gap-2">
                       <Text className="text-sm font-medium text-slate-900 dark:text-white">
-                        Latitude
+                        {t("registration.latitude")}
                       </Text>
 
                       <View className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-white/10 dark:bg-white/5">
@@ -545,7 +666,7 @@ export default function PondDetailsScreen() {
 
                     <View className="flex-1 gap-2">
                       <Text className="text-sm font-medium text-slate-900 dark:text-white">
-                        Longitude
+                        {t("registration.longitude")}
                       </Text>
 
                       <View className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-white/10 dark:bg-white/5">
@@ -561,7 +682,7 @@ export default function PondDetailsScreen() {
                       <ActivityIndicator size="small" color="#2563EB" />
 
                       <Text className="flex-1 text-xs text-blue-700 dark:text-blue-300">
-                        Fetching pond GPS coordinates...
+                        {t("registration.gpsFetching")}
                       </Text>
                     </View>
                   ) : lat && lng ? (
@@ -573,7 +694,7 @@ export default function PondDetailsScreen() {
                       />
 
                       <Text className="flex-1 text-xs text-emerald-700 dark:text-emerald-300">
-                        GPS coordinates captured successfully.
+                        {t("registration.gpsSuccess")}
                       </Text>
                     </View>
                   ) : (
@@ -585,7 +706,7 @@ export default function PondDetailsScreen() {
                       />
 
                       <Text className="flex-1 text-xs text-amber-700 dark:text-amber-300">
-                        GPS coordinates are required before submission.
+                        {t("registration.gpsRequired")}
                       </Text>
                     </View>
                   )}
@@ -600,12 +721,11 @@ export default function PondDetailsScreen() {
 
                       <View className="flex-1">
                         <Text className="font-medium text-sky-800 dark:text-sky-300">
-                          Pond Image Later
+                          {t("registration.pondImageLater")}
                         </Text>
 
                         <Text className="mt-1 text-sm leading-6 text-sky-700 dark:text-sky-200/80">
-                          Pond image capture must happen only after Pond QR
-                          activation. Gallery upload is not allowed.
+                          {t("registration.pondImageLaterDesc")}
                         </Text>
                       </View>
                     </View>
@@ -621,7 +741,7 @@ export default function PondDetailsScreen() {
           className="mt-5 rounded-2xl border border-dashed border-slate-400 bg-white px-4 py-4 dark:border-white/20 dark:bg-[#0B1220]"
         >
           <Text className="text-center font-semibold text-slate-900 dark:text-white">
-            Add Another Pond
+            {t("registration.addAnotherPond")}
           </Text>
         </Pressable>
 
@@ -632,7 +752,7 @@ export default function PondDetailsScreen() {
               className="rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-white/10 dark:bg-[#0B1220]"
             >
               <Text className="text-center font-semibold text-slate-900 dark:text-white">
-                Back
+                {t("registration.back")}
               </Text>
             </Pressable>
           </View>
@@ -643,7 +763,7 @@ export default function PondDetailsScreen() {
               className="rounded-2xl bg-slate-900 px-4 py-3 dark:bg-white"
             >
               <Text className="text-center font-semibold text-white dark:text-slate-900">
-                Review
+                {t("registration.reviewSubmit")}
               </Text>
             </Pressable>
           </View>
@@ -663,7 +783,7 @@ export default function PondDetailsScreen() {
           >
             <View className="mb-4 flex-row items-center justify-between">
               <Text className="text-base font-semibold text-slate-900 dark:text-white">
-                Select Species
+                {t("registration.selectSpecies")}
               </Text>
 
               <Pressable
@@ -680,7 +800,7 @@ export default function PondDetailsScreen() {
                   <ActivityIndicator size="large" color="#94A3B8" />
 
                   <Text className="mt-3 text-sm text-slate-500 dark:text-white/50">
-                    Loading species...
+                    {t("registration.loadingSpecies")}
                   </Text>
                 </View>
               ) : fishTypes.length ? (
@@ -746,7 +866,7 @@ export default function PondDetailsScreen() {
               ) : (
                 <View className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/5">
                   <Text className="text-sm text-slate-600 dark:text-white/60">
-                    No species available.
+                    {t("registration.noSpeciesAvailable")}
                   </Text>
                 </View>
               )}

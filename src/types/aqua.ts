@@ -41,12 +41,19 @@ export type AquaFarmData = {
 
   latitude: string;
   longitude: string;
+
+  technicianName: string;
+  technicianMobileNumber: string;
 };
 
 export type AquaPondData = {
   id: string;
   pondName: string;
   pondArea: string;
+
+  // Added for client requirement: Earthen / HDPE / Concrete
+  pondType: string;
+
   cultureType: string;
 
   speciesId: string;

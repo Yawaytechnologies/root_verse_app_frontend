@@ -6,6 +6,7 @@ import authReducer from "../../features/auth/authSlice";
 import tripsReducer from "../../features/trip/tripSlice";
 import aquaRegistrationReducer from "../../features/aqua/registration/registration.slice";
 import aquaApprovalsReducer from "../../features/aqua/approvals/approvals.slice";
+import aquaCultureCyclesReducer from "../../features/aqua/cultureCycles/cultureCycles.slice";
 
 // ---- services (wild) ----
 import catchLogReducer from "../../services/wild/catchLog.slice";
@@ -41,6 +42,7 @@ const appReducer = combineReducers({
   trips: tripsReducer,
   aquaRegistration: aquaRegistrationReducer,
   aquaApprovals: aquaApprovalsReducer,
+  aquaCultureCycles: aquaCultureCyclesReducer,
 
   // services
   catchLog: catchLogReducer,
@@ -103,6 +105,7 @@ const rootReducer = (state: any, action: any) => {
       location: undefined,
       aquaRegistration: undefined,
       aquaApprovals: undefined,
+      aquaCultureCycles: undefined,
       auth: undefined,
       trips: undefined,
       catchLog: undefined,
