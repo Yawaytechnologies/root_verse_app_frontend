@@ -184,7 +184,7 @@ export default function AquaReviewSubmitScreen() {
   const { t } = useTranslation();
 
   const registration = useSelector(selectAquaRegistration);
-  const { farmer, farm, ponds, submission } = registration;
+  const { farm, ponds, submission } = registration;
 
   const me = useSelector((state: any) => state.me?.me);
   const loginState = useSelector((state: any) => state.login);
@@ -357,11 +357,6 @@ export default function AquaReviewSubmitScreen() {
         return false;
       }
 
-      if (!pond.speciesId?.trim()) {
-        Alert.alert("Validation", `Pond ${i + 1} species is required`);
-        return false;
-      }
-
       const lat = pond.gpsLat || farm.latitude;
       const lng = pond.gpsLng || farm.longitude;
 
@@ -379,6 +374,7 @@ export default function AquaReviewSubmitScreen() {
 
     const farmPayload = {
       user_id: Number(loggedUserId),
+      owner_id: Number(loggedUserId),
       farm_prefix: farmPrefix,
       farm_name: farm.farmName.trim(),
       address: farm.farmAddress.trim(),
@@ -415,6 +411,7 @@ export default function AquaReviewSubmitScreen() {
 
         const pondPayload = {
           farm_id: Number(createdFarmDbId),
+          owner_id: Number(loggedUserId),
           pond_name: pond.pondName.trim(),
           pond_type: String((pond as any).pondType || "Earthen"),
           water_spread_area_acres: toNumber(pond.pondArea),
@@ -507,37 +504,6 @@ export default function AquaReviewSubmitScreen() {
 
       <View className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#0B1220]">
         <Text className="mb-3 text-base font-semibold text-slate-900 dark:text-white">
-          {t("registration.farmerProfile")}
-        </Text>
-
-        <View className="rounded-2xl border border-slate-100 bg-slate-50 px-3 dark:border-white/5 dark:bg-white/5">
-          <InfoRow label={t("registration.farmerName")} value={farmer.farmerName} />
-          <View className="h-px bg-slate-100 dark:bg-white/5" />
-
-          <InfoRow label={t("registration.fatherName")} value={String((farmer as any).fatherName ?? "")} />
-          <View className="h-px bg-slate-100 dark:bg-white/5" />
-
-          <InfoRow label={t("registration.dateOfBirth")} value={String((farmer as any).dateOfBirth ?? "")} />
-          <View className="h-px bg-slate-100 dark:bg-white/5" />
-
-          <InfoRow label={t("registration.farmerLicense")} value={String((farmer as any).farmerLicense ?? "")} />
-          <View className="h-px bg-slate-100 dark:bg-white/5" />
-
-          <InfoRow label={t("registration.contactNumber")} value={farmer.mobileNumber} />
-          <View className="h-px bg-slate-100 dark:bg-white/5" />
-
-          <InfoRow label={t("registration.farmerAddress")} value={String((farmer as any).farmerAddress ?? "")} />
-          <View className="h-px bg-slate-100 dark:bg-white/5" />
-
-          <InfoRow
-            label={t("registration.farmingExperience")}
-            value={`${String((farmer as any).farmingExperienceYears ?? "0")} ${t("registration.experienceYears")} ${String((farmer as any).farmingExperienceMonths ?? "0")} ${t("registration.experienceMonths")}`}
-          />
-        </View>
-      </View>
-
-      <View className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#0B1220]">
-        <Text className="mb-3 text-base font-semibold text-slate-900 dark:text-white">
           {t("registration.farmSection")}
         </Text>
 
@@ -607,9 +573,6 @@ export default function AquaReviewSubmitScreen() {
                 <View className="h-px bg-slate-100 dark:bg-white/5" />
 
                 <InfoRow label={t("registration.volumeCubicMeter")} value={`${String((pond as any).volume || "-")} m³`} />
-                <View className="h-px bg-slate-100 dark:bg-white/5" />
-
-                <InfoRow label={t("registration.species")} value={pond.speciesName} />
                 <View className="h-px bg-slate-100 dark:bg-white/5" />
 
                 <InfoRow label={t("registration.pondGpsMap")} value={buildPondGps(pondLat, pondLng)} />

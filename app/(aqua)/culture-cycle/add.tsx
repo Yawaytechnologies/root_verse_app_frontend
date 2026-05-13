@@ -21,6 +21,12 @@ type FarmRecord = {
   id: number | string;
   farm_id?: string;
   farm_code?: string;
+  farm_qrs?: string;
+  farm_qr_id?: string;
+  farm_qr_code?: string;
+  activated_qr_code?: string;
+  qr_code?: string;
+  qr_value?: string;
   farm_name?: string;
   name?: string;
   user_id?: number | string;
@@ -32,6 +38,12 @@ type PondRecord = {
   farm_id: number | string;
   pond_id?: string;
   pond_code?: string;
+  qrs_code?: string;
+  pond_qr_id?: string;
+  pond_qr_code?: string;
+  activated_qr_code?: string;
+  qr_code?: string;
+  qr_value?: string;
   pond_name?: string;
   name?: string;
   species?: string;
@@ -52,6 +64,13 @@ function extractArray<T = any>(data: any): T[] {
   if (Array.isArray(data?.farms)) return data.farms;
   if (Array.isArray(data?.ponds)) return data.ponds;
   return [];
+}
+
+function unwrapData<T = any>(data: any): T | null {
+  if (!data) return null;
+  if (data.data !== undefined) return data.data as T;
+  if (data.result !== undefined) return data.result as T;
+  return data as T;
 }
 
 function toNumericUserId(value: any) {
@@ -85,6 +104,28 @@ function pickName(...values: any[]) {
   });
 
   return found ? String(found) : "";
+}
+
+function farmQrIdOf(farm: FarmRecord) {
+  return pickName(
+    farm.farm_qrs,
+    farm.farm_qr_id,
+    farm.farm_qr_code,
+    farm.activated_qr_code,
+    farm.qr_code,
+    farm.qr_value,
+  );
+}
+
+function pondQrIdOf(pond: PondRecord) {
+  return pickName(
+    pond.qrs_code,
+    pond.pond_qr_id,
+    pond.pond_qr_code,
+    pond.activated_qr_code,
+    pond.qr_code,
+    pond.qr_value,
+  );
 }
 
 function todayDate() {
@@ -205,6 +246,72 @@ export default function CultureCycleAddScreen() {
       fetchData();
     }, [fetchData]),
   );
+
+  useEffect(() => {
+    if (!selectedFarmId) return;
+    if (selectedFarm && farmQrIdOf(selectedFarm)) return;
+
+    let cancelled = false;
+
+    const fetchFarmDetail = async () => {
+      try {
+        const response = await fetch(apiUrl(`/api/farms/${selectedFarmId}`));
+        const json = await response.json();
+        const farmDetail = unwrapData<FarmRecord>(json);
+
+        if (cancelled || !farmDetail) return;
+
+        setFarms((current) =>
+          current.map((farm) =>
+            sameId(farm.id, selectedFarmId)
+              ? { ...farm, ...farmDetail, id: farm.id }
+              : farm,
+          ),
+        );
+      } catch (error) {
+        console.log("Farm detail fetch failed:", error);
+      }
+    };
+
+    fetchFarmDetail();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFarmId, selectedFarm]);
+
+  useEffect(() => {
+    if (!selectedPondId) return;
+    if (selectedPond && pondQrIdOf(selectedPond)) return;
+
+    let cancelled = false;
+
+    const fetchPondDetail = async () => {
+      try {
+        const response = await fetch(apiUrl(`/api/ponds/${selectedPondId}`));
+        const json = await response.json();
+        const pondDetail = unwrapData<PondRecord>(json);
+
+        if (cancelled || !pondDetail) return;
+
+        setPonds((current) =>
+          current.map((pond) =>
+            sameId(pond.id, selectedPondId)
+              ? { ...pond, ...pondDetail, id: pond.id }
+              : pond,
+          ),
+        );
+      } catch (error) {
+        console.log("Pond detail fetch failed:", error);
+      }
+    };
+
+    fetchPondDetail();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPondId, selectedPond]);
 
   useEffect(() => {
     if (!selectedFarmId) return;
@@ -409,6 +516,7 @@ export default function CultureCycleAddScreen() {
           {farms.length > 0 ? (
             farms.map((farm) => {
               const active = sameId(farm.id, selectedFarmId);
+              const farmQrId = farmQrIdOf(farm);
 
               return (
                 <Pressable
@@ -427,11 +535,8 @@ export default function CultureCycleAddScreen() {
                       </Text>
 
                       <Text className="mt-1 text-sm text-slate-500 dark:text-white/60">
-                        {pickName(farm.farm_code, farm.farm_id)
-                          ? `${t("traceability.farmCode")}: ${pickName(
-                              farm.farm_code,
-                              farm.farm_id,
-                            )}`
+                        {farmQrId
+                          ? `QR ID: ${farmQrId}`
                           : t("cultureCycle.farmQrPending")}
                       </Text>
                     </View>
@@ -458,6 +563,7 @@ export default function CultureCycleAddScreen() {
           {filteredPonds.length > 0 ? (
             filteredPonds.map((pond) => {
               const active = sameId(pond.id, selectedPondId);
+              const pondQrId = pondQrIdOf(pond);
 
               return (
                 <Pressable
@@ -476,11 +582,8 @@ export default function CultureCycleAddScreen() {
                       </Text>
 
                       <Text className="mt-1 text-sm text-slate-500 dark:text-white/60">
-                        {pickName(pond.pond_code, pond.pond_id)
-                          ? `${t("traceability.pondCode")}: ${pickName(
-                              pond.pond_code,
-                              pond.pond_id,
-                            )}`
+                        {pondQrId
+                          ? `QR ID: ${pondQrId}`
                           : t("cultureCycle.pondQrPending")}
                       </Text>
                     </View>

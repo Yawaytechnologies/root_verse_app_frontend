@@ -60,16 +60,15 @@ export function mapRegistrationStateToPayload(
       pondCount: state.farm.pondCount,
       latitude: state.farm.latitude,
       longitude: state.farm.longitude,
+      technicianName: state.farm.technicianName,
+      technicianMobileNumber: state.farm.technicianMobileNumber,
     },
     ponds: state.ponds.map((pond) => ({
       id: pond.id,
       pondName: pond.pondName,
       pondArea: pond.pondArea,
+      pondType: pond.pondType,
       cultureType: pond.cultureType,
-      speciesId: pond.speciesId,
-      speciesName: pond.speciesName,
-      speciesCode: pond.speciesCode,
-      speciesImageUrl: pond.speciesImageUrl,
       gpsLat: pond.gpsLat,
       gpsLng: pond.gpsLng,
       pondImageCaptured: pond.pondImageCaptured,
@@ -139,12 +138,10 @@ export function mapPondToFormData(
 
   const numericArea = String(parseFloat(pond.pondArea.trim()) || 0);
   const numericFarmId = farmId.trim().replace(/\D/g, "").replace(/^0+/, "") || farmId.trim();
-  const numericSpeciesId = pond.speciesId.trim().replace(/\D/g, "").replace(/^0+/, "") || pond.speciesId.trim();
 
   formData.append("name", pond.pondName.trim());
   formData.append("area", numericArea);
   formData.append("farm_id", numericFarmId);
-  formData.append("species_id", numericSpeciesId);
 
   if (pond.pondImageUri) {
     const { extension, mimeType } = getImageMeta(pond.pondImageUri);

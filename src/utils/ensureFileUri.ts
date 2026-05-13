@@ -14,9 +14,10 @@ export async function ensureFileUri(uri: string): Promise<string> {
   if (uri.startsWith("content://")) {
     const filename = uri.split("/").pop() || `image_${Date.now()}.jpg`;
 
-    const baseDir = FileSystem.cacheDirectory;
+    const fs = FileSystem as any;
+    const baseDir = fs.cacheDirectory ?? fs.documentDirectory;
     if (typeof baseDir !== "string") {
-      throw new Error("FileSystem.documentDirectory is not available");
+      throw new Error("FileSystem cache or document directory is not available");
     }
 
     const dest = `${baseDir}${filename}`;

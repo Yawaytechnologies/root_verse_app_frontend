@@ -268,7 +268,10 @@ export default function WildInspectionModal(props: Props) {
 
   // ✅ watermark staging
   const watermarkRef = useRef<View | null>(null);
-  const wmPromiseRef = useRef<null | { resolve: (u: string) => void }>(null);
+  const wmPromiseRef = useRef<null | {
+    resolve: (u: string) => void;
+    reject: (e: Error) => void;
+  }>(null);
 
   const [wmTask, setWmTask] = useState<null | {
     uri: string;
@@ -292,7 +295,9 @@ export default function WildInspectionModal(props: Props) {
         await new Promise((r) => setTimeout(r, 180));
 
         if (stageErr) {
-          if (!cancelled) wmPromiseRef.current?.resolve(wmTask.uri);
+          if (!cancelled) {
+            wmPromiseRef.current?.reject(new Error(stageErr));
+          }
           return;
         }
 
@@ -303,8 +308,12 @@ export default function WildInspectionModal(props: Props) {
         });
 
         if (!cancelled) wmPromiseRef.current?.resolve(outUri);
-      } catch {
-        if (!cancelled) wmPromiseRef.current?.resolve(wmTask.uri);
+      } catch (error: any) {
+        if (!cancelled) {
+          wmPromiseRef.current?.reject(
+            new Error(error?.message || "Watermark capture failed"),
+          );
+        }
       } finally {
         wmPromiseRef.current = null;
         setWmTask(null);
@@ -325,8 +334,8 @@ export default function WildInspectionModal(props: Props) {
     const { w, h } = await getImageSizeSafe(safeUri);
     const { W, H } = scaleDown(w, h, 960);
 
-    return await new Promise<string>((resolve) => {
-      wmPromiseRef.current = { resolve };
+    return await new Promise<string>((resolve, reject) => {
+      wmPromiseRef.current = { resolve, reject };
       setStageReady(false);
       setStageErr(null);
       setWmTask({ uri: safeUri, text: stampText, W, H });

@@ -210,8 +210,6 @@ export default function PondReviewSubmitScreen() {
             <View className="h-px bg-slate-100 dark:bg-white/5" />
             <InfoRow label={t("registration.pondArea") || "Water Spread Area"} value={pond.pondArea} />
             <View className="h-px bg-slate-100 dark:bg-white/5" />
-            <InfoRow label={t("registration.species") || "Species"} value={pond.speciesName} />
-            <View className="h-px bg-slate-100 dark:bg-white/5" />
             <InfoRow label={t("registration.latitude") || "Latitude"} value={pond.gpsLat || ""} />
             <View className="h-px bg-slate-100 dark:bg-white/5" />
             <InfoRow label={t("registration.longitude") || "Longitude"} value={pond.gpsLng || ""} />

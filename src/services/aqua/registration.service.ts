@@ -32,6 +32,7 @@ export type FarmRegistrationJson = {
 
 export type PondRegistrationJson = {
   farm_id: number;
+  owner_id?: number;
   pond_name: string;
   pond_type: string;
   water_spread_area_acres: number;
@@ -335,9 +336,16 @@ function normalizePondPayload(
   input: FormData | Partial<PondRegistrationJson> | Record<string, any>,
 ): PondRegistrationJson {
   const raw = payloadToObject(input as any);
+  const ownerId = pickFirstDefined(
+    raw.owner_id,
+    raw.ownerId,
+    raw.user_id,
+    raw.userId,
+  );
 
   return removeEmptyKeys({
     farm_id: toNumber(pickFirstDefined(raw.farm_id, raw.farmId)),
+    owner_id: ownerId === undefined ? undefined : toNumber(ownerId),
     pond_name: String(pickFirstDefined(raw.pond_name, raw.pondName, "")),
     pond_type: String(
       pickFirstDefined(raw.pond_type, raw.pondType, raw.type, "Earthen"),

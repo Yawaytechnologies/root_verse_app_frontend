@@ -12,6 +12,7 @@ import * as Location from "expo-location";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { captureRef } from "react-native-view-shot";
 
 import {
   activateFarmQrById,
@@ -51,6 +52,7 @@ export default function CaptureFarmGateScreen() {
   const nextTo = getParamValue(params.nextTo);
 
   const cameraRef = useRef<CameraView | null>(null);
+  const watermarkRef = useRef<View | null>(null);
 
   const [permission, requestPermission] = useCameraPermissions();
 
@@ -249,11 +251,22 @@ export default function CaptureFarmGateScreen() {
     try {
       setSaving(true);
 
+      if (!watermarkRef.current) {
+        Alert.alert("Watermark Failed", "Watermarked image preview is not ready.");
+        return;
+      }
+
+      const watermarkedUri = await captureRef(watermarkRef, {
+        format: "jpg",
+        quality: 0.9,
+        result: "tmpfile",
+      });
+
       if (cultureCycleId) {
         const uploadResponse = await uploadAquacultureImage(
           cultureCycleId,
           {
-            uri: photoUri,
+            uri: String(watermarkedUri),
             name: `farm-gate-${Date.now()}.jpg`,
             type: "image/jpeg",
           },
@@ -432,7 +445,12 @@ export default function CaptureFarmGateScreen() {
 
             <View className="overflow-hidden rounded-3xl border border-white/10 bg-[#0B1220]">
               {photoUri ? (
-                <View>
+                <View
+                  collapsable={false}
+                  ref={(ref) => {
+                    watermarkRef.current = ref;
+                  }}
+                >
                   <Image
                     source={{ uri: photoUri }}
                     className="h-[430px] w-full"

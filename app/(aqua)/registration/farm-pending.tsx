@@ -19,12 +19,14 @@ export default function FarmPendingScreen() {
   const submission = useSelector(selectAquaSubmission);
   const registration = useSelector(selectAquaRegistration);
 
-  const farmId = getParamValue(params.farmId, ""); // backend DB id only, not official QR Farm ID
+  const farmId =
+    getParamValue(params.farmId, "") || getParamValue(params.farmDbId, ""); // backend DB id only, not official QR Farm ID
   const farmName =
     getParamValue(params.farmName, "") ||
     registration.farm.farmName?.trim() ||
     "Your farm";
-  const temporaryServerCode = getParamValue(params.farmCode, "");
+  const temporaryServerCode =
+    getParamValue(params.farmCode, "") || getParamValue(params.tempFarmCode, "");
 
   const handleAddPonds = () => {
     if (!farmId) {

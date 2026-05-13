@@ -145,7 +145,7 @@ export default function FarmReviewSubmitScreen() {
   const dispatch = useDispatch<AppDispatch>();
 
   const registration = useSelector(selectAquaRegistration);
-  const { farmer, farm, submission } = registration;
+  const { farm, submission } = registration;
 
   const me = useSelector((state: any) => state.me?.me);
   const loginState = useSelector((state: any) => state.login);
@@ -319,6 +319,7 @@ export default function FarmReviewSubmitScreen() {
 
     const payload = {
       user_id: Number(loggedUserId),
+      owner_id: Number(loggedUserId),
       farm_prefix: farmPrefix,
       farm_name: farm.farmName.trim(),
       address: farm.farmAddress.trim(),
@@ -413,36 +414,13 @@ export default function FarmReviewSubmitScreen() {
 
       <View className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#0B1220]">
         <Text className="mb-3 text-base font-semibold text-slate-900 dark:text-white">
-          Farmer Details
-        </Text>
-
-        <View className="rounded-2xl border border-slate-100 bg-slate-50 px-3 dark:border-white/5 dark:bg-white/5">
-          <InfoRow label="Farmer Name" value={farmer.farmerName} />
-          <View className="h-px bg-slate-100 dark:bg-white/5" />
-
-          <InfoRow label="Mobile Number" value={farmer.mobileNumber} />
-          <View className="h-px bg-slate-100 dark:bg-white/5" />
-
-          <InfoRow label="Email" value={farmer.email ?? ""} />
-          <View className="h-px bg-slate-100 dark:bg-white/5" />
-
-          <InfoRow label="Aadhaar Number" value={farmer.aadhaarNumber ?? ""} />
-        </View>
-      </View>
-
-      <View className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#0B1220]">
-        <Text className="mb-3 text-base font-semibold text-slate-900 dark:text-white">
           Farm Details
         </Text>
 
         <View className="rounded-2xl border border-slate-100 bg-slate-50 px-3 dark:border-white/5 dark:bg-white/5">
           <InfoRow
-            label="User ID"
-            value={
-              loadingUserId
-                ? "Loading..."
-                : loggedUserId || "Not found"
-            }
+            label="Owner ID"
+            value={loadingUserId ? "Loading..." : loggedUserId || "Not found"}
           />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 

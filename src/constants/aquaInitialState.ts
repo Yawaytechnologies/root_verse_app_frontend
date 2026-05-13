@@ -33,17 +33,16 @@ export const initialFarmData: AquaFarmData = {
   pondCount: "",
   latitude: "",
   longitude: "",
+  technicianName: "",
+  technicianMobileNumber: "",
 };
 
 export const initialPondData: AquaPondData = {
   id: "",
   pondName: "",
   pondArea: "",
+  pondType: "Earthen",
   cultureType: "",
-  speciesId: "",
-  speciesName: "",
-  speciesCode: "",
-  speciesImageUrl: "",
   gpsLat: "",
   gpsLng: "",
   pondImageCaptured: false,

@@ -56,11 +56,6 @@ export type AquaPondData = {
 
   cultureType: string;
 
-  speciesId: string;
-  speciesName: string;
-  speciesCode: string;
-  speciesImageUrl: string;
-
   gpsLat: string;
   gpsLng: string;
   pondImageCaptured: boolean;

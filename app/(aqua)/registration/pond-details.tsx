@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -6,8 +6,6 @@ import {
   ScrollView,
   Pressable,
   Alert,
-  Image,
-  Modal,
   ActivityIndicator,
 } from "react-native";
 import * as Location from "expo-location";
@@ -19,20 +17,12 @@ import { useDispatch, useSelector } from "react-redux";
 
 import type { AppDispatch } from "../../../src/store/auth/store";
 import type { AquaPondData } from "../../../src/types/aqua";
-import { API_BASE } from "../../../src/config/env";
 import { selectAquaRegistration } from "../../../src/features/aqua/registration/registration.selectors";
 import {
   addPond,
   removePond,
   setPondField,
 } from "../../../src/features/aqua/registration/registration.slice";
-
-type FishTypeItem = {
-  id: number;
-  fish_name: string;
-  fish_code?: string;
-  fish_type_url?: string;
-};
 
 const POND_TYPES = ["Earthen", "HDPE", "Concrete"];
 
@@ -63,77 +53,6 @@ function Field({
         keyboardType={keyboardType}
         className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 dark:border-white/10 dark:bg-[#0B1220] dark:text-white"
       />
-    </View>
-  );
-}
-
-function SelectTrigger({
-  label,
-  placeholder,
-  selectedLabel,
-  selectedSub,
-  loading,
-  onPress,
-}: {
-  label: string;
-  placeholder: string;
-  selectedLabel?: string;
-  selectedSub?: string;
-  loading?: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <View className="gap-2">
-      <Text className="text-sm font-medium text-slate-900 dark:text-white">
-        {label}
-      </Text>
-
-      <Pressable
-        onPress={onPress}
-        disabled={loading}
-        className={`flex-row items-center justify-between rounded-2xl border px-4 py-3 ${
-          selectedLabel
-            ? "border-emerald-300 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10"
-            : "border-slate-200 bg-white dark:border-white/10 dark:bg-[#0B1220]"
-        }`}
-      >
-        {loading ? (
-          <View className="flex-1 flex-row items-center gap-2">
-            <ActivityIndicator size="small" color="#94A3B8" />
-            <Text className="text-sm text-slate-400 dark:text-white/40">
-              Loading...
-            </Text>
-          </View>
-        ) : selectedLabel ? (
-          <View className="flex-1">
-            <Text
-              className="text-sm font-semibold text-emerald-800 dark:text-emerald-300"
-              numberOfLines={1}
-            >
-              {selectedLabel}
-            </Text>
-
-            {selectedSub ? (
-              <Text
-                className="mt-0.5 text-xs text-emerald-600 dark:text-emerald-400"
-                numberOfLines={1}
-              >
-                {selectedSub}
-              </Text>
-            ) : null}
-          </View>
-        ) : (
-          <Text className="flex-1 text-sm text-slate-400 dark:text-white/40">
-            {placeholder}
-          </Text>
-        )}
-
-        <Ionicons
-          name="chevron-down"
-          size={18}
-          color={selectedLabel ? "#059669" : "#94A3B8"}
-        />
-      </Pressable>
     </View>
   );
 }
@@ -180,12 +99,6 @@ export default function PondDetailsScreen() {
   const [gpsLat, setGpsLat] = useState("");
   const [gpsLng, setGpsLng] = useState("");
   const [gpsLoading, setGpsLoading] = useState(false);
-
-  const [fishTypes, setFishTypes] = useState<FishTypeItem[]>([]);
-  const [fishTypesLoading, setFishTypesLoading] = useState(false);
-  const [speciesModalForIndex, setSpeciesModalForIndex] = useState<
-    number | null
-  >(null);
 
   useEffect(() => {
     if (ponds.length === 0) {
@@ -235,27 +148,6 @@ export default function PondDetailsScreen() {
   }, []);
 
   useEffect(() => {
-    const loadFishTypes = async () => {
-      try {
-        setFishTypesLoading(true);
-
-        const res = await fetch(`${API_BASE}/api/fish-types`);
-        const data = await res.json();
-
-        const list = Array.isArray(data) ? data : data?.data ?? [];
-
-        setFishTypes(list);
-      } catch (error) {
-        console.error("Failed to load fish types:", error);
-      } finally {
-        setFishTypesLoading(false);
-      }
-    };
-
-    loadFishTypes();
-  }, []);
-
-  useEffect(() => {
     if (!gpsLat || !gpsLng) return;
 
     ponds.forEach((pond, index) => {
@@ -268,35 +160,6 @@ export default function PondDetailsScreen() {
       }
     });
   }, [dispatch, gpsLat, gpsLng, ponds]);
-
-  const handleSpeciesSelect = (index: number, item: FishTypeItem) => {
-    dispatch(setPondField({ index, key: "speciesId", value: String(item.id) }));
-    dispatch(setPondField({ index, key: "speciesName", value: item.fish_name }));
-    dispatch(
-      setPondField({
-        index,
-        key: "speciesCode",
-        value: item.fish_code ?? "",
-      }),
-    );
-    dispatch(
-      setPondField({
-        index,
-        key: "speciesImageUrl",
-        value: item.fish_type_url ?? "",
-      }),
-    );
-
-    dispatch(
-      setPondField({
-        index,
-        key: "cultureType",
-        value: item.fish_name,
-      }),
-    );
-
-    setSpeciesModalForIndex(null);
-  };
 
   const validatePonds = () => {
     if (!farm.farmName?.trim()) {
@@ -346,11 +209,6 @@ export default function PondDetailsScreen() {
 
       if (!Number.isFinite(volume) || volume <= 0) {
         Alert.alert("Validation", `Enter valid volume for Pond ${i + 1}`);
-        return false;
-      }
-
-      if (!pond.speciesId.trim()) {
-        Alert.alert("Validation", `Please select species for Pond ${i + 1}`);
         return false;
       }
 
@@ -416,14 +274,6 @@ export default function PondDetailsScreen() {
 
   const latDisplay = gpsLoading ? "Fetching..." : gpsLat || farm.latitude || "N/A";
   const lngDisplay = gpsLoading ? "Fetching..." : gpsLng || farm.longitude || "N/A";
-
-  const selectedSpeciesItem = useMemo(() => {
-    if (speciesModalForIndex === null) return null;
-
-    const selectedId = ponds[speciesModalForIndex]?.speciesId;
-
-    return fishTypes.find((item) => String(item.id) === String(selectedId));
-  }, [speciesModalForIndex, ponds, fishTypes]);
 
   return (
     <>
@@ -611,34 +461,6 @@ export default function PondDetailsScreen() {
                     />
                   </View>
 
-                  <SelectTrigger
-                    label={t("registration.species")}
-                    placeholder={t("registration.selectSpecies")}
-                    selectedLabel={pond.speciesName || undefined}
-                    selectedSub={
-                      pond.speciesCode ? `Code: ${pond.speciesCode}` : undefined
-                    }
-                    loading={fishTypesLoading}
-                    onPress={() => setSpeciesModalForIndex(index)}
-                  />
-
-                  {pond.speciesImageUrl ? (
-                    <View className="overflow-hidden rounded-2xl border border-slate-200 dark:border-white/10">
-                      <Image
-                        source={{ uri: pond.speciesImageUrl }}
-                        className="h-28 w-full"
-                        resizeMode="cover"
-                      />
-
-                      <View className="bg-slate-50 px-3 py-2 dark:bg-white/5">
-                        <Text className="text-xs font-medium text-slate-600 dark:text-white/60">
-                          {pond.speciesName}
-                          {pond.speciesCode ? ` • ${pond.speciesCode}` : ""}
-                        </Text>
-                      </View>
-                    </View>
-                  ) : null}
-
                   <View className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/5">
                     <Text className="text-sm font-semibold text-slate-900 dark:text-white">
                       {t("registration.pondGpsMap")}
@@ -769,111 +591,6 @@ export default function PondDetailsScreen() {
           </View>
         </View>
       </ScrollView>
-
-      <Modal
-        visible={speciesModalForIndex !== null}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setSpeciesModalForIndex(null)}
-      >
-        <View className="flex-1 justify-end bg-black/50">
-          <View
-            className="rounded-t-3xl bg-white px-4 pb-6 pt-4 dark:bg-[#0B1220]"
-            style={{ maxHeight: "75%" }}
-          >
-            <View className="mb-4 flex-row items-center justify-between">
-              <Text className="text-base font-semibold text-slate-900 dark:text-white">
-                {t("registration.selectSpecies")}
-              </Text>
-
-              <Pressable
-                onPress={() => setSpeciesModalForIndex(null)}
-                className="h-10 w-10 items-center justify-center rounded-full bg-slate-100 dark:bg-white/10"
-              >
-                <Ionicons name="close" size={20} color="#94A3B8" />
-              </Pressable>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {fishTypesLoading ? (
-                <View className="items-center py-8">
-                  <ActivityIndicator size="large" color="#94A3B8" />
-
-                  <Text className="mt-3 text-sm text-slate-500 dark:text-white/50">
-                    {t("registration.loadingSpecies")}
-                  </Text>
-                </View>
-              ) : fishTypes.length ? (
-                fishTypes.map((item) => {
-                  const isSelected =
-                    selectedSpeciesItem?.id &&
-                    String(selectedSpeciesItem.id) === String(item.id);
-
-                  return (
-                    <Pressable
-                      key={item.id}
-                      onPress={() => {
-                        if (speciesModalForIndex !== null) {
-                          handleSpeciesSelect(speciesModalForIndex, item);
-                        }
-                      }}
-                      className={`mb-3 overflow-hidden rounded-2xl border ${
-                        isSelected
-                          ? "border-emerald-300 dark:border-emerald-500/30"
-                          : "border-slate-200 dark:border-white/10"
-                      } bg-white dark:bg-[#111827]`}
-                    >
-                      {item.fish_type_url ? (
-                        <Image
-                          source={{ uri: item.fish_type_url }}
-                          className="h-32 w-full"
-                          resizeMode="cover"
-                        />
-                      ) : (
-                        <View className="h-20 w-full items-center justify-center bg-slate-100 dark:bg-white/5">
-                          <Ionicons
-                            name="fish-outline"
-                            size={32}
-                            color="#94A3B8"
-                          />
-                        </View>
-                      )}
-
-                      <View className="flex-row items-center justify-between px-4 py-3">
-                        <View className="flex-1">
-                          <Text className="text-sm font-semibold text-slate-900 dark:text-white">
-                            {item.fish_name}
-                          </Text>
-
-                          {item.fish_code ? (
-                            <Text className="mt-0.5 text-xs text-slate-500 dark:text-white/50">
-                              Code: {item.fish_code}
-                            </Text>
-                          ) : null}
-                        </View>
-
-                        {isSelected ? (
-                          <Ionicons
-                            name="checkmark-circle"
-                            size={20}
-                            color="#059669"
-                          />
-                        ) : null}
-                      </View>
-                    </Pressable>
-                  );
-                })
-              ) : (
-                <View className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/5">
-                  <Text className="text-sm text-slate-600 dark:text-white/60">
-                    {t("registration.noSpeciesAvailable")}
-                  </Text>
-                </View>
-              )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </>
   );
 }

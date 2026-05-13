@@ -17,11 +17,9 @@ import { useDispatch, useSelector } from "react-redux";
 
 import type { AppDispatch } from "../../../src/store/auth/store";
 import {
-  selectAquaFarmer,
   selectAquaFarm,
 } from "../../../src/features/aqua/registration/registration.selectors";
 import {
-  setFarmerField,
   setFarmField,
 } from "../../../src/features/aqua/registration/registration.slice";
 
@@ -32,15 +30,9 @@ import {
   fetchLocationsByDistrict,
 } from "../../../src/store/auth/location.slice";
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MOBILE_REGEX = /^\d{10}$/;
-const AADHAAR_REGEX = /^\d{12}$/;
-const ALPHA_SPACE_REGEX = /^[A-Za-z\s]+$/;
 const DECIMAL_REGEX = /^-?\d+(\.\d+)?$/;
 const INTEGER_REGEX = /^\d+$/;
-
-const sanitizeAlphaText = (text: string) =>
-  text.replace(/[^A-Za-z\s]/g, "").replace(/\s{2,}/g, " ");
 
 type PickerType = "country" | "state" | "district" | "location" | null;
 
@@ -66,39 +58,6 @@ function extractLabel(item: any): string {
   );
 }
 
-function pad2(value: number) {
-  return String(value).padStart(2, "0");
-}
-
-function toYmd(year: number, month: number, day: number) {
-  return `${year}-${pad2(month)}-${pad2(day)}`;
-}
-
-function getDaysInMonth(year: number, month: number) {
-  return new Date(year, month, 0).getDate();
-}
-
-function parseYmd(value: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
-
-  if (!match) return null;
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-
-  if (!year || !month || !day) return null;
-
-  return { year, month, day };
-}
-
-function formatDobForUi(value: string) {
-  const parsed = parseYmd(value);
-
-  if (!parsed) return "";
-
-  return `${pad2(parsed.day)}-${pad2(parsed.month)}-${parsed.year}`;
-}
 
 function Field({
   label,
@@ -200,77 +159,6 @@ function SelectField({
   );
 }
 
-function DateSelectField({
-  label,
-  value,
-  placeholder,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  onPress: () => void;
-}) {
-  return (
-    <View className="flex-1 gap-2">
-      <Text className="text-sm font-medium text-slate-900 dark:text-white">
-        {label}
-      </Text>
-
-      <Pressable
-        onPress={onPress}
-        className="rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-white/10 dark:bg-[#0B1220]"
-      >
-        <View className="flex-row items-center justify-between">
-          <Text
-            className={`flex-1 text-sm ${
-              value
-                ? "text-slate-900 dark:text-white"
-                : "text-slate-400 dark:text-white/40"
-            }`}
-            numberOfLines={1}
-          >
-            {value || placeholder}
-          </Text>
-
-          <Ionicons name="calendar-outline" size={18} color="#94A3B8" />
-        </View>
-      </Pressable>
-    </View>
-  );
-}
-
-function DateOption({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className={`mb-2 rounded-xl border px-3 py-2 ${
-        active
-          ? "border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-500/20"
-          : "border-slate-200 bg-white dark:border-white/10 dark:bg-white/5"
-      }`}
-    >
-      <Text
-        className={`text-center text-sm font-semibold ${
-          active
-            ? "text-blue-700 dark:text-blue-200"
-            : "text-slate-700 dark:text-white/70"
-        }`}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 export default function FarmDetailsScreen() {
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch<AppDispatch>();
@@ -280,7 +168,6 @@ export default function FarmDetailsScreen() {
     return t(key, { defaultValue: fallback });
   };
 
-  const farmer = useSelector(selectAquaFarmer);
   const farm = useSelector(selectAquaFarm);
 
   const me = useSelector((state: any) => state.me?.me);
@@ -288,13 +175,6 @@ export default function FarmDetailsScreen() {
 
   const [locationFetching, setLocationFetching] = useState(false);
   const [pickerType, setPickerType] = useState<PickerType>(null);
-
-  const currentYear = new Date().getFullYear();
-
-  const [dobModalVisible, setDobModalVisible] = useState(false);
-  const [dobYear, setDobYear] = useState(currentYear - 25);
-  const [dobMonth, setDobMonth] = useState(1);
-  const [dobDay, setDobDay] = useState(1);
 
   const locationState = useSelector((state: any) => state.location);
 
@@ -314,28 +194,6 @@ export default function FarmDetailsScreen() {
     locationState?.locationsLoadingByDistrictId?.[
       Number(farm.districtId || 0)
     ] ?? false;
-
-  const yearOptions = useMemo(() => {
-    return Array.from({ length: 91 }, (_, index) => currentYear - index);
-  }, [currentYear]);
-
-  const monthOptions = useMemo(() => {
-    return Array.from({ length: 12 }, (_, index) => index + 1);
-  }, []);
-
-  const dayOptions = useMemo(() => {
-    const days = getDaysInMonth(dobYear, dobMonth);
-
-    return Array.from({ length: days }, (_, index) => index + 1);
-  }, [dobYear, dobMonth]);
-
-  useEffect(() => {
-    const maxDay = getDaysInMonth(dobYear, dobMonth);
-
-    if (dobDay > maxDay) {
-      setDobDay(maxDay);
-    }
-  }, [dobDay, dobMonth, dobYear]);
 
   useEffect(() => {
     if (ownerId) {
@@ -463,33 +321,6 @@ export default function FarmDetailsScreen() {
     return [];
   }, [pickerType, countries, states, districts, locations]);
 
-  const openDobModal = () => {
-    const existing = parseYmd(String((farmer as any).dateOfBirth ?? ""));
-
-    if (existing) {
-      setDobYear(existing.year);
-      setDobMonth(existing.month);
-      setDobDay(existing.day);
-    } else {
-      setDobYear(currentYear - 25);
-      setDobMonth(1);
-      setDobDay(1);
-    }
-
-    setDobModalVisible(true);
-  };
-
-  const saveDob = () => {
-    dispatch(
-      setFarmerField({
-        key: "dateOfBirth" as any,
-        value: toYmd(dobYear, dobMonth, dobDay),
-      }),
-    );
-
-    setDobModalVisible(false);
-  };
-
   const handleCountrySelect = async (item: any) => {
     const id = String(extractId(item));
     const name = extractLabel(item);
@@ -579,82 +410,6 @@ export default function FarmDetailsScreen() {
   };
 
   const handleNext = () => {
-    const farmerName = String(farmer.farmerName ?? "").trim();
-    const mobile = String(farmer.mobileNumber ?? "").trim();
-    const email = String(farmer.email ?? "").trim();
-    const aadhaar = String(farmer.aadhaarNumber ?? "").trim();
-
-    const fatherName = String((farmer as any).fatherName ?? "").trim();
-    const dob = String((farmer as any).dateOfBirth ?? "").trim();
-    const farmerLicense = String((farmer as any).farmerLicense ?? "").trim();
-    const farmerAddress = String((farmer as any).farmerAddress ?? "").trim();
-
-    if (!farmerName) {
-      Alert.alert("Validation", "Please enter farmer name");
-      return;
-    }
-
-    if (!ALPHA_SPACE_REGEX.test(farmerName)) {
-      Alert.alert(
-        "Validation",
-        "Farmer name should contain only letters and spaces",
-      );
-      return;
-    }
-
-    if (!mobile) {
-      Alert.alert("Validation", "Please enter mobile number");
-      return;
-    }
-
-    if (!MOBILE_REGEX.test(mobile)) {
-      Alert.alert("Validation", "Mobile number must be exactly 10 digits");
-      return;
-    }
-
-    if (!fatherName) {
-      Alert.alert("Validation", "Please enter father name");
-      return;
-    }
-
-    if (!ALPHA_SPACE_REGEX.test(fatherName)) {
-      Alert.alert(
-        "Validation",
-        "Father name should contain only letters and spaces",
-      );
-      return;
-    }
-
-    if (!dob) {
-      Alert.alert("Validation", "Please select date of birth");
-      return;
-    }
-
-    if (!farmerLicense) {
-      Alert.alert("Validation", "Please enter farmer license");
-      return;
-    }
-
-    if (!farmerAddress) {
-      Alert.alert("Validation", "Please enter farmer address");
-      return;
-    }
-
-    if (email && !EMAIL_REGEX.test(email)) {
-      Alert.alert("Validation", "Please enter a valid email address");
-      return;
-    }
-
-    if (!aadhaar) {
-      Alert.alert("Validation", "Please enter Aadhaar number");
-      return;
-    }
-
-    if (!AADHAAR_REGEX.test(aadhaar)) {
-      Alert.alert("Validation", "Aadhaar number must be exactly 12 digits");
-      return;
-    }
-
     if (!farm.farmName.trim()) {
       Alert.alert("Validation", "Please enter farm name");
       return;
@@ -773,179 +528,9 @@ export default function FarmDetailsScreen() {
               <Text className="mt-1 text-lg font-bold text-white">
                 {tr(
                   "registration.farmRegistrationSubheader",
-                  "Farmer, farm and pond details",
+                  "Farm and pond details",
                 )}
               </Text>
-            </View>
-          </View>
-        </View>
-
-        <View className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#0B1220]">
-          <Text className="text-base font-semibold text-slate-900 dark:text-white">
-            {tr("registration.farmerSection", "Farmer Profile")}
-          </Text>
-
-          <View className="mt-4 gap-4">
-            <View className="flex-row gap-3">
-              <Field
-                label={tr("registration.farmerName", "Farmer Name")}
-                placeholder={tr(
-                  "registration.farmerNamePlaceholder",
-                  "Enter farmer name",
-                )}
-                value={farmer.farmerName}
-                onChangeText={(text) =>
-                  dispatch(
-                    setFarmerField({
-                      key: "farmerName",
-                      value: sanitizeAlphaText(text),
-                    }),
-                  )
-                }
-              />
-
-              <Field
-                label={tr("registration.contactNumber", "Contact Number")}
-                placeholder={tr(
-                  "registration.mobileNumberPlaceholder",
-                  "Enter 10 digit mobile",
-                )}
-                value={farmer.mobileNumber}
-                onChangeText={(text) =>
-                  dispatch(
-                    setFarmerField({
-                      key: "mobileNumber",
-                      value: text.replace(/\D/g, "").slice(0, 10),
-                    }),
-                  )
-                }
-                keyboardType="phone-pad"
-              />
-            </View>
-
-            <View className="flex-row gap-3">
-              <Field
-                label={tr("registration.fatherName", "Father Name")}
-                placeholder={tr(
-                  "registration.fatherNamePlaceholder",
-                  "Enter father name",
-                )}
-                value={(farmer as any).fatherName ?? ""}
-                onChangeText={(text) =>
-                  dispatch(
-                    setFarmerField({
-                      key: "fatherName" as any,
-                      value: sanitizeAlphaText(text),
-                    }),
-                  )
-                }
-              />
-
-              <DateSelectField
-                label={tr("registration.dateOfBirth", "Date of Birth")}
-                placeholder={tr("registration.selectDate", "Select date")}
-                value={formatDobForUi(
-                  String((farmer as any).dateOfBirth ?? ""),
-                )}
-                onPress={openDobModal}
-              />
-            </View>
-
-            <Field
-              label={tr("registration.farmerLicense", "Farmer License")}
-              placeholder={tr(
-                "registration.farmerLicensePlaceholder",
-                "Enter farmer license number",
-              )}
-              value={(farmer as any).farmerLicense ?? ""}
-              onChangeText={(text) =>
-                dispatch(
-                  setFarmerField({
-                    key: "farmerLicense" as any,
-                    value: text,
-                  }),
-                )
-              }
-            />
-
-            <Field
-              label={tr("registration.farmerAddress", "Farmer Address")}
-              placeholder={tr(
-                "registration.farmerAddressPlaceholder",
-                "Enter farmer address",
-              )}
-              value={(farmer as any).farmerAddress ?? ""}
-              onChangeText={(text) =>
-                dispatch(
-                  setFarmerField({
-                    key: "farmerAddress" as any,
-                    value: text,
-                  }),
-                )
-              }
-              multiline
-            />
-
-            <View className="flex-row gap-3">
-              <Field
-                label={tr("registration.experienceYears", "Years")}
-                placeholder="0"
-                value={(farmer as any).farmingExperienceYears ?? ""}
-                onChangeText={(text) =>
-                  dispatch(
-                    setFarmerField({
-                      key: "farmingExperienceYears" as any,
-                      value: text.replace(/\D/g, ""),
-                    }),
-                  )
-                }
-                keyboardType="numeric"
-              />
-
-              <Field
-                label={tr("registration.experienceMonths", "Months")}
-                placeholder="0"
-                value={(farmer as any).farmingExperienceMonths ?? ""}
-                onChangeText={(text) =>
-                  dispatch(
-                    setFarmerField({
-                      key: "farmingExperienceMonths" as any,
-                      value: text.replace(/\D/g, "").slice(0, 2),
-                    }),
-                  )
-                }
-                keyboardType="numeric"
-              />
-            </View>
-
-            <View className="flex-row gap-3">
-              <Field
-                label={tr("registration.email", "Email")}
-                placeholder={tr("registration.emailPlaceholder", "Enter email")}
-                value={farmer.email ?? ""}
-                onChangeText={(text) =>
-                  dispatch(setFarmerField({ key: "email", value: text }))
-                }
-                keyboardType="email-address"
-              />
-
-              <Field
-                label={tr("registration.aadhaarNumber", "Aadhaar Number")}
-                placeholder={tr(
-                  "registration.aadhaarPlaceholder",
-                  "Enter 12 digit Aadhaar",
-                )}
-                value={farmer.aadhaarNumber ?? ""}
-                onChangeText={(text) =>
-                  dispatch(
-                    setFarmerField({
-                      key: "aadhaarNumber",
-                      value: text.replace(/\D/g, "").slice(0, 12),
-                    }),
-                  )
-                }
-                keyboardType="numeric"
-              />
             </View>
           </View>
         </View>
@@ -1257,121 +842,6 @@ export default function FarmDetailsScreen() {
           </View>
         </View>
       </ScrollView>
-
-      <Modal
-        visible={dobModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setDobModalVisible(false)}
-      >
-        <View className="flex-1 justify-end bg-black/40">
-          <View className="rounded-t-3xl bg-white p-5 dark:bg-[#0B1220]">
-            <View className="mb-4 flex-row items-center justify-between">
-              <Text className="text-lg font-bold text-slate-900 dark:text-white">
-                {tr(
-                  "registration.selectDateOfBirth",
-                  "Select Date of Birth",
-                )}
-              </Text>
-
-              <Pressable
-                onPress={() => setDobModalVisible(false)}
-                className="h-9 w-9 items-center justify-center rounded-full bg-slate-100 dark:bg-white/10"
-              >
-                <Ionicons name="close" size={20} color="#64748B" />
-              </Pressable>
-            </View>
-
-            <View className="mb-4 rounded-2xl border border-blue-100 bg-blue-50 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
-              <Text className="text-center text-sm font-bold text-blue-700 dark:text-blue-200">
-                {`${pad2(dobDay)}-${pad2(dobMonth)}-${dobYear}`}
-              </Text>
-            </View>
-
-            <View className="flex-row gap-3">
-              <View className="flex-1">
-                <Text className="mb-2 text-center text-sm font-bold text-slate-700 dark:text-white/80">
-                  {tr("registration.year", "Year")}
-                </Text>
-
-                <ScrollView
-                  style={{ maxHeight: 220 }}
-                  showsVerticalScrollIndicator={false}
-                >
-                  {yearOptions.map((year) => (
-                    <DateOption
-                      key={year}
-                      label={String(year)}
-                      active={dobYear === year}
-                      onPress={() => setDobYear(year)}
-                    />
-                  ))}
-                </ScrollView>
-              </View>
-
-              <View className="flex-1">
-                <Text className="mb-2 text-center text-sm font-bold text-slate-700 dark:text-white/80">
-                  {tr("registration.month", "Month")}
-                </Text>
-
-                <ScrollView
-                  style={{ maxHeight: 220 }}
-                  showsVerticalScrollIndicator={false}
-                >
-                  {monthOptions.map((month) => (
-                    <DateOption
-                      key={month}
-                      label={pad2(month)}
-                      active={dobMonth === month}
-                      onPress={() => setDobMonth(month)}
-                    />
-                  ))}
-                </ScrollView>
-              </View>
-
-              <View className="flex-1">
-                <Text className="mb-2 text-center text-sm font-bold text-slate-700 dark:text-white/80">
-                  {tr("registration.day", "Day")}
-                </Text>
-
-                <ScrollView
-                  style={{ maxHeight: 220 }}
-                  showsVerticalScrollIndicator={false}
-                >
-                  {dayOptions.map((day) => (
-                    <DateOption
-                      key={day}
-                      label={pad2(day)}
-                      active={dobDay === day}
-                      onPress={() => setDobDay(day)}
-                    />
-                  ))}
-                </ScrollView>
-              </View>
-            </View>
-
-            <View className="mt-5 flex-row gap-3">
-              <Pressable
-                onPress={() => setDobModalVisible(false)}
-                className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 dark:border-white/10 dark:bg-white/5"
-              >
-                <Text className="text-center text-base font-bold text-slate-700 dark:text-white">
-                  {tr("common.cancel", "Cancel")}
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={saveDob}
-                className="flex-1 rounded-2xl bg-blue-600 py-3"
-              >
-                <Text className="text-center text-base font-bold text-white">
-                  {tr("common.save", "Save")}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       <Modal
         visible={pickerType !== null}

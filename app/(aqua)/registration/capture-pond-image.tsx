@@ -12,6 +12,7 @@ import * as Location from "expo-location";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { captureRef } from "react-native-view-shot";
 
 import {
   activatePondQrById,
@@ -78,6 +79,7 @@ export default function CapturePondImageScreen() {
     getParamValue(params.stocking_date) || getParamValue(params.stockingDate);
 
   const cameraRef = useRef<CameraView | null>(null);
+  const watermarkRef = useRef<View | null>(null);
 
   const [permission, requestPermission] = useCameraPermissions();
 
@@ -378,10 +380,21 @@ export default function CapturePondImageScreen() {
   try {
     setSaving(true);
 
+    if (!watermarkRef.current) {
+      Alert.alert("Watermark Failed", "Watermarked image preview is not ready.");
+      return;
+    }
+
+    const watermarkedUri = await captureRef(watermarkRef, {
+      format: "jpg",
+      quality: 0.9,
+      result: "tmpfile",
+    });
+
     const uploadResponse = await uploadAquacultureImage(
       cultureCycleId,
       {
-        uri: photoUri,
+        uri: String(watermarkedUri),
         name: `pond-${Date.now()}.jpg`,
         type: "image/jpeg",
       },
@@ -589,7 +602,12 @@ export default function CapturePondImageScreen() {
 
             <View className="overflow-hidden rounded-3xl border border-white/10 bg-[#0B1220]">
               {photoUri ? (
-                <View>
+                <View
+                  collapsable={false}
+                  ref={(ref) => {
+                    watermarkRef.current = ref;
+                  }}
+                >
                   <Image
                     source={{ uri: photoUri }}
                     className="h-[430px] w-full"
