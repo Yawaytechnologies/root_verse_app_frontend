@@ -46,9 +46,6 @@ type PondRecord = {
   qr_value?: string;
   pond_name?: string;
   name?: string;
-  species?: string;
-  species_name?: string;
-  culture_type?: string;
   user_id?: number | string;
 };
 
@@ -178,7 +175,6 @@ export default function CultureCycleAddScreen() {
 
   const [startDate, setStartDate] = useState(todayDate());
   const [endDate, setEndDate] = useState(plusMonths(4));
-  const [species, setSpecies] = useState("");
 
   const selectedFarm = farms.find((farm) => sameId(farm.id, selectedFarmId));
   const selectedPond = ponds.find((pond) => sameId(pond.id, selectedPondId));
@@ -320,34 +316,10 @@ export default function CultureCycleAddScreen() {
 
     if (firstPond) {
       setSelectedPondId(String(firstPond.id));
-
-      const foundSpecies = pickName(
-        firstPond.species,
-        firstPond.species_name,
-        firstPond.culture_type,
-      );
-
-      if (foundSpecies && !species) {
-        setSpecies(foundSpecies);
-      }
     } else {
       setSelectedPondId("");
     }
-  }, [selectedFarmId, ponds, species]);
-
-  useEffect(() => {
-    if (!selectedPond) return;
-
-    const foundSpecies = pickName(
-      selectedPond.species,
-      selectedPond.species_name,
-      selectedPond.culture_type,
-    );
-
-    if (foundSpecies) {
-      setSpecies(foundSpecies);
-    }
-  }, [selectedPond]);
+  }, [selectedFarmId, ponds]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -394,11 +366,6 @@ export default function CultureCycleAddScreen() {
       return false;
     }
 
-    if (!species.trim()) {
-      Alert.alert(t("common.failed"), `${t("cultureCycle.species")} required`);
-      return false;
-    }
-
     return true;
   };
 
@@ -414,7 +381,6 @@ export default function CultureCycleAddScreen() {
         pond_id: Number(selectedPondId),
         start_date: startDate.trim(),
         end_date: endDate.trim(),
-        species: species.trim(),
         verification_status: "PENDING",
         status: "PENDING",
       };
@@ -619,13 +585,6 @@ export default function CultureCycleAddScreen() {
             placeholder="YYYY-MM-DD"
             value={endDate}
             onChangeText={setEndDate}
-          />
-
-          <Field
-            label={t("cultureCycle.species")}
-            placeholder={t("cultureCycle.speciesPlaceholder")}
-            value={species}
-            onChangeText={setSpecies}
           />
         </View>
 

@@ -74,7 +74,6 @@ export default function CapturePondImageScreen() {
     getParamValue(params.endDate) ||
     futureDate(120);
 
-  const species = getParamValue(params.species);
   const stockingDate =
     getParamValue(params.stocking_date) || getParamValue(params.stockingDate);
 
@@ -196,10 +195,6 @@ export default function CapturePondImageScreen() {
       verification_status: "PENDING",
       status: "PENDING",
     };
-
-    if (species) {
-      payload.species = species;
-    }
 
     if (stockingDate) {
       payload.stocking_date = stockingDate;

@@ -17,7 +17,6 @@ export type CultureCycleRecord = {
   pond_id: number | string;
   start_date?: string;
   end_date?: string;
-  species?: string;
   verification_status?: string;
   status?: string;
   created_at?: string;
@@ -191,7 +190,6 @@ export async function createCultureCycle(payload: {
   pond_id: number;
   start_date: string;
   end_date: string;
-  species?: string;
   verification_status?: string;
   status?: string;
 }): Promise<ApiResult<CultureCycleRecord>> {
@@ -204,7 +202,6 @@ export async function createCultureCycle(payload: {
       pond_id: payload.pond_id,
       start_date: payload.start_date,
       end_date: payload.end_date,
-      species: payload.species || undefined,
       verification_status: payload.verification_status || "PENDING",
       status: payload.status || "PENDING",
     },
