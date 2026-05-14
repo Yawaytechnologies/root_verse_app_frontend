@@ -28,6 +28,8 @@ export type FarmRegistrationJson = {
   farm_gate_longitude: number;
   water_source: string;
   farm_area_acres: number;
+  technician_name?: string | null;
+  technician_phone?: string | null;
 };
 
 export type PondRegistrationJson = {
@@ -54,6 +56,8 @@ export type FarmRecord = {
   farm_gate_longitude?: string | number;
   water_source?: string;
   farm_area_acres?: string | number;
+  technician_name?: string | null;
+  technician_phone?: string | null;
   user_id?: number;
   owner_id?: number;
   status?: string;
@@ -605,6 +609,8 @@ function normalizeFarmRecord(item: any): FarmRecord {
     farm_gate_longitude: item.farm_gate_longitude,
     water_source: item.water_source,
     farm_area_acres: item.farm_area_acres,
+    technician_name: item.technician_name,
+    technician_phone: item.technician_phone,
     user_id: item.user_id,
     owner_id: item.owner_id ?? item.user_id,
     status: item.status ?? item.verification_status,

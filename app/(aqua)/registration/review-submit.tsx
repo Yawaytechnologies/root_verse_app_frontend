@@ -382,6 +382,10 @@ export default function AquaReviewSubmitScreen() {
       farm_gate_longitude: toNumber(farm.longitude),
       water_source: farm.waterSource.trim(),
       farm_area_acres: toNumber(farm.farmArea),
+      technician_name: String((farm as any).technicianName ?? "").trim(),
+      technician_phone: String((farm as any).technicianMobileNumber ?? "")
+        .replace(/\D/g, "")
+        .slice(0, 10),
     };
 
     try {
@@ -538,10 +542,10 @@ export default function AquaReviewSubmitScreen() {
           <InfoRow label={t("registration.farmGateGps")} value={`https://maps.google.com/?q=${farm.latitude},${farm.longitude}`} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label={t("registration.technicianName")} value={String((farm as any).technicianName ?? "Sriram D")} />
+          <InfoRow label={t("registration.technicianName")} value={String((farm as any).technicianName ?? "")} />
           <View className="h-px bg-slate-100 dark:bg-white/5" />
 
-          <InfoRow label={t("registration.technicianMobileNumber")} value={String((farm as any).technicianMobileNumber ?? "6374484558")} />
+          <InfoRow label={t("registration.technicianMobileNumber")} value={String((farm as any).technicianMobileNumber ?? "")} />
         </View>
       </View>
 

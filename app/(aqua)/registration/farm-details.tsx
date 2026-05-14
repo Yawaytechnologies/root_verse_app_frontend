@@ -202,30 +202,6 @@ export default function FarmDetailsScreen() {
   }, [dispatch, ownerId]);
 
   useEffect(() => {
-    if (!(farm as any).technicianName) {
-      dispatch(
-        setFarmField({
-          key: "technicianName" as any,
-          value: "Sriram D",
-        }),
-      );
-    }
-
-    if (!(farm as any).technicianMobileNumber) {
-      dispatch(
-        setFarmField({
-          key: "technicianMobileNumber" as any,
-          value: "6374484558",
-        }),
-      );
-    }
-  }, [
-    dispatch,
-    (farm as any).technicianName,
-    (farm as any).technicianMobileNumber,
-  ]);
-
-  useEffect(() => {
     if (farm.latitude && farm.longitude) return;
 
     let cancelled = false;
@@ -581,7 +557,7 @@ export default function FarmDetailsScreen() {
                     "registration.technicianNamePlaceholder",
                     "Example: Sriram D",
                   )}
-                  value={(farm as any).technicianName ?? "Sriram D"}
+                  value={(farm as any).technicianName ?? ""}
                   onChangeText={(text) =>
                     dispatch(
                       setFarmField({
@@ -601,9 +577,7 @@ export default function FarmDetailsScreen() {
                     "registration.technicianMobilePlaceholder",
                     "Example: 6374484558",
                   )}
-                  value={
-                    (farm as any).technicianMobileNumber ?? "6374484558"
-                  }
+                  value={(farm as any).technicianMobileNumber ?? ""}
                   onChangeText={(text) =>
                     dispatch(
                       setFarmField({
