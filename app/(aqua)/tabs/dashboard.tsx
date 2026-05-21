@@ -1,5 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Animated,
   Dimensions,
@@ -28,6 +34,10 @@ import {
 } from "../../../src/features/aqua/approvals/approvals.selectors";
 import { clearMe } from "../../../src/store/auth/me.slice";
 import { toggleTheme } from "../../../src/store/theme.slice";
+import {
+  extractSamplingArray,
+  getSamplingRecords,
+} from "../../../src/services/aqua/sampling.service";
 
 const SCREEN_W = Dimensions.get("window").width;
 const PANEL_W = SCREEN_W * 0.62;
@@ -59,7 +69,7 @@ function sameId(a: any, b: any) {
     return false;
   }
 
-  return String(a) === String(b);
+  return String(a).trim() === String(b).trim();
 }
 
 function pickId(...values: any[]) {
@@ -69,22 +79,17 @@ function pickId(...values: any[]) {
     const text = String(value).trim();
 
     return (
-      text !== "" &&
-      text !== "0" &&
-      text !== "undefined" &&
-      text !== "null"
+      text !== "" && text !== "0" && text !== "undefined" && text !== "null"
     );
   });
 
-  return found ? String(found) : "";
+  return found ? String(found).trim() : "";
 }
 
 function pickName(...values: any[]) {
   const found = values.find(
     (value) =>
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== "",
+      value !== undefined && value !== null && String(value).trim() !== "",
   );
 
   return found ? String(found) : "";
@@ -228,6 +233,131 @@ function isPondActivated(pond: any) {
   return false;
 }
 
+function getSamplingFarmId(record: any) {
+  return pickId(
+    record?.farm_id,
+    record?.farm?.id,
+    record?.farm_code,
+    record?.farm_uid,
+  );
+}
+
+function getSamplingPondId(record: any) {
+  return pickId(
+    record?.pond_id,
+    record?.pond?.id,
+    record?.pond_code,
+    record?.pond_uid,
+  );
+}
+
+function getSamplingUserId(record: any) {
+  return toNumericUserId(
+    pickId(record?.user_id, record?.farmer_id, record?.owner_id),
+  );
+}
+
+function getFarmUiKey(farm: any, index = 0) {
+  return (
+    pickId(
+      farm?.id,
+      farm?.farm_id,
+      farm?.farm_code,
+      farm?.farm_uid,
+      farm?.code,
+    ) || `farm-${index}`
+  );
+}
+
+function getFarmDisplayName(farm: any) {
+  return pickName(farm?.farm_name, farm?.name, farm?.farmName, "Unnamed Farm");
+}
+
+function getFarmDisplayCode(farm: any) {
+  return pickName(
+    farm?.farm_id,
+    farm?.farm_code,
+    farm?.farm_uid,
+    farm?.code,
+    farm?.id,
+    "—",
+  );
+}
+
+function getPondUiKey(pond: any, index = 0) {
+  return (
+    pickId(
+      pond?.id,
+      pond?.pond_id,
+      pond?.pond_code,
+      pond?.pond_uid,
+      pond?.code,
+    ) || `pond-${index}`
+  );
+}
+
+function getPondDisplayName(pond: any) {
+  return pickName(pond?.pond_name, pond?.name, pond?.pondName, "Unnamed Pond");
+}
+
+function getPondDisplayCode(pond: any) {
+  return pickName(
+    pond?.pond_id,
+    pond?.pond_code,
+    pond?.pond_uid,
+    pond?.code,
+    pond?.id,
+    "—",
+  );
+}
+
+function compactIds(...values: any[]) {
+  return values
+    .map((value) => String(value ?? "").trim())
+    .filter(
+      (value) =>
+        value !== "" &&
+        value !== "0" &&
+        value !== "undefined" &&
+        value !== "null",
+    );
+}
+
+function getFarmPossibleIds(farm: any) {
+  return compactIds(
+    farm?.id,
+    farm?.farm_id,
+    farm?.farm_code,
+    farm?.farm_uid,
+    farm?.code,
+  );
+}
+
+function getPondFarmPossibleIds(pond: any) {
+  return compactIds(
+    pond?.farm_id,
+    pond?.farmId,
+    pond?.farm_db_id,
+    pond?.farmDbId,
+    pond?.farm?.id,
+    pond?.farm?.farm_id,
+    pond?.farm?.farm_code,
+    pond?.farm_code,
+    pond?.farm_uid,
+  );
+}
+
+function isPondLinkedToSelectedFarm(pond: any, farm: any) {
+  const farmIds = getFarmPossibleIds(farm);
+  const pondFarmIds = getPondFarmPossibleIds(pond);
+
+  if (!farmIds.length || !pondFarmIds.length) return false;
+
+  return pondFarmIds.some((pondFarmId) =>
+    farmIds.some((farmId) => sameId(farmId, pondFarmId)),
+  );
+}
+
 async function getJson(path: string) {
   const token = await AsyncStorage.getItem(TOKEN_KEY);
 
@@ -296,17 +426,22 @@ export default function Dashboard() {
   const [apiFarms, setApiFarms] = useState<any[]>([]);
   const [apiPonds, setApiPonds] = useState<any[]>([]);
   const [apiCultureCycles, setApiCultureCycles] = useState<any[]>([]);
+  const [apiSamplingLogs, setApiSamplingLogs] = useState<any[]>([]);
+  const [showFarmPondViewer, setShowFarmPondViewer] = useState(false);
+  const [selectedFarmKey, setSelectedFarmKey] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
   const loadBackendData = useCallback(async () => {
     try {
-      const [farmsRes, pondsRes] = await Promise.all([
+      const [farmsRes, pondsRes, samplingRes] = await Promise.all([
         getJson("/api/farms"),
         getJson("/api/ponds"),
+        getSamplingRecords().catch(() => ({ data: [] })),
       ]);
 
       const farms = extractArray<any>(farmsRes);
       const ponds = extractArray<any>(pondsRes);
+      const samplingRecords = extractSamplingArray<any>(samplingRes);
 
       const ownFarms = numericOwnerId
         ? farms.filter((farm) => {
@@ -318,9 +453,16 @@ export default function Dashboard() {
           })
         : farms;
 
-      const ownFarmIds = new Set(
-        ownFarms.map((farm: any) => String(farm?.id)).filter(Boolean),
-      );
+      const ownFarmIds = new Set<string>();
+
+      ownFarms.forEach((farm: any) => {
+        [farm?.id, farm?.farm_id, farm?.farm_code, farm?.farm_uid].forEach(
+          (value) => {
+            const id = pickId(value);
+            if (id) ownFarmIds.add(id);
+          },
+        );
+      });
 
       const ownPonds = numericOwnerId
         ? ponds.filter((pond) => {
@@ -336,8 +478,38 @@ export default function Dashboard() {
           })
         : ponds;
 
+      const ownPondIds = new Set<string>();
+
+      ownPonds.forEach((pond: any) => {
+        [pond?.id, pond?.pond_id, pond?.pond_code, pond?.pond_uid].forEach(
+          (value) => {
+            const id = pickId(value);
+            if (id) ownPondIds.add(id);
+          },
+        );
+      });
+
+      const ownSamplingLogs = numericOwnerId
+        ? samplingRecords.filter((record: any) => {
+            const recordUserId = getSamplingUserId(record);
+
+            if (recordUserId && sameId(recordUserId, numericOwnerId)) {
+              return true;
+            }
+
+            const farmId = getSamplingFarmId(record);
+            if (farmId && ownFarmIds.has(farmId)) return true;
+
+            const pondId = getSamplingPondId(record);
+            if (pondId && ownPondIds.has(pondId)) return true;
+
+            return false;
+          })
+        : samplingRecords;
+
       setApiFarms(ownFarms);
       setApiPonds(ownPonds);
+      setApiSamplingLogs(ownSamplingLogs);
 
       if (numericOwnerId) {
         try {
@@ -355,6 +527,7 @@ export default function Dashboard() {
       }
     } catch (error) {
       console.log("Dashboard backend data load failed:", error);
+      setApiSamplingLogs([]);
     }
   }, [numericOwnerId]);
 
@@ -394,9 +567,48 @@ export default function Dashboard() {
     ]);
   }, [reduxApprovedPonds, reduxPendingPonds, apiPonds]);
 
+  const farmPondViewerFarms = useMemo(() => {
+    return allRegisteredFarms.map((farm, index) => ({
+      farm,
+      key: getFarmUiKey(farm, index),
+    }));
+  }, [allRegisteredFarms]);
+
+  useEffect(() => {
+    if (!farmPondViewerFarms.length) {
+      if (selectedFarmKey) setSelectedFarmKey("");
+      return;
+    }
+
+    const selectedExists = farmPondViewerFarms.some(
+      (item) => item.key === selectedFarmKey,
+    );
+
+    if (!selectedExists) {
+      setSelectedFarmKey(farmPondViewerFarms[0].key);
+    }
+  }, [farmPondViewerFarms, selectedFarmKey]);
+
+  const selectedFarmForViewer = useMemo(() => {
+    return (
+      farmPondViewerFarms.find((item) => item.key === selectedFarmKey)?.farm ??
+      farmPondViewerFarms[0]?.farm ??
+      null
+    );
+  }, [farmPondViewerFarms, selectedFarmKey]);
+
+  const selectedFarmLinkedPonds = useMemo(() => {
+    if (!selectedFarmForViewer) return [];
+
+    return allRegisteredPonds.filter((pond) =>
+      isPondLinkedToSelectedFarm(pond, selectedFarmForViewer),
+    );
+  }, [allRegisteredPonds, selectedFarmForViewer]);
+
   const totalFarms = allRegisteredFarms.length;
   const totalPonds = allRegisteredPonds.length;
   const totalCultureCycles = apiCultureCycles.length;
+  const totalSamplingLogs = apiSamplingLogs.length;
 
   const activatedFarms = useMemo(() => {
     return allRegisteredFarms.filter(isFarmActivated).length;
@@ -439,6 +651,8 @@ export default function Dashboard() {
   const canActivateFarmQr = !!firstRegisteredFarm && !!firstCultureCycle;
   const canActivatePondQr = !!firstRegisteredPond && !!firstCultureCycle;
   const canAddStocking =
+    !!firstRegisteredPond && !!firstCultureCycle && activatedPonds > 0;
+  const canAddSampling =
     !!firstRegisteredPond && !!firstCultureCycle && activatedPonds > 0;
 
   const farmNameForAction = pickName(
@@ -705,6 +919,41 @@ export default function Dashboard() {
         farmerId: numericOwnerId,
       },
     } as any);
+  };
+
+  const goAddSampling = () => {
+    router.push({
+      pathname: "/(aqua)/tabs/qr-scanner",
+      params: {
+        purpose: "SAMPLING_ENTRY",
+        returnTo: "/(aqua)/sampling/add",
+
+        cultureCycleId: String(firstCultureCycle?.id ?? ""),
+
+        pondDbId: String(firstRegisteredPond?.id ?? ""),
+        pondId: String(firstRegisteredPond?.id ?? ""),
+        pondName: pickName(
+          firstRegisteredPond?.pond_name,
+          firstRegisteredPond?.name,
+          "Pond",
+        ),
+
+        farmDbId: String(firstRegisteredFarm?.id ?? ""),
+        farmId: String(firstRegisteredFarm?.id ?? ""),
+        farmName: pickName(
+          firstRegisteredFarm?.farm_name,
+          firstRegisteredFarm?.name,
+          "Farm",
+        ),
+
+        userId: numericOwnerId,
+        farmerId: numericOwnerId,
+      },
+    } as any);
+  };
+
+  const goViewSamplingLogs = () => {
+    router.push("/(aqua)/sampling" as any);
   };
 
   const goTraceabilityScanner = () => {
@@ -997,12 +1246,26 @@ export default function Dashboard() {
 
         <View style={{ marginTop: 14, gap: 10 }}>
           <View style={{ flexDirection: "row", gap: 10 }}>
-            <StatCard
-              title={tr("dashboard.farmsRegistered", "Farms Registered")}
-              value={totalFarms}
-              sub={tr("dashboard.farmsRegisteredSub", "Total farms submitted")}
-              icon="business-outline"
-            />
+            <Pressable
+              onPress={() => {
+                if (farmPondViewerFarms.length && !selectedFarmKey) {
+                  setSelectedFarmKey(farmPondViewerFarms[0].key);
+                }
+
+                setShowFarmPondViewer(true);
+              }}
+              style={{ flex: 1 }}
+            >
+              <StatCard
+                title={tr("dashboard.farmsRegistered", "Farms Registered")}
+                value={totalFarms}
+                sub={tr(
+                  "dashboard.farmsRegisteredSub",
+                  "Tap to view linked ponds",
+                )}
+                icon="business-outline"
+              />
+            </Pressable>
 
             <StatCard
               title={tr("dashboard.farmsActivated", "Farms Activated")}
@@ -1027,7 +1290,394 @@ export default function Dashboard() {
               icon="scan-outline"
             />
           </View>
+
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <StatCard
+              title={tr("dashboard.samplingSubmitted", "Sampling Submitted")}
+              value={totalSamplingLogs}
+              sub={tr(
+                "dashboard.samplingSubmittedSub",
+                "Submitted pond sampling logs",
+              )}
+              icon="analytics-outline"
+            />
+
+            <StatCard
+              title={tr("dashboard.cultureCycles", "Culture Cycles")}
+              value={totalCultureCycles}
+              sub={tr(
+                "dashboard.cultureCyclesSub",
+                "Active/created culture cycles",
+              )}
+              icon="sync-circle-outline"
+            />
+          </View>
         </View>
+
+        {showFarmPondViewer ? (
+          <View
+            style={{
+              marginTop: 16,
+              borderRadius: 18,
+              borderWidth: 1,
+              borderColor: C.cardBorder,
+              backgroundColor: C.cardBg,
+              padding: 14,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    color: C.text,
+                    fontSize: 18,
+                    fontWeight: "900",
+                  }}
+                >
+                  My Farms
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.subText,
+                    fontSize: 12,
+                    marginTop: 4,
+                    lineHeight: 18,
+                  }}
+                >
+                  Select a farm to view linked ponds
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={() => setShowFarmPondViewer(false)}
+                style={{
+                  height: 34,
+                  width: 34,
+                  borderRadius: 12,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: C.iconBg,
+                }}
+              >
+                <Ionicons name="close" size={18} color={C.text} />
+              </Pressable>
+            </View>
+
+            {farmPondViewerFarms.length === 0 ? (
+              <View
+                style={{
+                  marginTop: 14,
+                  borderRadius: 14,
+                  borderWidth: 1,
+                  borderColor: C.cardBorder,
+                  padding: 14,
+                }}
+              >
+                <Text
+                  style={{
+                    color: C.text,
+                    fontSize: 14,
+                    fontWeight: "800",
+                  }}
+                >
+                  No farms found
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.subText,
+                    fontSize: 12,
+                    marginTop: 6,
+                    lineHeight: 18,
+                  }}
+                >
+                  Register a farm first. After that linked ponds will show here.
+                </Text>
+              </View>
+            ) : (
+              <>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{
+                    gap: 10,
+                    paddingTop: 14,
+                    paddingBottom: 4,
+                  }}
+                >
+                  {farmPondViewerFarms.map((item, index) => {
+                    const active = item.key === selectedFarmKey;
+
+                    return (
+                      <Pressable
+                        key={`${item.key}-${index}`}
+                        onPress={() => setSelectedFarmKey(item.key)}
+                        style={{
+                          width: 160,
+                          borderRadius: 15,
+                          borderWidth: 1.5,
+                          borderColor: active ? C.tapHint : C.cardBorder,
+                          backgroundColor: active
+                            ? dark
+                              ? "rgba(37,99,235,0.18)"
+                              : "#DCEEFF"
+                            : dark
+                              ? "rgba(255,255,255,0.04)"
+                              : "#F8FAFC",
+                          padding: 12,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: active ? C.tapHint : C.text,
+                            fontSize: 13,
+                            fontWeight: "900",
+                          }}
+                          numberOfLines={1}
+                        >
+                          {getFarmDisplayName(item.farm)}
+                        </Text>
+
+                        <Text
+                          style={{
+                            color: active ? C.tapHint : C.subText,
+                            fontSize: 11,
+                            fontWeight: "700",
+                            marginTop: 5,
+                          }}
+                          numberOfLines={1}
+                        >
+                          {getFarmDisplayCode(item.farm)}
+                        </Text>
+
+                        <Text
+                          style={{
+                            color: isFarmActivated(item.farm)
+                              ? "#16A34A"
+                              : "#D97706",
+                            fontSize: 10,
+                            fontWeight: "900",
+                            marginTop: 7,
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          {isFarmActivated(item.farm) ? "Active" : "Pending"}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+
+                {selectedFarmForViewer ? (
+                  <View
+                    style={{
+                      marginTop: 14,
+                      borderRadius: 16,
+                      borderWidth: 1,
+                      borderColor: C.cardBorder,
+                      backgroundColor: dark
+                        ? "rgba(255,255,255,0.04)"
+                        : "#F8FAFC",
+                      padding: 14,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: C.subText,
+                        fontSize: 11,
+                        fontWeight: "800",
+                        textTransform: "uppercase",
+                        letterSpacing: 0.7,
+                      }}
+                    >
+                      Selected Farm
+                    </Text>
+
+                    <Text
+                      style={{
+                        color: C.text,
+                        fontSize: 16,
+                        fontWeight: "900",
+                        marginTop: 5,
+                      }}
+                    >
+                      {getFarmDisplayName(selectedFarmForViewer)}
+                    </Text>
+
+                    <Text
+                      style={{
+                        color: C.subText,
+                        fontSize: 12,
+                        fontWeight: "700",
+                        marginTop: 4,
+                      }}
+                    >
+                      Farm ID: {getFarmDisplayCode(selectedFarmForViewer)}
+                    </Text>
+
+                    <View
+                      style={{
+                        marginTop: 16,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: C.text,
+                          fontSize: 15,
+                          fontWeight: "900",
+                        }}
+                      >
+                        Linked Ponds
+                      </Text>
+
+                      <Text
+                        style={{
+                          color: C.subText,
+                          fontSize: 12,
+                          fontWeight: "800",
+                        }}
+                      >
+                        {selectedFarmLinkedPonds.length} pond
+                        {selectedFarmLinkedPonds.length === 1 ? "" : "s"}
+                      </Text>
+                    </View>
+
+                    {selectedFarmLinkedPonds.length === 0 ? (
+                      <View
+                        style={{
+                          marginTop: 12,
+                          borderRadius: 14,
+                          borderWidth: 1,
+                          borderColor: C.cardBorder,
+                          padding: 14,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: C.text,
+                            fontSize: 14,
+                            fontWeight: "800",
+                          }}
+                        >
+                          No ponds linked
+                        </Text>
+
+                        <Text
+                          style={{
+                            color: C.subText,
+                            fontSize: 12,
+                            marginTop: 6,
+                            lineHeight: 18,
+                          }}
+                        >
+                          This farm does not have linked ponds yet.
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={{ marginTop: 12, gap: 10 }}>
+                        {selectedFarmLinkedPonds.map((pond, index) => (
+                          <View
+                            key={`${getPondUiKey(pond, index)}-${index}`}
+                            style={{
+                              borderRadius: 14,
+                              borderWidth: 1,
+                              borderColor: C.cardBorder,
+                              backgroundColor: dark
+                                ? "rgba(255,255,255,0.04)"
+                                : "#FFFFFF",
+                              padding: 12,
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 10,
+                            }}
+                          >
+                            <View
+                              style={{
+                                height: 40,
+                                width: 40,
+                                borderRadius: 13,
+                                alignItems: "center",
+                                justifyContent: "center",
+                                backgroundColor: C.iconBg,
+                              }}
+                            >
+                              <Ionicons
+                                name="water-outline"
+                                size={20}
+                                color={C.iconColor}
+                              />
+                            </View>
+
+                            <View style={{ flex: 1 }}>
+                              <Text
+                                style={{
+                                  color: C.text,
+                                  fontSize: 14,
+                                  fontWeight: "900",
+                                }}
+                                numberOfLines={1}
+                              >
+                                {getPondDisplayName(pond)}
+                              </Text>
+
+                              <Text
+                                style={{
+                                  color: C.subText,
+                                  fontSize: 12,
+                                  fontWeight: "700",
+                                  marginTop: 3,
+                                }}
+                                numberOfLines={1}
+                              >
+                                Pond ID: {getPondDisplayCode(pond)}
+                              </Text>
+
+                              <Text
+                                style={{
+                                  color: C.subText,
+                                  fontSize: 11,
+                                  marginTop: 3,
+                                }}
+                                numberOfLines={1}
+                              >
+                                Linked Farm:{" "}
+                                {getFarmDisplayCode(selectedFarmForViewer)}
+                              </Text>
+                            </View>
+
+                            <Text
+                              style={{
+                                color: isPondActivated(pond)
+                                  ? "#16A34A"
+                                  : "#D97706",
+                                fontSize: 10,
+                                fontWeight: "900",
+                                textTransform: "uppercase",
+                              }}
+                            >
+                              {isPondActivated(pond) ? "Active" : "Pending"}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                ) : null}
+              </>
+            )}
+          </View>
+        ) : null}
 
         <View
           style={{
@@ -1127,9 +1777,7 @@ export default function Dashboard() {
             variant="dark"
             disabled={!canCreateCultureCycle}
             badge={
-              !canCreateCultureCycle
-                ? tr("common.locked", "LOCKED")
-                : undefined
+              !canCreateCultureCycle ? tr("common.locked", "LOCKED") : undefined
             }
             onPress={goCreateCultureCycle}
           />
@@ -1205,6 +1853,40 @@ export default function Dashboard() {
           />
 
           <ActionCard
+            title={tr("dashboard.addSamplingLog", "Add Sampling Log")}
+            sub={
+              canAddSampling
+                ? tr(
+                    "dashboard.addSamplingLogSub",
+                    "Scan Pond QR and enter sampling details",
+                  )
+                : tr(
+                    "dashboard.addSamplingLogLockedSub",
+                    "Activate Pond QR and add stocking before sampling",
+                  )
+            }
+            icon="analytics-outline"
+            variant="dark"
+            disabled={!canAddSampling}
+            badge={!canAddSampling ? tr("common.locked", "LOCKED") : undefined}
+            onPress={goAddSampling}
+          />
+
+          <ActionCard
+            title={tr(
+              "dashboard.viewSamplingSubmitted",
+              "View Sampling Submitted",
+            )}
+            sub={tr(
+              "dashboard.viewSamplingSubmittedSub",
+              "View all submitted sampling logs with ABW, size and biomass",
+            )}
+            icon="clipboard-outline"
+            variant="light"
+            onPress={goViewSamplingLogs}
+          />
+
+          <ActionCard
             title={tr("dashboard.addExtraPond", "Add Extra Pond")}
             sub={
               canCreatePond
@@ -1269,7 +1951,7 @@ export default function Dashboard() {
           >
             {tr(
               "dashboard.correctWorkflowSub",
-              "Farm + Pond Register → Create Culture Cycle → Activate Farm/Pond QR → Capture Image → Add Stocking → Daily Logs.",
+              "Farm + Pond Register → Create Culture Cycle → Activate Farm/Pond QR → Capture Image → Add Stocking → Add Sampling → Harvest.",
             )}
           </Text>
         </View>

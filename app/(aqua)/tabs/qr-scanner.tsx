@@ -102,7 +102,7 @@ function pickName(...values: any[]) {
       String(value).trim() !== "",
   );
 
-  return found ? String(found) : "";
+  return found ? String(found).trim() : "";
 }
 
 function pickId(...values: any[]) {
@@ -119,7 +119,7 @@ function pickId(...values: any[]) {
     );
   });
 
-  return found ? String(found) : "";
+  return found ? String(found).trim() : "";
 }
 
 function sameId(a: any, b: any) {
@@ -127,7 +127,7 @@ function sameId(a: any, b: any) {
     return false;
   }
 
-  return String(a) === String(b);
+  return String(a).trim() === String(b).trim();
 }
 
 function isQrActivated(qr: any) {
@@ -141,7 +141,8 @@ function isQrActivated(qr: any) {
     qr?.qr_activated === true ||
     status === "ACTIVE" ||
     status === "ACTIVATED" ||
-    status === "LINKED"
+    status === "LINKED" ||
+    status === "VERIFIED"
   );
 }
 
@@ -192,6 +193,7 @@ export default function QrScannerScreen() {
     getParamValue(params.pondDbId) || getParamValue(params.pondId);
   const userId = getParamValue(params.userId) || getParamValue(params.farmerId);
   const cultureCycleId = getParamValue(params.cultureCycleId);
+  const totalPlStocked = getParamValue(params.totalPlStocked);
 
   const farmName = getParamValue(params.farmName, "Farm");
   const pondName = getParamValue(params.pondName, "Pond");
@@ -212,6 +214,13 @@ export default function QrScannerScreen() {
     router.replace("/(aqua)/tabs/dashboard");
   };
 
+  const resetScanner = () => {
+    lockRef.current = false;
+    setScanned(false);
+    setProcessing(false);
+    setMessage(tr("qrActivation.scanQr", "Scan QR"));
+  };
+
   const openTraceability = (qrValue: string) => {
     router.push({
       pathname: "/(aqua)/traceability/[code]",
@@ -223,124 +232,153 @@ export default function QrScannerScreen() {
     } as any);
   };
 
+  const resolvePondContext = async (qrValue: string, qrData: any) => {
+    const qrType = String(qrData?.qr_type || qrData?.type || "")
+      .trim()
+      .toUpperCase();
+
+    if (qrType && !qrType.includes("POND")) {
+      throw new Error(tr("stocking.scanPondQrOnly", "Please scan Pond QR only."));
+    }
+
+    const pondsRes = await getJson("/api/ponds").catch(() => null);
+    const ponds = extractArray<any>(pondsRes);
+
+    const linkedPondId = pickId(qrData?.pond_id, pondDbId);
+
+    const pond =
+      ponds.find((p) => sameId(p.id, linkedPondId)) ||
+      ponds.find((p) =>
+        [
+          p.pond_qr_id,
+          p.pond_qr_code,
+          p.qr_code,
+          p.qr_value,
+          p.pond_id,
+          p.pond_code,
+        ]
+          .map((v) => String(v || "").trim())
+          .includes(qrValue),
+      );
+
+    const finalPondId = pickId(
+      pond?.id,
+      qrData?.pond_id,
+      qrData?.pond?.id,
+      pondDbId,
+    );
+
+    const finalFarmId = pickId(
+      pond?.farm_id,
+      pond?.farm?.id,
+      qrData?.farm_id,
+      qrData?.farm?.id,
+      farmDbId,
+    );
+
+    if (!finalPondId) {
+      throw new Error(
+        tr(
+          "stocking.pondNotFoundForQr",
+          "Could not find pond linked to this QR.",
+        ),
+      );
+    }
+
+    const qrLooksActivated = isQrActivated(qrData);
+    const pondLooksActivated = pond ? isPondActivated(pond) : true;
+
+    if (!qrLooksActivated && !pondLooksActivated) {
+      throw new Error(
+        tr(
+          "stocking.pondQrActivationRequired",
+          "Pond QR must be activated before entry.",
+        ),
+      );
+    }
+
+    let finalCultureCycleId = cultureCycleId;
+    let finalTotalPlStocked = totalPlStocked;
+    let linkedCycle: any = null;
+
+    if (userId) {
+      try {
+        const cyclesRes = await getJson(
+          `/api/aquaculture/culture-cycles/user/${userId}`,
+        );
+
+        const cycles = extractArray<any>(cyclesRes);
+
+        linkedCycle =
+          cycles.find((cycle) => sameId(cycle.pond_id, finalPondId)) ||
+          cycles.find((cycle) => sameId(cycle.pond?.id, finalPondId)) ||
+          cycles.find((cycle) => sameId(cycle.farm_id, finalFarmId)) ||
+          null;
+
+        finalCultureCycleId = pickId(
+          finalCultureCycleId,
+          linkedCycle?.id,
+          linkedCycle?.culture_cycle_id,
+          linkedCycle?.cycle_id,
+        );
+
+        finalTotalPlStocked = pickId(
+          finalTotalPlStocked,
+          linkedCycle?.total_pl_stocked,
+          linkedCycle?.stocking_count,
+          linkedCycle?.seed_quantity,
+          linkedCycle?.pl_stocked,
+        );
+      } catch {
+        finalCultureCycleId = pickId(finalCultureCycleId);
+      }
+    }
+
+    if (!finalCultureCycleId) {
+      throw new Error(
+        tr(
+          "stocking.cultureCycleRequired",
+          "Culture cycle is required before entry.",
+        ),
+      );
+    }
+
+    return {
+      pond,
+      linkedCycle,
+      finalFarmId,
+      finalPondId,
+      finalCultureCycleId,
+      finalTotalPlStocked,
+      qrcodeId: pickId(qrData?.id, qrData?.qrcode_id, qrData?.qr_id),
+      finalFarmName: farmName,
+      finalPondName: pickName(pond?.pond_name, pond?.name, pondName),
+    };
+  };
+
   const openStockingForm = async (qrValue: string, qrData: any) => {
     try {
       setProcessing(true);
       setMessage(tr("stocking.validatingPondQr", "Validating Pond QR..."));
 
-      const qrType = String(qrData?.qr_type || qrData?.type || "").toUpperCase();
-
-      if (qrType && qrType !== "POND") {
-        Alert.alert(
-          tr("qrActivation.wrongQr", "Wrong QR"),
-          tr("stocking.scanPondQrOnly", "Please scan Pond QR only."),
-        );
-        setScanned(false);
-        lockRef.current = false;
-        return;
-      }
-
-      const pondsRes = await getJson("/api/ponds").catch(() => null);
-      const ponds = extractArray<any>(pondsRes);
-
-      const linkedPondId = pickId(qrData?.pond_id, pondDbId);
-
-      const pond =
-        ponds.find((p) => sameId(p.id, linkedPondId)) ||
-        ponds.find((p) =>
-          [
-            p.pond_qr_id,
-            p.pond_qr_code,
-            p.qr_code,
-            p.qr_value,
-            p.pond_id,
-            p.pond_code,
-          ]
-            .map((v) => String(v || "").trim())
-            .includes(qrValue),
-        );
-
-      const finalPondId = pickId(pond?.id, qrData?.pond_id, pondDbId);
-      const finalFarmId = pickId(pond?.farm_id, qrData?.farm_id, farmDbId);
-
-      if (!finalPondId) {
-        Alert.alert(
-          tr("common.failed", "Failed"),
-          tr(
-            "stocking.pondNotFoundForQr",
-            "Could not find pond linked to this QR.",
-          ),
-        );
-        setScanned(false);
-        lockRef.current = false;
-        return;
-      }
-
-      const qrLooksActivated = isQrActivated(qrData);
-      const pondLooksActivated = pond ? isPondActivated(pond) : true;
-
-      if (!qrLooksActivated && !pondLooksActivated) {
-        Alert.alert(
-          tr("qrActivation.qrNotActivated", "QR Not Activated"),
-          tr(
-            "stocking.pondQrActivationRequired",
-            "Pond QR must be activated before stocking entry.",
-          ),
-        );
-        setScanned(false);
-        lockRef.current = false;
-        return;
-      }
-
-      let finalCultureCycleId = cultureCycleId;
-
-      if (!finalCultureCycleId && userId) {
-        try {
-          const cyclesRes = await getJson(
-            `/api/aquaculture/culture-cycles/user/${userId}`,
-          );
-
-          const cycles = extractArray<any>(cyclesRes);
-
-          const linkedCycle =
-            cycles.find((cycle) => sameId(cycle.pond_id, finalPondId)) ||
-            cycles.find((cycle) => sameId(cycle.farm_id, finalFarmId));
-
-          finalCultureCycleId = pickId(linkedCycle?.id);
-        } catch {
-          finalCultureCycleId = "";
-        }
-      }
-
-      if (!finalCultureCycleId) {
-        Alert.alert(
-          tr("common.failed", "Failed"),
-          tr(
-            "stocking.cultureCycleRequired",
-            "Culture cycle is required before stocking entry.",
-          ),
-        );
-        setScanned(false);
-        lockRef.current = false;
-        return;
-      }
+      const context = await resolvePondContext(qrValue, qrData);
 
       router.push({
         pathname: "/(aqua)/stocking/add",
         params: {
           farmerId: userId,
           userId,
-          farmId: finalFarmId,
-          farmDbId: finalFarmId,
-          pondId: finalPondId,
-          pondDbId: finalPondId,
-          cultureCycleId: finalCultureCycleId,
-          qrcodeId: pickId(qrData?.id, qrData?.qrcode_id, qrData?.qr_id),
+          farmId: context.finalFarmId,
+          farmDbId: context.finalFarmId,
+          pondId: context.finalPondId,
+          pondDbId: context.finalPondId,
+          cultureCycleId: context.finalCultureCycleId,
+          qrcodeId: context.qrcodeId,
           pondQr: qrValue,
           qrValue,
           code: qrValue,
-          farmName,
-          pondName: pickName(pond?.pond_name, pond?.name, pondName),
+          farmName: context.finalFarmName,
+          pondName: context.finalPondName,
         },
       } as any);
     } catch (error: any) {
@@ -349,8 +387,49 @@ export default function QrScannerScreen() {
         error?.message ||
           tr("stocking.qrValidationFailed", "QR validation failed"),
       );
-      setScanned(false);
-      lockRef.current = false;
+      resetScanner();
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const openSamplingForm = async (qrValue: string, qrData: any) => {
+    try {
+      setProcessing(true);
+      setMessage(tr("sampling.validatingPondQr", "Validating Pond QR..."));
+
+      const context = await resolvePondContext(qrValue, qrData);
+
+      router.push({
+        pathname: "/(aqua)/sampling/add",
+        params: {
+          farmerId: userId,
+          userId,
+          farmId: context.finalFarmId,
+          farmDbId: context.finalFarmId,
+          pondId: context.finalPondId,
+          pondDbId: context.finalPondId,
+          cultureCycleId: context.finalCultureCycleId,
+          qrcodeId: context.qrcodeId,
+          qrCodeId: context.qrcodeId,
+          pondQr: qrValue,
+          qrCode: qrValue,
+          qr_code: qrValue,
+          qrValue,
+          code: qrValue,
+          farmName: context.finalFarmName,
+          pondName: context.finalPondName,
+          totalPlStocked: context.finalTotalPlStocked,
+          total_pl_stocked: context.finalTotalPlStocked,
+        },
+      } as any);
+    } catch (error: any) {
+      Alert.alert(
+        tr("common.failed", "Failed"),
+        error?.message ||
+          tr("sampling.qrValidationFailed", "QR validation failed"),
+      );
+      resetScanner();
     } finally {
       setProcessing(false);
     }
@@ -412,18 +491,56 @@ export default function QrScannerScreen() {
         return;
       }
 
+      if (purpose === "SAMPLING_ENTRY") {
+        let qrData: any = null;
+
+        try {
+          qrData = await fetchQrByCode(qrValue);
+        } catch {
+          qrData = {
+            id: getParamValue(params.qrcodeId),
+            type: "POND",
+            status: "ACTIVATED",
+            pond_id: pondDbId,
+            farm_id: farmDbId,
+          };
+        }
+
+        await openSamplingForm(qrValue, qrData);
+        return;
+      }
+
       openTraceability(qrValue);
     } catch (error: any) {
       Alert.alert(
         tr("qrActivation.invalidQr", "Invalid QR"),
         error?.message || tr("qrActivation.qrNotFound", "QR not found."),
       );
-      setScanned(false);
-      lockRef.current = false;
+      resetScanner();
     } finally {
       setProcessing(false);
     }
   };
+
+  const scannerTitle =
+    purpose === "STOCKING_ENTRY"
+      ? tr("stocking.scanPondQr", "Scan Pond QR")
+      : purpose === "SAMPLING_ENTRY"
+        ? tr("sampling.scanPondQr", "Scan Pond QR")
+        : tr("qrActivation.title", "QR Scanner");
+
+  const scannerSubTitle =
+    purpose === "STOCKING_ENTRY"
+      ? tr(
+          "stocking.scanPondQrSub",
+          "Stocking opens only after Pond QR scan",
+        )
+      : purpose === "SAMPLING_ENTRY"
+        ? tr(
+            "sampling.scanPondQrSub",
+            "Sampling opens only after Pond QR scan",
+          )
+        : tr("qrActivation.scanQrSub", "Place QR inside the frame");
 
   if (!permission) {
     return (
@@ -504,18 +621,11 @@ export default function QrScannerScreen() {
 
           <View className="flex-1 px-3">
             <Text className="text-center text-base font-bold text-white">
-              {purpose === "STOCKING_ENTRY"
-                ? tr("stocking.scanPondQr", "Scan Pond QR")
-                : tr("qrActivation.title", "QR Scanner")}
+              {scannerTitle}
             </Text>
 
             <Text className="mt-1 text-center text-xs text-white/70">
-              {purpose === "STOCKING_ENTRY"
-                ? tr(
-                    "stocking.scanPondQrSub",
-                    "Stocking opens only after Pond QR scan",
-                  )
-                : tr("qrActivation.scanQrSub", "Place QR inside the frame")}
+              {scannerSubTitle}
             </Text>
           </View>
 
@@ -546,11 +656,7 @@ export default function QrScannerScreen() {
 
           {scanned ? (
             <Pressable
-              onPress={() => {
-                lockRef.current = false;
-                setScanned(false);
-                setMessage(tr("qrActivation.scanQr", "Scan QR"));
-              }}
+              onPress={resetScanner}
               className="mt-4 rounded-2xl border border-white/20 px-4 py-3"
             >
               <Text className="text-center font-bold text-white">
