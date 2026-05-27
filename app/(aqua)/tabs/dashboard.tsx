@@ -812,6 +812,22 @@ export default function Dashboard() {
   const canAddSampling =
     !!firstRegisteredPond && !!firstCultureCycle && activatedPonds > 0;
 
+  const canCreateHarvestRequest = activatedPonds > 0 && totalSamplingLogs > 0;
+
+  const userRoleText = cleanStatus(
+    pickName(
+      (me as any)?.role,
+      (me as any)?.user_role,
+      (me as any)?.rootverse_type,
+      profileType,
+    ),
+  );
+
+  const canOpenTraderConfirmation =
+    userRoleText.includes("trader") ||
+    userRoleText.includes("admin") ||
+    userRoleText.includes("super_admin");
+
   const farmNameForAction = pickName(
     firstRegisteredFarm?.farm_name,
     firstRegisteredFarm?.name,
@@ -1305,6 +1321,18 @@ export default function Dashboard() {
 
   const goViewSamplingLogs = () => {
     router.push("/(aqua)/sampling" as any);
+  };
+
+  const goCreateHarvestRequest = () => {
+    router.push("/(aqua)/harvest/scan-pond" as any);
+  };
+
+  const goMyHarvestRequests = () => {
+    router.push("/(aqua)/harvest/my-requests" as any);
+  };
+
+  const goTraderHarvestPending = () => {
+    router.push("/(aqua)/harvest/trader-pending" as any);
   };
 
   const goTraceabilityScanner = () => {
@@ -1958,16 +1986,46 @@ export default function Dashboard() {
           }}
         >
           <View style={{ flex: 1 }}>
-            <Text
+            <View
               style={{
-                fontWeight: "700",
-                color: titleCol,
-                fontSize: 16,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
               }}
-              numberOfLines={1}
             >
-              {title}
-            </Text>
+              <Text
+                style={{
+                  flex: 1,
+                  fontWeight: "700",
+                  color: titleCol,
+                  fontSize: 16,
+                }}
+                numberOfLines={1}
+              >
+                {title}
+              </Text>
+
+              {badge ? (
+                <View
+                  style={{
+                    borderRadius: 999,
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                    backgroundColor: C.badgeBg,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: C.badgeText,
+                      fontSize: 9,
+                      fontWeight: "900",
+                    }}
+                  >
+                    {badge}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
 
             <Text
               style={{
@@ -2438,6 +2496,57 @@ export default function Dashboard() {
             variant="light"
             onPress={goViewSamplingLogs}
           />
+
+          <ActionCard
+            title={tr("dashboard.createHarvestRequest", "Create Harvest Request")}
+            sub={
+              canCreateHarvestRequest
+                ? tr(
+                    "dashboard.createHarvestRequestSub",
+                    "Scan Pond QR and submit harvest request for trader confirmation",
+                  )
+                : tr(
+                    "dashboard.createHarvestRequestLockedSub",
+                    "Activate Pond QR and submit sampling first before harvest request",
+                  )
+            }
+            icon="leaf-outline"
+            variant="dark"
+            disabled={!canCreateHarvestRequest}
+            badge={
+              !canCreateHarvestRequest
+                ? tr("common.locked", "LOCKED")
+                : undefined
+            }
+            onPress={goCreateHarvestRequest}
+          />
+
+          <ActionCard
+            title={tr("dashboard.myHarvestRequests", "My Harvest Requests")}
+            sub={tr(
+              "dashboard.myHarvestRequestsSub",
+              "View harvest request status and generated Harvest ID after trader acceptance",
+            )}
+            icon="document-text-outline"
+            variant="light"
+            onPress={goMyHarvestRequests}
+          />
+
+          {canOpenTraderConfirmation ? (
+            <ActionCard
+              title={tr(
+                "dashboard.traderHarvestConfirmation",
+                "Trader Harvest Confirmation",
+              )}
+              sub={tr(
+                "dashboard.traderHarvestConfirmationSub",
+                "Accept or reject pending farmer harvest requests",
+              )}
+              icon="checkmark-done-circle-outline"
+              variant="dark"
+              onPress={goTraderHarvestPending}
+            />
+          ) : null}
 
           <ActionCard
             title={tr("dashboard.addExtraPond", "Add Extra Pond")}
