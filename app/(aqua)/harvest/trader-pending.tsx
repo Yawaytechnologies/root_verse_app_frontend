@@ -71,7 +71,7 @@ export default function TraderPendingHarvestRequestsScreen() {
 
               Alert.alert(
                 "Accepted",
-                `Harvest ID generated: ${result.data.harvest_id}`
+                `Harvest ID generated: ${result.data?.harvest_id || "-"}`
               );
 
               loadRequests();

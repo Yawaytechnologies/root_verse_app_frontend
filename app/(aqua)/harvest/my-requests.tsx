@@ -11,24 +11,24 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import {
-  getMyHarvestRequests,
+  getHarvestRequests,
   HarvestRequest,
 } from "../../../src/services/aqua/harvest.service";
 
-function getStatusLabel(status: string) {
-  if (status === "PENDING_TRADER_CONFIRMATION") {
-    return "Pending Trader Confirmation";
+function formatValue(value: any) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
   }
 
-  if (status === "ACCEPTED") {
-    return "Accepted";
-  }
+  return String(value);
+}
 
-  if (status === "REJECTED") {
-    return "Rejected";
-  }
-
-  return status;
+function getStatusText(item: HarvestRequest) {
+  return (
+    item.booking_status ||
+    item.status ||
+    (item.trader_id ? "Trader Assigned" : "Waiting Trader")
+  );
 }
 
 export default function MyHarvestRequestsScreen() {
@@ -38,10 +38,10 @@ export default function MyHarvestRequestsScreen() {
 
   const loadRequests = useCallback(async () => {
     try {
-      const result = await getMyHarvestRequests();
+      const result = await getHarvestRequests();
       setRequests(result.data || []);
     } catch (error: any) {
-      Alert.alert("Failed", error?.message || "Unable to fetch requests.");
+      Alert.alert("Failed", error?.message || "Unable to fetch harvest records.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -69,7 +69,7 @@ export default function MyHarvestRequestsScreen() {
   return (
     <View style={styles.page}>
       <View style={styles.header}>
-        <Text style={styles.title}>My Harvest Requests</Text>
+        <Text style={styles.title}>Harvest Requests</Text>
 
         <TouchableOpacity
           style={styles.scanButton}
@@ -88,70 +88,113 @@ export default function MyHarvestRequestsScreen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyTitle}>No Harvest Requests</Text>
+            <Text style={styles.emptyTitle}>No Harvest Records</Text>
             <Text style={styles.emptyText}>
               Scan Pond QR and create your first harvest request.
             </Text>
           </View>
         }
         renderItem={({ item }) => {
-          const accepted = item.status === "ACCEPTED";
-          const rejected = item.status === "REJECTED";
+          const statusText = getStatusText(item);
+          const assigned = Boolean(item.trader_id);
 
           return (
             <View style={styles.card}>
               <View style={styles.rowBetween}>
-                <Text style={styles.cardTitle}>
-                  Request #{item.id}
-                </Text>
+                <Text style={styles.cardTitle}>Harvest #{item.id}</Text>
 
                 <View
                   style={[
                     styles.statusBadge,
-                    accepted && styles.acceptedBadge,
-                    rejected && styles.rejectedBadge,
+                    assigned && styles.acceptedBadge,
                   ]}
                 >
                   <Text
                     style={[
                       styles.statusText,
-                      accepted && styles.acceptedText,
-                      rejected && styles.rejectedText,
+                      assigned && styles.acceptedText,
                     ]}
                   >
-                    {getStatusLabel(item.status)}
+                    {statusText}
                   </Text>
                 </View>
               </View>
 
-              <Text style={styles.infoText}>
-                Farm: {item.farm_name || item.farm_id}
-              </Text>
-              <Text style={styles.infoText}>
-                Pond: {item.pond_name || item.pond_id}
-              </Text>
-              <Text style={styles.infoText}>
-                Culture Cycle: {item.culture_cycle_id}
-              </Text>
-              <Text style={styles.infoText}>
-                Method: {item.harvest_method}
-              </Text>
-              <Text style={styles.infoText}>
-                Expected Size: {item.expected_size}
-              </Text>
-              <Text style={styles.infoText}>
-                Expected Biomass: {item.expected_biomass}
-              </Text>
+              <View style={styles.infoBox}>
+                <Text style={styles.infoText}>
+                  QR Code: {formatValue(item.qr_code)}
+                </Text>
+                <Text style={styles.infoText}>
+                  QR Code ID: {formatValue(item.qr_code_id)}
+                </Text>
+                <Text style={styles.infoText}>
+                  Culture ID: {formatValue(item.culture_cycle_id || item.culture_id)}
+                </Text>
+                <Text style={styles.infoText}>
+                  Culture Code: {formatValue(item.culture_code)}
+                </Text>
+                <Text style={styles.infoText}>
+                  Culture Status: {formatValue(item.culture_verification_status)}
+                </Text>
+              </View>
+
+              <View style={styles.infoBox}>
+                <Text style={styles.infoText}>
+                  Farmer: {formatValue(item.farmer_name || item.farmer_id)}
+                </Text>
+                <Text style={styles.infoText}>
+                  Farm: {formatValue(item.farm_name || item.farm_id)}
+                </Text>
+                <Text style={styles.infoText}>
+                  Pond: {formatValue(item.pond_name || item.pond_id)}
+                </Text>
+                <Text style={styles.infoText}>
+                  Pond Code: {formatValue(item.pond_code)}
+                </Text>
+              </View>
 
               <View style={styles.harvestBox}>
-                <Text style={styles.harvestLabel}>Harvest ID</Text>
+                <Text style={styles.harvestLabel}>Harvest Details</Text>
                 <Text style={styles.harvestValue}>
-                  {item.harvest_id || "Not generated yet"}
+                  {formatValue(item.harvest_method)} / {formatValue(item.species)}
+                </Text>
+
+                <Text style={styles.infoText}>
+                  DOC: {formatValue(item.DOC)}
+                </Text>
+                <Text style={styles.infoText}>
+                  Expected Size: {formatValue(item.expected_size)}
+                </Text>
+                <Text style={styles.infoText}>
+                  Expected Biomass: {formatValue(item.expected_biomass)}
+                </Text>
+                <Text style={styles.infoText}>
+                  Preferred Time: {formatValue(item.preferred_harvest_time)}
+                </Text>
+                <Text style={styles.infoText}>
+                  Stocking Date: {formatValue(item.stocking_date)}
+                </Text>
+                <Text style={styles.infoText}>
+                  Reason: {formatValue(item.harvest_reason)}
                 </Text>
               </View>
 
               {item.trader_id ? (
-                <Text style={styles.infoText}>Trader ID: {item.trader_id}</Text>
+                <View style={styles.traderBox}>
+                  <Text style={styles.harvestLabel}>Trader Details</Text>
+                  <Text style={styles.infoText}>
+                    Trader ID: {formatValue(item.trader_id)}
+                  </Text>
+                  <Text style={styles.infoText}>
+                    Trader Code: {formatValue(item.trader_code)}
+                  </Text>
+                  <Text style={styles.infoText}>
+                    Trader Name: {formatValue(item.trader_name)}
+                  </Text>
+                  <Text style={styles.infoText}>
+                    Trader Mobile: {formatValue(item.trader_mobile)}
+                  </Text>
+                </View>
               ) : null}
 
               {item.rejection_reason ? (
@@ -269,16 +312,17 @@ const styles = StyleSheet.create({
   acceptedText: {
     color: "#166534",
   },
-  rejectedBadge: {
-    backgroundColor: "#FEE2E2",
-  },
-  rejectedText: {
-    color: "#991B1B",
+  infoBox: {
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
   },
   infoText: {
     color: "#374151",
     fontSize: 14,
     marginTop: 5,
+    lineHeight: 20,
   },
   harvestBox: {
     backgroundColor: "#F3F4F6",
@@ -286,10 +330,16 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 14,
   },
+  traderBox: {
+    backgroundColor: "#ECFDF5",
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 14,
+  },
   harvestLabel: {
     color: "#6B7280",
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "800",
   },
   harvestValue: {
     color: "#111827",
@@ -300,7 +350,7 @@ const styles = StyleSheet.create({
   rejectReason: {
     color: "#991B1B",
     fontSize: 13,
-    fontWeight: "600",
+    fontWeight: "700",
     marginTop: 10,
   },
 });
