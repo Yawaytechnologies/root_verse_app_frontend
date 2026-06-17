@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { memo, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -65,6 +65,83 @@ function isValidDateFormat(value: string) {
   if (!value.trim()) return true;
   return /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
+
+type ProfileInputProps = {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder?: string;
+  keyboardType?: "default" | "phone-pad" | "email-address";
+  editable?: boolean;
+  helper?: string;
+};
+
+/**
+ * IMPORTANT:
+ * This component must stay OUTSIDE AquaProfileScreen.
+ * If it is inside the screen component, React remounts it on every letter typed,
+ * and the keyboard closes automatically.
+ */
+const ProfileInput = memo(function ProfileInput({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  keyboardType = "default",
+  editable = true,
+  helper,
+}: ProfileInputProps) {
+  return (
+    <View style={{ marginTop: 14 }}>
+      <Text
+        style={{
+          fontSize: 12,
+          fontWeight: "700",
+          color: "#475569",
+          marginBottom: 7,
+        }}
+      >
+        {label}
+      </Text>
+
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor="#94A3B8"
+        keyboardType={keyboardType}
+        editable={editable}
+        autoCapitalize={keyboardType === "email-address" ? "none" : "sentences"}
+        autoCorrect={keyboardType === "email-address" ? false : true}
+        blurOnSubmit={false}
+        returnKeyType="next"
+        style={{
+          borderWidth: 1,
+          borderColor: "#CBD5E1",
+          backgroundColor: editable ? "#FFFFFF" : "#E2E8F0",
+          color: "#0F172A",
+          borderRadius: 14,
+          paddingHorizontal: 14,
+          paddingVertical: Platform.OS === "ios" ? 13 : 10,
+          fontSize: 14,
+        }}
+      />
+
+      {helper ? (
+        <Text
+          style={{
+            marginTop: 5,
+            fontSize: 11,
+            color: "#64748B",
+            lineHeight: 15,
+          }}
+        >
+          {helper}
+        </Text>
+      ) : null}
+    </View>
+  );
+});
 
 export default function AquaProfileScreen() {
   const insets = useSafeAreaInsets();
@@ -271,70 +348,6 @@ export default function AquaProfileScreen() {
     }
   };
 
-  const Input = ({
-    label,
-    value,
-    onChangeText,
-    placeholder,
-    keyboardType = "default",
-    editable = true,
-    helper,
-  }: {
-    label: string;
-    value: string;
-    onChangeText: (value: string) => void;
-    placeholder?: string;
-    keyboardType?: "default" | "phone-pad" | "email-address";
-    editable?: boolean;
-    helper?: string;
-  }) => (
-    <View style={{ marginTop: 14 }}>
-      <Text
-        style={{
-          fontSize: 12,
-          fontWeight: "700",
-          color: "#475569",
-          marginBottom: 7,
-        }}
-      >
-        {label}
-      </Text>
-
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor="#94A3B8"
-        keyboardType={keyboardType}
-        editable={editable}
-        autoCapitalize={keyboardType === "email-address" ? "none" : "sentences"}
-        style={{
-          borderWidth: 1,
-          borderColor: "#CBD5E1",
-          backgroundColor: editable ? "#FFFFFF" : "#E2E8F0",
-          color: "#0F172A",
-          borderRadius: 14,
-          paddingHorizontal: 14,
-          paddingVertical: Platform.OS === "ios" ? 13 : 10,
-          fontSize: 14,
-        }}
-      />
-
-      {helper ? (
-        <Text
-          style={{
-            marginTop: 5,
-            fontSize: 11,
-            color: "#64748B",
-            lineHeight: 15,
-          }}
-        >
-          {helper}
-        </Text>
-      ) : null}
-    </View>
-  );
-
   if (loading) {
     return (
       <View
@@ -356,11 +369,12 @@ export default function AquaProfileScreen() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: "#E8EEF6" }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <ScrollView
         showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
+        keyboardShouldPersistTaps="always"
+        removeClippedSubviews={false}
         contentContainerStyle={{
           paddingTop: insets.top + 10,
           paddingHorizontal: 16,
@@ -480,7 +494,7 @@ export default function AquaProfileScreen() {
             User Details
           </Text>
 
-          <Input
+          <ProfileInput
             label="Name"
             value={username}
             onChangeText={setUsername}
@@ -488,7 +502,7 @@ export default function AquaProfileScreen() {
             helper="Name belongs to rootverse_user. This API does not update name."
           />
 
-          <Input
+          <ProfileInput
             label="Phone Number"
             value={phoneNo}
             onChangeText={setPhoneNo}
@@ -518,7 +532,7 @@ export default function AquaProfileScreen() {
             Farmer Details
           </Text>
 
-          <Input
+          <ProfileInput
             label="Email"
             value={email}
             onChangeText={setEmail}
@@ -526,14 +540,14 @@ export default function AquaProfileScreen() {
             keyboardType="email-address"
           />
 
-          <Input
+          <ProfileInput
             label="Father Name"
             value={fatherName}
             onChangeText={setFatherName}
             placeholder="Enter father name"
           />
 
-          <Input
+          <ProfileInput
             label="Date of Birth"
             value={dob}
             onChangeText={setDob}
@@ -541,14 +555,14 @@ export default function AquaProfileScreen() {
             helper="Example: 1988-04-15"
           />
 
-          <Input
+          <ProfileInput
             label="Farmer Licence"
             value={farmerLicence}
             onChangeText={setFarmerLicence}
             placeholder="Enter farmer licence"
           />
 
-          <Input
+          <ProfileInput
             label="Farming Experience"
             value={farmingExperience}
             onChangeText={setFarmingExperience}
