@@ -85,6 +85,7 @@ export type CultureCycle = {
 };
 
 export type HarvestPayload = {
+  user_id?: number | string;
   culture_id: number;
   qr_code_id: number;
   DOC: number;
@@ -99,8 +100,20 @@ export type HarvestPayload = {
 
 export type HarvestRequest = {
   id: number | string;
+  user_id?: number | string;
   culture_id?: number | string;
+  culture_cycle_id?: number | string;
   qr_code_id?: number | string;
+  qr_code?: string;
+  culture_code?: string;
+  culture_verification_status?: string;
+  farmer_id?: number | string;
+  farmer_name?: string;
+  farm_id?: number | string;
+  farm_name?: string;
+  pond_id?: number | string;
+  pond_name?: string;
+  pond_code?: string;
   DOC?: number | string;
   preferred_harvest_time?: string;
   expected_size?: string;
@@ -111,6 +124,11 @@ export type HarvestRequest = {
   stocking_date?: string;
   booking_status?: string;
   status?: string;
+  trader_id?: number | string;
+  trader_code?: string;
+  trader_name?: string;
+  trader_mobile?: string;
+  rejection_reason?: string;
   [key: string]: any;
 };
 
@@ -223,6 +241,17 @@ function toNumber(value: any, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function isValidUserId(value: any) {
+  const text = cleanText(value);
+
+  if (!text || text === "0" || text === "undefined" || text === "null") {
+    return false;
+  }
+
+  const number = Number(text);
+  return Number.isFinite(number) && number > 0;
+}
+
 function normalizeHarvestMethod(value: any): "Partial" | "Full" {
   const method = cleanText(value).toUpperCase();
 
@@ -251,8 +280,12 @@ function normalizeIsoDateTime(value: string) {
   return raw;
 }
 
-function cleanHarvestPayload(payload: HarvestPayload): HarvestPayload {
+function cleanHarvestPayload(
+  payload: HarvestPayload,
+  loginUserId: string | number,
+): HarvestPayload {
   return {
+    user_id: toNumber(loginUserId),
     culture_id: toNumber(payload.culture_id),
     qr_code_id: toNumber(payload.qr_code_id),
     DOC: toNumber(payload.DOC),
@@ -332,8 +365,16 @@ export async function getQrByCode(code: string): Promise<ApiResult<QrRecord>> {
 export async function getCultureCyclesByUser(
   userId: number | string,
 ): Promise<ApiResult<CultureCycle[]>> {
+  if (!isValidUserId(userId)) {
+    return {
+      ok: false,
+      message: "User ID not found. Please login again.",
+      data: [],
+    };
+  }
+
   const result = await requestJson<any>({
-    path: `${CULTURE_CYCLES_BY_USER_PATH}/${userId}`,
+    path: `${CULTURE_CYCLES_BY_USER_PATH}/${encodeURIComponent(String(userId))}`,
     method: "GET",
     fallbackError: "Unable to fetch culture cycles.",
   });
@@ -346,18 +387,36 @@ export async function getCultureCyclesByUser(
 
 export async function submitHarvestRequest(
   payload: HarvestPayload,
+  userId: string | number,
 ): Promise<ApiResult<HarvestRequest>> {
+  if (!isValidUserId(userId)) {
+    return {
+      ok: false,
+      message: "User ID not found. Please login again and create harvest request.",
+    };
+  }
+
   return requestJson<HarvestRequest>({
     path: HARVEST_PATH,
     method: "POST",
-    body: cleanHarvestPayload(payload),
+    body: cleanHarvestPayload(payload, userId),
     fallbackError: "Harvest request submission failed.",
   });
 }
 
-export async function getHarvestRequests(): Promise<ApiResult<HarvestRequest[]>> {
+export async function getHarvestRequests(
+  userId: string | number,
+): Promise<ApiResult<HarvestRequest[]>> {
+  if (!isValidUserId(userId)) {
+    return {
+      ok: false,
+      message: "User ID not found. Please login again and open harvest requests.",
+      data: [],
+    };
+  }
+
   const result = await requestJson<any>({
-    path: HARVEST_PATH,
+    path: `${HARVEST_PATH}/user/${encodeURIComponent(String(userId))}`,
     method: "GET",
     fallbackError: "Unable to fetch harvest records.",
   });

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -10,10 +10,23 @@ import {
   View,
 } from "react-native";
 import { router } from "expo-router";
+import { useSelector } from "react-redux";
+
+import type { RootState } from "../../../src/store/auth/store";
 import {
   getHarvestRequests,
   HarvestRequest,
 } from "../../../src/services/aqua/harvest.service";
+
+function firstText(...values: any[]) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value).trim();
+    }
+  }
+
+  return "";
+}
 
 function formatValue(value: any) {
   if (value === null || value === undefined || value === "") {
@@ -32,21 +45,54 @@ function getStatusText(item: HarvestRequest) {
 }
 
 export default function MyHarvestRequestsScreen() {
+  const me = useSelector((state: RootState) => state.me?.me);
+
+  const userId = useMemo(
+    () =>
+      firstText(
+        me?.rootverse_user?.id,
+        me?.user_id,
+        me?.id,
+        me?.rootverse_user_id,
+      ),
+    [me],
+  );
+
   const [requests, setRequests] = useState<HarvestRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadRequests = useCallback(async () => {
     try {
-      const result = await getHarvestRequests();
+      if (!userId) {
+        setRequests([]);
+        Alert.alert("Error", "User ID not found. Please login again.");
+        return;
+      }
+
+      const result = await getHarvestRequests(userId);
+
+      if (!result.ok) {
+        setRequests([]);
+        Alert.alert(
+          "Failed",
+          result.message || "Unable to fetch your harvest records.",
+        );
+        return;
+      }
+
       setRequests(result.data || []);
     } catch (error: any) {
-      Alert.alert("Failed", error?.message || "Unable to fetch harvest records.");
+      setRequests([]);
+      Alert.alert(
+        "Failed",
+        error?.message || "Unable to fetch your harvest records.",
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     loadRequests();
@@ -61,7 +107,7 @@ export default function MyHarvestRequestsScreen() {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#16A34A" />
-        <Text style={styles.loadingText}>Loading harvest requests...</Text>
+        <Text style={styles.loadingText}>Loading my harvest requests...</Text>
       </View>
     );
   }
@@ -69,7 +115,7 @@ export default function MyHarvestRequestsScreen() {
   return (
     <View style={styles.page}>
       <View style={styles.header}>
-        <Text style={styles.title}>Harvest Requests</Text>
+        <Text style={styles.title}>My Harvest Requests</Text>
 
         <TouchableOpacity
           style={styles.scanButton}
@@ -81,7 +127,7 @@ export default function MyHarvestRequestsScreen() {
 
       <FlatList
         data={requests}
-        keyExtractor={(item) => String(item.id)}
+        keyExtractor={(item, index) => String(item.id || index)}
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -101,7 +147,9 @@ export default function MyHarvestRequestsScreen() {
           return (
             <View style={styles.card}>
               <View style={styles.rowBetween}>
-                <Text style={styles.cardTitle}>Harvest #{item.id}</Text>
+                <Text style={styles.cardTitle}>
+                  Harvest #{formatValue(item.id)}
+                </Text>
 
                 <View
                   style={[
@@ -128,13 +176,15 @@ export default function MyHarvestRequestsScreen() {
                   QR Code ID: {formatValue(item.qr_code_id)}
                 </Text>
                 <Text style={styles.infoText}>
-                  Culture ID: {formatValue(item.culture_cycle_id || item.culture_id)}
+                  Culture ID:{" "}
+                  {formatValue(item.culture_cycle_id || item.culture_id)}
                 </Text>
                 <Text style={styles.infoText}>
                   Culture Code: {formatValue(item.culture_code)}
                 </Text>
                 <Text style={styles.infoText}>
-                  Culture Status: {formatValue(item.culture_verification_status)}
+                  Culture Status:{" "}
+                  {formatValue(item.culture_verification_status)}
                 </Text>
               </View>
 
@@ -155,8 +205,10 @@ export default function MyHarvestRequestsScreen() {
 
               <View style={styles.harvestBox}>
                 <Text style={styles.harvestLabel}>Harvest Details</Text>
+
                 <Text style={styles.harvestValue}>
-                  {formatValue(item.harvest_method)} / {formatValue(item.species)}
+                  {formatValue(item.harvest_method)} /{" "}
+                  {formatValue(item.species)}
                 </Text>
 
                 <Text style={styles.infoText}>
