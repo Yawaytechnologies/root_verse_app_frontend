@@ -24,6 +24,7 @@ export type SamplingPayload = {
   farm_id: string | number;
   pond_id: string | number;
   culture_cycle_id: string | number;
+  culture_id?: string | number;
 
   qr_code_id?: string | number;
   qrcode_id?: string | number;
@@ -54,6 +55,7 @@ export type SamplingPayload = {
   size_count_per_kg: number;
   size?: number;
   size_count?: number;
+  count_kg?: number;
 
   total_pl_stock?: number;
   total_pl_stocked?: number;
@@ -64,6 +66,8 @@ export type SamplingPayload = {
   expectedBiomass?: number;
 
   [key: string]: any;
+  
+
 };
 
 export type SamplingRecord = SamplingPayload & {

@@ -18,23 +18,35 @@ import {
 } from "./common";
 
 export type AquaFormState = {
-  qc_status: "PENDING" | "CHECKED";
+  harvest_id: string;
+  sample_count: string;
+  sample_weight: string;
 
-  species: string;
-  water_temperature: string;
-  ph_level: string;
-  grade: "30" | "40";
+  grade: "A" | "B" | "C" | "D";
+  disease_observation: "false" | "true";
+  disease_notes: string;
+
+  inspection_latitude: string;
+  inspection_longitude: string;
+  inspected_at: string;
 
   remarks: string;
   images: string[];
 };
 
 export const aquaInitial = (): AquaFormState => ({
-  qc_status: "CHECKED",
-  species: "",
-  water_temperature: "",
-  ph_level: "",
-  grade: "30",
+  harvest_id: "",
+  sample_count: "",
+  sample_weight: "",
+
+  grade: "A",
+  disease_observation: "false",
+  disease_notes: "",
+
+  inspection_latitude: "",
+  inspection_longitude: "",
+  inspected_at: new Date().toISOString(),
+
   remarks: "",
   images: [],
 });
@@ -60,16 +72,32 @@ type Props = {
   submitError?: string | null;
 
   onCancel: () => void;
-
-  // ✅ FIX: accept payload (and allow async)
   onSubmit: (payload: any) => void | Promise<void>;
-
-  // ✅ OPTIONAL: screen passes this already; add if you want to disable UI when already filled
   readOnly?: boolean;
 };
 
-const QC_STATUS = ["PENDING", "CHECKED"] as const;
-const GRADE = ["30", "40"] as const;
+const GRADES = ["A", "B", "C", "D"] as const;
+const BOOLS = ["false", "true"] as const;
+
+function clean(v: any) {
+  const t = String(v ?? "").trim();
+  return t;
+}
+
+function firstText(...vals: any[]) {
+  for (const v of vals) {
+    const t = clean(v);
+    if (t) return t;
+  }
+  return "";
+}
+
+function toNumOrUndefined(v: any) {
+  const t = clean(v);
+  if (!t) return undefined;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : undefined;
+}
 
 export default function AquaInspectionModal({
   visible,
@@ -87,23 +115,76 @@ export default function AquaInspectionModal({
   onSubmit,
   readOnly = false,
 }: Props) {
-  const speciesAuto = data?.fish_name ?? data?.species ?? "";
+  const harvestIdValue = firstText(
+    form.harvest_id,
+    data?.harvest_id,
+    data?.harvestId,
+    data?.harvest?.id,
+    data?.harvest_record?.id
+  );
 
-  // ✅ Build the payload here and pass to screen submit(payload)
+  const sampleCountValue = firstText(
+    form.sample_count,
+    data?.sample_count,
+    data?.latest_sampling?.sample_count,
+    data?.sampling?.sample_count
+  );
+
+  const sampleWeightValue = firstText(
+    form.sample_weight,
+    data?.sample_weight,
+    data?.latest_sampling?.sample_weight,
+    data?.sampling?.sample_weight
+  );
+
+  const latValue = firstText(
+    form.inspection_latitude,
+    data?.inspection_latitude,
+    data?.latitude,
+    data?.pond?.latitude,
+    data?.farm?.latitude
+  );
+
+  const lngValue = firstText(
+    form.inspection_longitude,
+    data?.inspection_longitude,
+    data?.longitude,
+    data?.pond?.longitude,
+    data?.farm?.longitude
+  );
+
+  const species = firstText(
+    data?.species,
+    data?.shrimp_species,
+    data?.fish_name,
+    data?.culture?.species
+  );
+
+  const pondName = firstText(data?.pond_name, data?.pond?.pond_name, data?.pond?.name);
+  const farmName = firstText(data?.farm_name, data?.farm?.farm_name, data?.farm?.name);
+
   const buildPayload = () => ({
-    qc_status: form.qc_status,
+    pond_qr_scan: scannedCode,
 
-    // keep auto species if backend provides it, else user entry
-    species: (speciesAuto || form.species || "").trim() || undefined,
+    harvest_id: toNumOrUndefined(harvestIdValue),
 
-    water_temperature: Number(form.water_temperature || 0),
-    ph_level: Number(form.ph_level || 0),
+    sample_count: toNumOrUndefined(sampleCountValue),
+    sample_weight: toNumOrUndefined(sampleWeightValue),
 
     grade: form.grade,
-    remarks: form.remarks?.trim() || undefined,
+    disease_observation: form.disease_observation === "true",
+    disease_notes: clean(form.disease_notes) || undefined,
 
-    // IMPORTANT: screen expects images array and slice will convert to FormData if needed
-    pond_condition_images: form.images,
+    shrimp_images: form.images,
+
+    inspection_latitude: toNumOrUndefined(latValue),
+    inspection_longitude: toNumOrUndefined(lngValue),
+    inspected_at: clean(form.inspected_at) || undefined,
+
+    remarks: clean(form.remarks) || undefined,
+
+    qc_status: "CHECKED",
+    qc_result: "PASS",
   });
 
   const disabled = submitLoading || readOnly;
@@ -146,7 +227,7 @@ export default function AquaInspectionModal({
           >
             <View style={{ flex: 1 }}>
               <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>
-                Aqua Quality Inspection
+                Aquaculture Quality Inspection
               </Text>
               <Text
                 style={{
@@ -209,34 +290,59 @@ export default function AquaInspectionModal({
               </Text>
             ) : null}
 
-            <Label>QC Status</Label>
-            <Select
-              value={form.qc_status}
-              onValueChange={(v) => setFormField("qc_status", v)}
-              items={QC_STATUS}
-            />
-
-            <Label>Fish Code</Label>
+            <Label>Pond QR Scan</Label>
             <ReadOnly value={scannedCode || "—"} />
 
-            <Label>Species (auto)</Label>
-            <ReadOnly value={speciesAuto || form.species || "—"} />
+            {!!farmName ? (
+              <>
+                <Label>Farm</Label>
+                <ReadOnly value={farmName} />
+              </>
+            ) : null}
+
+            {!!pondName ? (
+              <>
+                <Label>Pond</Label>
+                <ReadOnly value={pondName} />
+              </>
+            ) : null}
+
+            {!!species ? (
+              <>
+                <Label>Species</Label>
+                <ReadOnly value={species} />
+              </>
+            ) : null}
+
+            <Label>Harvest ID</Label>
+            <Input
+              value={harvestIdValue}
+              onChangeText={(v) => setFormField("harvest_id", v)}
+              keyboardType="numeric"
+              disabled={disabled}
+              placeholder="Enter harvest id"
+            />
 
             <TwoCol>
               <View style={{ flex: 1 }}>
-                <Label>Water Temperature</Label>
+                <Label>Sample Count</Label>
                 <Input
-                  value={form.water_temperature}
-                  onChangeText={(v) => setFormField("water_temperature", v)}
+                  value={sampleCountValue}
+                  onChangeText={(v) => setFormField("sample_count", v)}
                   keyboardType="numeric"
+                  disabled={disabled}
+                  placeholder="50"
                 />
               </View>
+
               <View style={{ flex: 1 }}>
-                <Label>pH Level</Label>
+                <Label>Sample Weight</Label>
                 <Input
-                  value={form.ph_level}
-                  onChangeText={(v) => setFormField("ph_level", v)}
+                  value={sampleWeightValue}
+                  onChangeText={(v) => setFormField("sample_weight", v)}
                   keyboardType="numeric"
+                  disabled={disabled}
+                  placeholder="600"
                 />
               </View>
             </TwoCol>
@@ -245,11 +351,30 @@ export default function AquaInspectionModal({
             <Select
               value={form.grade}
               onValueChange={(v) => setFormField("grade", v)}
-              items={GRADE}
+              items={GRADES}
+              disabled={disabled}
+            />
+
+            <Label>Disease Observation</Label>
+            <Select
+              value={form.disease_observation}
+              onValueChange={(v) => setFormField("disease_observation", v)}
+              items={BOOLS}
+              disabled={disabled}
+            />
+
+            <Label>Disease Notes</Label>
+            <Input
+              value={form.disease_notes}
+              onChangeText={(v) => setFormField("disease_notes", v)}
+              disabled={disabled}
+              placeholder="No visible disease signs"
+              multiline
+              numberOfLines={4}
             />
 
             <View style={{ marginTop: 14 }}>
-              <Label>Images of Pond Condition</Label>
+              <Label>Shrimp Images</Label>
               <View style={{ marginTop: 10 }}>
                 <ActionBtn
                   label={`Pick Images (${form.images.length})`}
@@ -257,8 +382,44 @@ export default function AquaInspectionModal({
                   disabled={disabled}
                 />
               </View>
-              <ImageList uris={form.images} onRemove={onRemoveImage} disabled={disabled} />
+              <ImageList
+                uris={form.images}
+                onRemove={onRemoveImage}
+                disabled={disabled}
+              />
             </View>
+
+            <TwoCol>
+              <View style={{ flex: 1 }}>
+                <Label>Inspection Latitude</Label>
+                <Input
+                  value={latValue}
+                  onChangeText={(v) => setFormField("inspection_latitude", v)}
+                  keyboardType="numeric"
+                  disabled={disabled}
+                  placeholder="10.7637"
+                />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Label>Inspection Longitude</Label>
+                <Input
+                  value={lngValue}
+                  onChangeText={(v) => setFormField("inspection_longitude", v)}
+                  keyboardType="numeric"
+                  disabled={disabled}
+                  placeholder="79.8435"
+                />
+              </View>
+            </TwoCol>
+
+            <Label>Inspected At</Label>
+            <Input
+              value={form.inspected_at}
+              onChangeText={(v) => setFormField("inspected_at", v)}
+              disabled={disabled}
+              placeholder="2026-06-15T09:30:00.000Z"
+            />
 
             <View style={{ marginTop: 14 }}>
               <Label>Remarks</Label>
@@ -268,6 +429,7 @@ export default function AquaInspectionModal({
                 placeholder="Add remarks…"
                 multiline
                 numberOfLines={5}
+                disabled={disabled}
               />
             </View>
 
@@ -291,7 +453,7 @@ export default function AquaInspectionModal({
                   fontWeight: "900",
                 }}
               >
-                This QR is already filled (read-only).
+                This inspection is read-only.
               </Text>
             ) : null}
           </ScrollView>
@@ -321,7 +483,6 @@ export default function AquaInspectionModal({
             </Pressable>
 
             <Pressable
-              // ✅ FIX: pass payload
               onPress={() => onSubmit(buildPayload())}
               disabled={disabled}
               style={{

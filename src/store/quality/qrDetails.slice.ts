@@ -102,9 +102,105 @@ type FetchArg =
   | string
   | {
       qrCode: string;
-      /** AUTO = try FILLED then NEW, FILLED_ONLY = only /api/filled/:code */
       mode?: "AUTO" | "FILLED_ONLY";
+      division?: "WILD" | "AQUA" | "MARICULTURE" | string;
     };
+
+    function numOrNull(v: any): number | null {
+  if (v === undefined || v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeAquaScan(raw: any, code: string): CatchLogDetails {
+  const root = raw?.data ?? raw?.result ?? raw ?? {};
+
+  const harvest =
+    root?.harvest ??
+    root?.harvest_record ??
+    root?.harvestRecord ??
+    root?.harvest_data ??
+    {};
+
+  const farm = root?.farm ?? root?.farm_data ?? {};
+  const pond = root?.pond ?? root?.pond_data ?? {};
+  const culture = root?.culture ?? root?.culture_cycle ?? root?.cultureCycle ?? {};
+
+  const status = normalizeStatus(root);
+  const finalStatus = status === "UNKNOWN" ? "NEW" : status;
+
+  return {
+    code: normalizeQr(
+      String(
+        root?.pond_qr_scan ??
+          root?.qr_code ??
+          root?.qrs_code ??
+          root?.code ??
+          code
+      )
+    ),
+    type: "pond",
+    status: finalStatus,
+
+    harvest_id:
+      root?.harvest_id ??
+      root?.harvestId ??
+      harvest?.id ??
+      harvest?.harvest_id ??
+      null,
+
+    farm_id: root?.farm_id ?? farm?.id ?? null,
+    pond_id: root?.pond_id ?? pond?.id ?? null,
+    culture_id:
+      root?.culture_id ??
+      root?.culture_cycle_id ??
+      culture?.id ??
+      culture?.culture_id ??
+      null,
+
+    farm_name: root?.farm_name ?? farm?.farm_name ?? farm?.name ?? null,
+    pond_name: root?.pond_name ?? pond?.pond_name ?? pond?.name ?? null,
+
+    fish_name:
+      root?.species ??
+      root?.shrimp_species ??
+      harvest?.species ??
+      culture?.species ??
+      null,
+
+    species:
+      root?.species ??
+      root?.shrimp_species ??
+      harvest?.species ??
+      culture?.species ??
+      null,
+
+    sample_count:
+      root?.sample_count ??
+      root?.latest_sampling?.sample_count ??
+      root?.sampling?.sample_count ??
+      null,
+
+    sample_weight:
+      root?.sample_weight ??
+      root?.latest_sampling?.sample_weight ??
+      root?.sampling?.sample_weight ??
+      null,
+
+    inspection_latitude: numOrNull(
+      root?.inspection_latitude ?? root?.latitude ?? pond?.latitude ?? farm?.latitude
+    ),
+
+    inspection_longitude: numOrNull(
+      root?.inspection_longitude ??
+        root?.longitude ??
+        pond?.longitude ??
+        farm?.longitude
+    ),
+
+    raw,
+  } as any;
+}
 
 // ✅ PRE-SUBMIT DETAILS FLOW:
 // 1) /api/filled/:code  (works after QC submit)
@@ -117,29 +213,41 @@ export const fetchCatchLogByQr = createAsyncThunk<
   try {
     const qrCode = typeof arg === "string" ? arg : arg?.qrCode;
     const mode = typeof arg === "string" ? "AUTO" : arg?.mode ?? "AUTO";
+    const division = typeof arg === "string" ? "" : upper(arg?.division);
 
     const code = normalizeQr(qrCode || "");
     if (!code) return rejectWithValue("QR_CODE_REQUIRED");
+
+    if (division === "AQUA") {
+      const res = await httpJson<ApiAnyResponse>(
+        `/api/aquaculture/quality-inspection/scan/${encodeURIComponent(code)}`,
+        { method: "GET" }
+      );
+
+      const data = res?.data ?? res?.qr ?? res;
+      if (!data) return rejectWithValue("AQUA_QR_NOT_FOUND");
+
+      return normalizeAquaScan(res, code);
+    }
 
     const tryFetch = async (path: string) => {
       const res = await httpJson<ApiAnyResponse>(path, { method: "GET" });
       return res?.qr ?? res?.data ?? null;
     };
 
-    // 1) FILLED (read-only)
-    let q = await tryFetch(`/api/filled/${encodeURIComponent(code)}`).catch(() => null);
+    let q = await tryFetch(`/api/filled/${encodeURIComponent(code)}`).catch(
+      () => null
+    );
 
-    // If view-only mode: do NOT fallback to NEW
     if (mode === "FILLED_ONLY") {
       if (!q) return rejectWithValue("ONLY_SUBMITTED_ALLOWED");
       return mapToCatchLog(q);
     }
 
-    // 2) NEW (pre-submit)
     if (!q) {
-      q = await tryFetch(`/api/qrs/status/NEW/code/${encodeURIComponent(code)}`).catch(
-        () => null
-      );
+      q = await tryFetch(
+        `/api/qrs/status/NEW/code/${encodeURIComponent(code)}`
+      ).catch(() => null);
     }
 
     if (!q) return rejectWithValue("QR not found");

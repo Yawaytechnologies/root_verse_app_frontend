@@ -116,12 +116,14 @@ function deriveQcStatus(qcResult: string): string {
 
 function pickImagesFromPayload(payload: any): string[] {
   const imgs =
+    payload?.shrimp_images ??
     payload?.crate_images ??
     payload?.inspection_images ??
     payload?.pond_images ??
     payload?.pond_condition_images ??
     payload?.images ??
     [];
+
   return Array.isArray(imgs) ? imgs.filter(Boolean) : [];
 }
 
@@ -615,10 +617,33 @@ export default function QcScannerScreen({
       next.images = pickImagesFromPayload(payload);
       setWildForm(next);
     } else if (division === "AQUA") {
-      const next: any = aquaInitial();
-      Object.assign(next, payload);
-      next.images = pickImagesFromPayload(payload);
-      setAquaForm(next);
+  const next: any = aquaInitial();
+
+  next.harvest_id = String(
+    payload.harvest_id ?? payload.harvestId ?? payload?.harvest?.id ?? ""
+  );
+
+  next.sample_count = String(payload.sample_count ?? "");
+  next.sample_weight = String(payload.sample_weight ?? "");
+
+  next.grade = payload.grade ?? "A";
+  next.disease_observation = String(
+    payload.disease_observation ?? "false"
+  ) as any;
+
+  next.disease_notes = payload.disease_notes ?? "";
+  next.inspection_latitude = String(
+    payload.inspection_latitude ?? payload.latitude ?? ""
+  );
+  next.inspection_longitude = String(
+    payload.inspection_longitude ?? payload.longitude ?? ""
+  );
+  next.inspected_at = payload.inspected_at ?? new Date().toISOString();
+
+  next.remarks = payload.remarks ?? "";
+  next.images = pickImagesFromPayload(payload);
+
+  setAquaForm(next);
     } else {
       const next: any = mariInitial();
       Object.assign(next, payload);
@@ -688,7 +713,7 @@ export default function QcScannerScreen({
     }
 
     setModalOpen(true);
-    dispatch(fetchCatchLogByQr(c));
+    dispatch(fetchCatchLogByQr({ qrCode: c, division }));
   };
 
   useEffect(() => {
@@ -706,7 +731,7 @@ export default function QcScannerScreen({
 
     dispatch(resetQcFill());
     dispatch(clearCatchLog());
-    dispatch(fetchCatchLogByQr(code));
+    dispatch(fetchCatchLogByQr({ qrCode: code, division }));
 
     onEditDraftConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -818,13 +843,29 @@ const submit = async (payload: any) => {
     return;
   }
 
-  if (!catchLog || !speciesOk) {
-    Alert.alert(
-      "Cannot submit",
-      "Species not loaded for this QR. Submission blocked."
-    );
+  if (!catchLog) {
+  Alert.alert("Cannot submit", "QR details not loaded. Please rescan.");
+  return;
+}
+
+if (division !== "AQUA" && !speciesOk) {
+  Alert.alert(
+    "Cannot submit",
+    "Species not loaded for this QR. Submission blocked."
+  );
+  return;
+}
+
+if (division === "AQUA") {
+  const harvestId = String(
+    payload?.harvest_id ?? (catchLog as any)?.harvest_id ?? ""
+  ).trim();
+
+  if (!harvestId) {
+    Alert.alert("Cannot submit", "Harvest ID is required for aquaculture.");
     return;
   }
+}
 
   if (!inspector?.checker_code || !inspector?.id) {
     Alert.alert("Inspector missing", "QC inspector data not loaded");
@@ -855,14 +896,27 @@ const submit = async (payload: any) => {
   // ✅ removed heavy image compression during submit
   const processedPayload = payload;
 
-  const finalPayload = {
-    ...processedPayload,
-    checker_code: inspector.checker_code,
-    quality_checker_id: inspector.id,
-    division,
-    ...(latitude ? { latitude } : {}),
-    ...(longitude ? { longitude } : {}),
-  };
+  const finalPayload =
+  division === "AQUA"
+    ? {
+        ...processedPayload,
+        pond_qr_scan: scannedCode,
+        harvest_id:
+          processedPayload?.harvest_id ?? (catchLog as any)?.harvest_id,
+        checker_code: inspector.checker_code,
+        quality_checker_id: inspector.id,
+        division,
+        ...(latitude ? { inspection_latitude: latitude } : {}),
+        ...(longitude ? { inspection_longitude: longitude } : {}),
+      }
+    : {
+        ...processedPayload,
+        checker_code: inspector.checker_code,
+        quality_checker_id: inspector.id,
+        division,
+        ...(latitude ? { latitude } : {}),
+        ...(longitude ? { longitude } : {}),
+      };
 
   const qcResultFromForm = getFormQcResult(finalPayload);
   const qcStatusFromForm = deriveQcStatus(qcResultFromForm);

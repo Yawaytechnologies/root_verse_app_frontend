@@ -125,6 +125,15 @@ function fmt(value: any, fallback = "-") {
   return text ? text : fallback;
 }
 
+function pickMetric(...values: any[]) {
+  const found = values.find((value) => {
+    const text = String(value ?? "").trim();
+    return text && text !== "undefined" && text !== "null";
+  });
+
+  return fmt(found);
+}
+
 function dateText(value: any) {
   const text = String(value ?? "").trim();
   if (!text) return "-";
@@ -456,8 +465,8 @@ export default function SamplingListScreen() {
                         Sampling ID: {fmt(record?.sampling_id || record?.id)}
                       </Text>
                       <Text style={{ color: C.subText, fontSize: 12, marginTop: 4 }} numberOfLines={1}>
-                        Date: {dateText(record?.sampling_date)} | DOC: {fmt(record?.doc)}
-                      </Text>
+  Date: {dateText(record?.sampling_date)} | DOC: {pickMetric(record?.DOC, record?.doc, record?.DoC)}
+</Text>
                       <Text style={{ color: C.subText, fontSize: 12, marginTop: 4 }} numberOfLines={1}>
                         Farm: {getFarmName(farms, farmId)} | Pond: {getPondName(ponds, pondId)}
                       </Text>
@@ -465,11 +474,35 @@ export default function SamplingListScreen() {
                   </View>
 
                   <View style={{ marginTop: 13, gap: 8 }}>
-                    <MetricRow label="Sample Count" value={fmt(record?.sample_count)} C={C} />
-                    <MetricRow label="Sample Weight (g)" value={fmt(record?.sample_weight)} C={C} />
-                    <MetricRow label="ABW (g)" value={fmt(record?.abw)} C={C} />
-                    <MetricRow label="Size (Count/kg)" value={fmt(record?.size_count_per_kg)} C={C} />
-                    <MetricRow label="Expected Biomass (kg)" value={fmt(record?.expected_biomass)} C={C} />
+                    <MetricRow
+  label="Sample Count"
+  value={pickMetric(record?.sample_count, record?.sampleCount)}
+  C={C}
+/>
+
+<MetricRow
+  label="Sample Weight (g)"
+  value={pickMetric(record?.sample_weight, record?.sample_weight_g, record?.sampleWeight)}
+  C={C}
+/>
+
+<MetricRow
+  label="ABW (g)"
+  value={pickMetric(record?.ABW, record?.abw)}
+  C={C}
+/>
+
+<MetricRow
+  label="Size (Count/kg)"
+  value={pickMetric(record?.count_kg, record?.size_count_per_kg, record?.size_count, record?.size)}
+  C={C}
+/>
+
+<MetricRow
+  label="Expected Biomass (kg)"
+  value={pickMetric(record?.expected_biomass, record?.expected_biomass_kg, record?.expectedBiomass)}
+  C={C}
+/>
                   </View>
                 </View>
               );

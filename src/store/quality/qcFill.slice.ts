@@ -1,4 +1,3 @@
-// src/store/quality/qcFill.slice.ts
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import type { RootState } from "../auth/store";
@@ -42,8 +41,14 @@ const TOKEN_KEY = "auth_token";
 const QC_FILL_ENDPOINT = (code: string) =>
   `/api/qrs/${encodeURIComponent(code)}/fill`;
 
+const AQUA_QUALITY_INSPECTION_ENDPOINT = `/api/aquaculture/quality-inspection`;
+
 function normalizeQr(raw: string) {
   return String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function upper(v: any) {
+  return String(v ?? "").trim().toUpperCase();
 }
 
 function guessMime(uri: string) {
@@ -61,12 +66,48 @@ function toFile(uri: string, idx: number) {
 }
 
 function appendScalar(form: FormData, key: string, value: any) {
-  if (value === undefined || value === null) return;
+  if (value === undefined || value === null || value === "") return;
   if (Array.isArray(value)) return;
   if (typeof value === "object") return;
 
   if (typeof value === "boolean") form.append(key, value ? "true" : "false");
   else form.append(key, String(value));
+}
+
+function firstValue(...vals: any[]) {
+  for (const v of vals) {
+    if (v === undefined || v === null) continue;
+    const t = String(v).trim();
+    if (t !== "") return v;
+  }
+  return undefined;
+}
+
+function toRequiredNumber(value: any, errorName: string) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    throw new Error(errorName);
+  }
+  return n;
+}
+
+function toOptionalNumber(value: any) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function getImages(payload: any): string[] {
+  const imgs =
+    payload?.shrimp_images ??
+    payload?.crate_images ??
+    payload?.inspection_images ??
+    payload?.pond_images ??
+    payload?.pond_condition_images ??
+    payload?.images ??
+    [];
+
+  return Array.isArray(imgs) ? imgs.filter(Boolean).map(String) : [];
 }
 
 function pickUpdatedQr(raw: any): QcFillQr | undefined {
@@ -75,10 +116,24 @@ function pickUpdatedQr(raw: any): QcFillQr | undefined {
     raw?.updatedQr ||
     raw?.data?.qr ||
     raw?.data?.updatedQr ||
+    raw?.data ||
+    raw?.inspection ||
+    raw?.quality_inspection ||
     raw?.result?.qr ||
     raw?.result?.updatedQr ||
     undefined
   );
+}
+
+async function readJsonResponse(res: Response) {
+  const text = await res.text();
+  let raw: any = {};
+  try {
+    raw = text ? JSON.parse(text) : {};
+  } catch {
+    raw = { message: text };
+  }
+  return raw;
 }
 
 export const submitQcFill = createAsyncThunk<
@@ -99,74 +154,156 @@ export const submitQcFill = createAsyncThunk<
 
     const inspector = (getState() as any)?.qualityAuth?.inspector;
 
-    /**
-     * ✅ IMPORTANT FRONTEND RULE:
-     * Take QC identity ONLY from logged-in inspector.
-     * Do NOT trust payload fallback.
-     */
-    const checkerCode = inspector?.checker_code || null;
-    const checkerName = inspector?.checker_name || null;
+    const checkerCode =
+      inspector?.checker_code ||
+      inspector?.checkerCode ||
+      payload?.checker_code ||
+      payload?.quality_checker_code ||
+      null;
 
-    const qcIdRaw = inspector?.id ?? null;
+    const checkerName =
+      inspector?.checker_name ||
+      inspector?.checkerName ||
+      inspector?.name ||
+      payload?.checker_name ||
+      payload?.quality_checker_name ||
+      null;
+
+    const qcIdRaw =
+      inspector?.id ??
+      payload?.quality_checker_id ??
+      payload?.qualityCheckerId ??
+      null;
+
     const qcId =
       qcIdRaw !== null && qcIdRaw !== undefined ? Number(qcIdRaw) : null;
 
-    // Debug proof (remove later if you want)
-    console.log("QC_ID_RAW", qcIdRaw, "QC_ID_FINAL", qcId);
-    console.log("QC_SEND_FIELDS", {
-      quality_checker_id: qcId,
-      quality_checker_code: checkerCode,
-      quality_checker_name: checkerName,
-    });
-
     if (!checkerCode) return rejectWithValue("QC_CHECKER_CODE_MISSING");
-    if (!checkerName) return rejectWithValue("QC_CHECKER_NAME_MISSING");
     if (!qcId || Number.isNaN(qcId)) return rejectWithValue("QC_ID_MISSING");
 
-    const url = `${API_BASE}${QC_FILL_ENDPOINT(code)}`;
+    const division = upper(payload?.division);
 
+    /**
+     * AQUA ONLY:
+     * Use new backend API:
+     * POST /api/aquaculture/quality-inspection
+     */
+    if (division === "AQUA") {
+      const form = new FormData();
+
+      const harvestIdRaw = firstValue(
+        payload?.harvest_id,
+        payload?.harvestId,
+        payload?.harvest?.id
+      );
+
+      const harvestId = toRequiredNumber(harvestIdRaw, "HARVEST_ID_REQUIRED");
+
+      const grade = String(payload?.grade ?? "").trim();
+      if (!grade) return rejectWithValue("GRADE_REQUIRED");
+
+      appendScalar(form, "pond_qr_scan", payload?.pond_qr_scan || code);
+      appendScalar(form, "harvest_id", harvestId);
+
+      appendScalar(form, "quality_checker_id", qcId);
+      appendScalar(form, "checker_code", checkerCode);
+
+      const sampleCount = toOptionalNumber(payload?.sample_count);
+      const sampleWeight = toOptionalNumber(payload?.sample_weight);
+
+      appendScalar(form, "sample_count", sampleCount);
+      appendScalar(form, "sample_weight", sampleWeight);
+
+      appendScalar(form, "grade", grade);
+
+      appendScalar(
+        form,
+        "disease_observation",
+        payload?.disease_observation ?? false
+      );
+
+      appendScalar(form, "disease_notes", payload?.disease_notes);
+
+      const lat = firstValue(payload?.inspection_latitude, payload?.latitude);
+      const lng = firstValue(payload?.inspection_longitude, payload?.longitude);
+
+      appendScalar(form, "inspection_latitude", toOptionalNumber(lat));
+      appendScalar(form, "inspection_longitude", toOptionalNumber(lng));
+
+      appendScalar(form, "inspected_at", payload?.inspected_at);
+      appendScalar(form, "remarks", payload?.remarks);
+
+      getImages(payload)
+        .slice(0, 5)
+        .forEach((uri, idx) => {
+          form.append("shrimp_images", toFile(uri, idx));
+        });
+
+      const res = await fetch(`${API_BASE}${AQUA_QUALITY_INSPECTION_ENDPOINT}`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: form,
+        signal: controller.signal,
+      });
+
+      const raw = await readJsonResponse(res);
+
+      if (!res.ok) {
+        const msg =
+          raw?.message ||
+          raw?.error ||
+          raw?.msg ||
+          `AQUA_QUALITY_INSPECTION_FAILED_${res.status}`;
+        return rejectWithValue(msg);
+      }
+
+      return {
+        success: true,
+        message: raw?.message || "Aquaculture quality inspection created",
+        qr: pickUpdatedQr(raw),
+        raw,
+      };
+    }
+
+    /**
+     * WILD / MARICULTURE:
+     * Old flow untouched.
+     */
+    if (!checkerName) return rejectWithValue("QC_CHECKER_NAME_MISSING");
+
+    const url = `${API_BASE}${QC_FILL_ENDPOINT(code)}`;
     const form = new FormData();
 
-    // ✅ FORCE clean numeric string for backend lookup
     appendScalar(form, "quality_checker_id", String(Number(qcId)));
 
-    // ✅ send new keys (DB columns)
     appendScalar(form, "quality_checker_code", checkerCode);
     appendScalar(form, "quality_checker_name", checkerName);
 
-    // ✅ send legacy keys also (if backend still uses them)
     appendScalar(form, "checker_code", checkerCode);
     appendScalar(form, "checker_name", checkerName);
 
-    const images: string[] = (
-      payload?.crate_images ??
-      payload?.inspection_images ??
-      payload?.pond_images ??
-      payload?.pond_condition_images ??
-      payload?.images ??
-      []
-    ) as string[];
+    const images = getImages(payload);
 
     const SKIP_KEYS = new Set([
-      // images
+      "shrimp_images",
       "crate_images",
       "inspection_images",
       "pond_images",
       "pond_condition_images",
       "images",
 
-      // qc identity fields (we append explicitly above)
       "checker_code",
       "checker_name",
       "quality_checker_id",
       "quality_checker_code",
       "quality_checker_name",
 
-      // explicitly blocked
       "quality_checker_manager",
       "qualityCheckerManager",
 
-      // internal objects
       "_local",
       "server_qr",
       "serverQr",
@@ -180,8 +317,6 @@ export const submitQcFill = createAsyncThunk<
       if (SKIP_KEYS.has(k)) return;
       appendScalar(form, k, v);
     });
-
-    const division = String(payload?.division || "").toUpperCase();
 
     if (division === "WILD") {
       images
@@ -203,13 +338,7 @@ export const submitQcFill = createAsyncThunk<
       signal: controller.signal,
     });
 
-    const text = await res.text();
-    let raw: any = {};
-    try {
-      raw = text ? JSON.parse(text) : {};
-    } catch {
-      raw = { message: text };
-    }
+    const raw = await readJsonResponse(res);
 
     if (!res.ok) {
       const msg =
@@ -217,12 +346,10 @@ export const submitQcFill = createAsyncThunk<
       return rejectWithValue(msg);
     }
 
-    const updatedQr = pickUpdatedQr(raw);
-
     return {
       success: true,
       message: raw?.message || "QC filled",
-      qr: updatedQr,
+      qr: pickUpdatedQr(raw),
       raw,
     };
   } catch (e: any) {
@@ -250,11 +377,13 @@ const slice = createSlice({
       s.error = null;
       s.success = false;
     });
+
     b.addCase(submitQcFill.fulfilled, (s, a) => {
       s.loading = false;
       s.success = true;
       s.lastResult = a.payload;
     });
+
     b.addCase(submitQcFill.rejected, (s, a) => {
       s.loading = false;
       s.success = false;
@@ -268,9 +397,12 @@ export default slice.reducer;
 
 export const selectQcFillLoading = (state: RootState) =>
   (state as any)?.qcFill?.loading ?? false;
+
 export const selectQcFillError = (state: RootState) =>
   (state as any)?.qcFill?.error ?? null;
+
 export const selectQcFillSuccess = (state: RootState) =>
   (state as any)?.qcFill?.success ?? false;
+
 export const selectQcFillLastResult = (state: RootState) =>
   (state as any)?.qcFill?.lastResult ?? null;

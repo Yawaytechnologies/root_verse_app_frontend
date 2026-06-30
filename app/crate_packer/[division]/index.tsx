@@ -1,151 +1,136 @@
 // app/crate_packer/[division]/index.tsx
-import React, { useEffect, useMemo } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import React, { useEffect, useMemo } from "react";
+import { ActivityIndicator, Text, View } from "react-native";
+
+import CratePackerDashboard from "../../../src/components/crate_packer/CratePackerDashboard";
+import AquaCratePackerDashboard from "../../../src/components/crate_packer/aqua/AquaCratePackerDashboard";
 
 import { useAppDispatch, useAppSelector } from "../../../src/store/hooks";
 import { selectAuthSession } from "../../../src/store/auth/authSession.slice";
 import { fetchMe } from "../../../src/store/auth/me.slice";
-import { logout as logoutThunk } from "../../../src/store/auth/login.slice";
 
-import CratePackerDashboard from "../../../src/components/crate_packer/CratePackerDashboard";
+type DivisionKey = "wild" | "aqua" | "mariculture";
 
-const BG = "black";
-const BORDER = "rgba(255,255,255,0.12)";
+function parseDivision(v: any): DivisionKey | null {
+  const raw = Array.isArray(v) ? v[0] : v;
+  const s = String(raw || "").trim().toLowerCase();
+
+  if (s === "wild" || s === "aqua" || s === "mariculture") {
+    return s as DivisionKey;
+  }
+
+  return null;
+}
+
+function cleanText(v: any) {
+  const s = String(v ?? "").trim();
+
+  if (!s || s.toLowerCase() === "undefined" || s.toLowerCase() === "null") {
+    return "";
+  }
+
+  return s;
+}
+
+function pickFirst(...vals: any[]) {
+  return vals.find(
+    (v) => v !== undefined && v !== null && String(v).trim() !== ""
+  );
+}
 
 export default function CratePackerDivisionScreen() {
-  const dispatch = useAppDispatch();
   const params = useLocalSearchParams();
+  const division = parseDivision(params.division);
+
+  const dispatch = useAppDispatch();
 
   const { token, hydrated } = useAppSelector(selectAuthSession);
   const meState = useAppSelector((s: any) => s.me);
+  const me = meState?.me;
 
-  const division = String(params.division || "").toLowerCase();
+  const roleText = useMemo(() => {
+    return cleanText(
+      pickFirst(
+        me?.rootverse_type,
+        me?.role,
+        me?.user_type,
+        me?.type,
+        me?.designation
+      )
+    ).toUpperCase();
+  }, [
+    me?.rootverse_type,
+    me?.role,
+    me?.user_type,
+    me?.type,
+    me?.designation,
+  ]);
 
-  const divisionOk = useMemo(() => {
-    return division === "wild" || division === "aqua" || division === "mariculture";
-  }, [division]);
-
-  const rtype = useMemo(() => {
-    return String(meState?.me?.rootverse_type || "").toUpperCase();
-  }, [meState?.me?.rootverse_type]);
-
-  const isCratePacker = useMemo(() => rtype.includes("CRATE"), [rtype]);
+  const isCratePacker = roleText.includes("CRATE");
 
   useEffect(() => {
     if (!hydrated) return;
 
-    // invalid division -> back to choose division
-    if (token && division && !divisionOk) {
-      router.replace("/crate_packer");
-      return;
-    }
-
-    // no token -> login
     if (!token) {
       router.replace("/(auth)/login");
       return;
     }
-  }, [hydrated, token, division, divisionOk]);
 
-  const onRetry = async () => {
-    await dispatch(fetchMe()).unwrap().catch(() => {});
-  };
+    if (!division) {
+      router.replace("/crate_packer");
+      return;
+    }
 
-  const onLogout = async () => {
-    await dispatch(logoutThunk()).unwrap().catch(() => {});
-    router.replace("/(auth)/login");
-  };
+    if (meState?.me) return;
+    if (meState?.loading) return;
 
-  if (!hydrated) {
-    return (
-      <View style={{ flex: 1, backgroundColor: BG, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator />
-        <Text style={{ color: "rgba(255,255,255,0.8)", marginTop: 10, fontWeight: "800" }}>
-          Starting...
-        </Text>
-      </View>
-    );
-  }
+    dispatch(fetchMe()).unwrap().catch(() => {});
+  }, [dispatch, hydrated, token, division, meState?.me, meState?.loading]);
 
-  // token missing -> redirect happens in effect
-  if (!token) return null;
-
-  // division missing -> go back
   if (!division) {
-    router.replace("/crate_packer");
-    return null;
-  }
-
-  // wait profile
-  if (meState?.loading || !meState?.me) {
     return (
-      <View style={{ flex: 1, backgroundColor: BG, alignItems: "center", justifyContent: "center" }}>
+      <View className="flex-1 items-center justify-center bg-[#030712] px-6">
         <ActivityIndicator />
-        <Text style={{ color: "rgba(255,255,255,0.8)", marginTop: 10, fontWeight: "800" }}>
-          Loading profile...
+        <Text className="mt-3 font-extrabold text-white/70">
+          Opening divisions...
         </Text>
       </View>
     );
   }
 
-  // profile error
-  if (meState?.error) {
+  if (!hydrated || meState?.loading || (token && !me)) {
     return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: BG,
-          alignItems: "center",
-          justifyContent: "center",
-          paddingHorizontal: 18,
-        }}
-      >
-        <Text style={{ color: "rgba(255,255,255,0.95)", fontWeight: "900", fontSize: 16, textAlign: "center" }}>
-          {String(meState.error)}
+      <View className="flex-1 items-center justify-center bg-[#030712] px-6">
+        <ActivityIndicator />
+        <Text className="mt-3 font-extrabold text-white/70">
+          Loading crate packer...
         </Text>
-
-        <View style={{ flexDirection: "row", marginTop: 14 }}>
-          <Pressable
-            onPress={onRetry}
-            style={{
-              paddingVertical: 10,
-              paddingHorizontal: 18,
-              borderRadius: 14,
-              borderWidth: 1,
-              borderColor: BORDER,
-              backgroundColor: "rgba(255,255,255,0.06)",
-            }}
-          >
-            <Text style={{ color: "white", fontWeight: "900" }}>Retry</Text>
-          </Pressable>
-
-          <View style={{ width: 10 }} />
-
-          <Pressable
-            onPress={onLogout}
-            style={{
-              paddingVertical: 10,
-              paddingHorizontal: 18,
-              borderRadius: 14,
-              borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.18)",
-              backgroundColor: "rgba(255,255,255,0.10)",
-            }}
-          >
-            <Text style={{ color: "white", fontWeight: "900" }}>Logout</Text>
-          </Pressable>
-        </View>
       </View>
     );
   }
 
-  // not allowed -> kick
-  if (!isCratePacker) {
-    router.replace("/(auth)/login");
-    return null;
+  if (!token) {
+    return (
+      <View className="flex-1 items-center justify-center bg-[#030712] px-6">
+        <Text className="font-extrabold text-white">Login required</Text>
+      </View>
+    );
   }
 
-  // ✅ Use redux me. No AsyncStorage, no manual /api/me calls.
-  return <CratePackerDashboard meOverride={meState.me} />;
+  if (!isCratePacker) {
+    return (
+      <View className="flex-1 items-center justify-center bg-[#030712] px-6">
+        <Text className="text-center font-extrabold text-white">
+          Your account is not mapped as Crate Packer
+        </Text>
+      </View>
+    );
+  }
+
+  if (division === "aqua") {
+    return <AquaCratePackerDashboard meOverride={me} />;
+  }
+
+  return <CratePackerDashboard meOverride={me} />;
 }

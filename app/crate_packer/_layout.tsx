@@ -1,4 +1,4 @@
-import React from "react";
+// app/crate_packer/_layout.tsx
 import { Stack } from "expo-router";
 
 export default function CratePackerLayout() {
@@ -6,7 +6,6 @@ export default function CratePackerLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
-        animation: "fade",
       }}
     />
   );
