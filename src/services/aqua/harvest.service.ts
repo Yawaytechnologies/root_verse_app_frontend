@@ -280,12 +280,84 @@ function normalizeIsoDateTime(value: string) {
   return raw;
 }
 
+function pickUserIdFromObject(value: any) {
+  const candidates = [
+    value?.user_id,
+    value?.userId,
+
+    value?.data?.user_id,
+    value?.data?.userId,
+
+    value?.rootverse_user?.id,
+    value?.data?.rootverse_user?.id,
+
+    value?.user?.user_id,
+    value?.user?.userId,
+    value?.user?.id,
+
+    value?.data?.user?.user_id,
+    value?.data?.user?.userId,
+    value?.data?.user?.id,
+
+    value?.profile?.user_id,
+    value?.profile?.userId,
+    value?.profile?.id,
+
+    value?.id,
+    value?.data?.id,
+  ];
+
+  return candidates.find(isValidUserId) || "";
+}
+
+async function getStoredLoginUserId() {
+  const directKeys = [
+    "user_id",
+    "userId",
+    "login_user_id",
+    "auth_user_id",
+    "rootverse_user_id",
+  ];
+
+  for (const key of directKeys) {
+    const value = await AsyncStorage.getItem(key);
+    if (isValidUserId(value)) return String(value);
+  }
+
+  const jsonKeys = [
+    "auth_user",
+    "user",
+    "login_user",
+    "loginUser",
+    "current_user",
+    "me",
+    "profile",
+    "farmer_details",
+  ];
+
+  for (const key of jsonKeys) {
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) continue;
+
+    try {
+      const parsed = JSON.parse(raw);
+      const found = pickUserIdFromObject(parsed);
+
+      if (isValidUserId(found)) return String(found);
+    } catch {
+      // ignore invalid JSON
+    }
+  }
+
+  return "";
+}
+
 function cleanHarvestPayload(
   payload: HarvestPayload,
-  loginUserId: string | number,
+  loginUserId?: string | number,
 ): HarvestPayload {
   return {
-    user_id: toNumber(loginUserId),
+    user_id: Number(loginUserId || payload.user_id),
     culture_id: toNumber(payload.culture_id),
     qr_code_id: toNumber(payload.qr_code_id),
     DOC: toNumber(payload.DOC),
@@ -387,19 +459,33 @@ export async function getCultureCyclesByUser(
 
 export async function submitHarvestRequest(
   payload: HarvestPayload,
-  userId: string | number,
+  userId?: string | number,
 ): Promise<ApiResult<HarvestRequest>> {
-  if (!isValidUserId(userId)) {
+  const storedUserId =
+    userId ||
+    (await AsyncStorage.getItem("user_id")) ||
+    (await AsyncStorage.getItem("userId")) ||
+    "";
+
+  console.log("HARVEST STORED USER ID:", storedUserId);
+
+  if (!isValidUserId(storedUserId)) {
     return {
       ok: false,
-      message: "User ID not found. Please login again and create harvest request.",
+      message:
+        "Login user ID missing. Please logout and login again. If still same issue, login API is not returning user_id.",
     };
   }
+
+  const finalPayload = {
+    ...payload,
+    user_id: Number(storedUserId),
+  };
 
   return requestJson<HarvestRequest>({
     path: HARVEST_PATH,
     method: "POST",
-    body: cleanHarvestPayload(payload, userId),
+    body: cleanHarvestPayload(finalPayload, storedUserId),
     fallbackError: "Harvest request submission failed.",
   });
 }
