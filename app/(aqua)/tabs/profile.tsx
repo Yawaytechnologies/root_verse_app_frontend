@@ -19,11 +19,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { RootState } from "../../../src/store/auth/store";
 import {
   getFarmerDetailsByUserId,
-  updateFarmerDetailsByUserId,
+  saveFarmerDetailsByUserId,
   type FarmerProfilePayload,
 } from "../../../src/services/aqua/farmer-details.service";
 
-const FARMER_PROFILE_CACHE_KEY = "aqua_profile_edit_cache_v1";
+const OLD_BAD_PROFILE_CACHE_KEY = "aqua_profile_edit_cache_v1";
 
 function firstText(...values: any[]) {
   for (const value of values) {
@@ -31,21 +31,17 @@ function firstText(...values: any[]) {
       return String(value).trim();
     }
   }
-  return "";
-}
 
-function safeJsonParse(value: string | null) {
-  try {
-    return value ? JSON.parse(value) : null;
-  } catch {
-    return null;
-  }
+  return "";
 }
 
 function onlyDate(value: any) {
   if (!value) return "";
+
   const str = String(value);
+
   if (str.includes("T")) return str.split("T")[0];
+
   return str.slice(0, 10);
 }
 
@@ -66,6 +62,58 @@ function isValidDateFormat(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
+function getRootverseUserFromMe(me: any) {
+  return me?.rootverse_user || me?.user || me || {};
+}
+
+function getUserIdFromMe(me: any) {
+  const rootUser = getRootverseUserFromMe(me);
+
+  return firstText(
+    rootUser?.id,
+    me?.rootverse_user_id,
+    me?.user_id,
+    me?.userId,
+    me?.rootverseUserId,
+    me?.id
+  );
+}
+
+function getRootverseType(me: any) {
+  const rootUser = getRootverseUserFromMe(me);
+
+  return firstText(
+    rootUser?.rootverse_type,
+    me?.rootverse_type,
+    "AQUACULTURE"
+  );
+}
+
+function isSameUser(apiProfile: any, currentUserId: string) {
+  if (!apiProfile || !currentUserId) return true;
+
+  const apiUserId = firstText(
+    apiProfile?.rootverse_user?.id,
+    apiProfile?.user_id,
+    apiProfile?.rootverse_user_id,
+    apiProfile?.userId
+  );
+
+  if (!apiUserId) return true;
+
+  return String(apiUserId) === String(currentUserId);
+}
+
+function isNotFoundMessage(message: any) {
+  const text = String(message || "").toLowerCase();
+
+  return (
+    text.includes("not found") ||
+    text.includes("farmer details not found") ||
+    text.includes("user_id")
+  );
+}
+
 type ProfileInputProps = {
   label: string;
   value: string;
@@ -76,12 +124,6 @@ type ProfileInputProps = {
   helper?: string;
 };
 
-/**
- * IMPORTANT:
- * This component must stay OUTSIDE AquaProfileScreen.
- * If it is inside the screen component, React remounts it on every letter typed,
- * and the keyboard closes automatically.
- */
 const ProfileInput = memo(function ProfileInput({
   label,
   value,
@@ -147,8 +189,13 @@ export default function AquaProfileScreen() {
   const insets = useSafeAreaInsets();
   const me = useSelector((state: RootState) => state.me?.me);
 
+  const userId = useMemo(() => getUserIdFromMe(me), [me]);
+  const rootverseType = useMemo(() => getRootverseType(me), [me]);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const [farmerDetailsExists, setFarmerDetailsExists] = useState(false);
 
   const [username, setUsername] = useState("");
   const [phoneNo, setPhoneNo] = useState("");
@@ -157,19 +204,7 @@ export default function AquaProfileScreen() {
   const [dob, setDob] = useState("");
   const [farmerLicence, setFarmerLicence] = useState("");
   const [farmingExperience, setFarmingExperience] = useState("");
-
-  const userId = firstText(
-    me?.rootverse_user?.id,
-    me?.user_id,
-    me?.id,
-    me?.rootverse_user_id
-  );
-
-  const rootverseType = firstText(
-    me?.rootverse_type,
-    me?.rootverse_user?.rootverse_type,
-    "AQUACULTURE"
-  );
+  const [farmerLoadMessage, setFarmerLoadMessage] = useState("");
 
   const initials = useMemo(() => getInitials(username), [username]);
 
@@ -177,84 +212,141 @@ export default function AquaProfileScreen() {
     const loadProfile = async () => {
       try {
         setLoading(true);
+        setFarmerLoadMessage("");
+        setFarmerDetailsExists(false);
 
-        const localRaw = await AsyncStorage.getItem(FARMER_PROFILE_CACHE_KEY);
-        const localProfile = safeJsonParse(localRaw) || {};
+        await AsyncStorage.removeItem(OLD_BAD_PROFILE_CACHE_KEY);
 
-        let apiProfile: any = null;
-
-        if (userId) {
-          try {
-            const response = await getFarmerDetailsByUserId(userId);
-            apiProfile = response?.data || response;
-          } catch (error: any) {
-            console.warn("farmer details GET failed:", error?.message || error);
-          }
-        }
-
-        const rootUser = apiProfile?.rootverse_user || me?.rootverse_user || {};
+        const currentRootUser = getRootverseUserFromMe(me);
 
         setUsername(
-          firstText(localProfile?.username, rootUser?.username, me?.username)
+          firstText(
+            currentRootUser?.username,
+            currentRootUser?.name,
+            me?.username,
+            me?.name
+          )
         );
 
         setPhoneNo(
-          firstText(localProfile?.phone_no, rootUser?.phone_no, me?.phone_no)
-        );
-
-        setEmail(
           firstText(
-            localProfile?.email,
-            apiProfile?.email,
-            me?.email,
-            rootUser?.email
+            currentRootUser?.phone_no,
+            currentRootUser?.mobile,
+            currentRootUser?.phone,
+            me?.phone_no,
+            me?.mobile,
+            me?.phone
           )
         );
 
-        setFatherName(
-          firstText(
-            localProfile?.Father_name,
-            apiProfile?.Father_name,
-            apiProfile?.father_name,
-            me?.Father_name,
-            me?.father_name
-          )
-        );
+        setEmail("");
+        setFatherName("");
+        setDob("");
+        setFarmerLicence("");
+        setFarmingExperience("");
 
-        setDob(
-          onlyDate(
+        if (!userId) {
+          setFarmerLoadMessage("User ID not found. Please logout and login again.");
+          return;
+        }
+
+        try {
+          const response = await getFarmerDetailsByUserId(userId);
+          const apiProfile: any = response?.data || response;
+
+          if (!isSameUser(apiProfile, userId)) {
+            setFarmerLoadMessage(
+              "Wrong farmer profile was returned, so it was ignored."
+            );
+            setFarmerDetailsExists(false);
+            return;
+          }
+
+          setFarmerDetailsExists(true);
+
+          const apiRootUser = apiProfile?.rootverse_user || {};
+
+          setUsername(
             firstText(
-              localProfile?.DOB,
-              apiProfile?.DOB,
-              apiProfile?.dob,
-              me?.DOB,
-              me?.dob
+              apiRootUser?.username,
+              apiRootUser?.name,
+              currentRootUser?.username,
+              currentRootUser?.name,
+              me?.username,
+              me?.name
             )
-          )
-        );
+          );
 
-        setFarmerLicence(
-          firstText(
-            localProfile?.farmer_liscence,
-            localProfile?.farmer_licence,
-            apiProfile?.farmer_liscence,
-            apiProfile?.farmer_licence,
-            me?.farmer_liscence,
-            me?.farmer_licence
-          )
-        );
-
-        setFarmingExperience(
-          onlyDate(
+          setPhoneNo(
             firstText(
-              localProfile?.farming_experience,
-              apiProfile?.farming_experience,
-              me?.farming_experience
+              apiRootUser?.phone_no,
+              apiRootUser?.mobile,
+              apiRootUser?.phone,
+              currentRootUser?.phone_no,
+              currentRootUser?.mobile,
+              currentRootUser?.phone,
+              me?.phone_no,
+              me?.mobile,
+              me?.phone
             )
-          )
-        );
-      } catch (error) {
-        console.warn("profile load failed:", error);
+          );
+
+          setEmail(
+            firstText(
+              apiProfile?.email,
+              apiRootUser?.email,
+              currentRootUser?.email,
+              me?.email
+            )
+          );
+
+          setFatherName(
+            firstText(
+              apiProfile?.Father_name,
+              apiProfile?.father_name,
+              me?.Father_name,
+              me?.father_name
+            )
+          );
+
+          setDob(
+            onlyDate(
+              firstText(apiProfile?.DOB, apiProfile?.dob, me?.DOB, me?.dob)
+            )
+          );
+
+          setFarmerLicence(
+            firstText(
+              apiProfile?.farmer_liscence,
+              apiProfile?.farmer_licence,
+              me?.farmer_liscence,
+              me?.farmer_licence
+            )
+          );
+
+          setFarmingExperience(
+            onlyDate(
+              firstText(
+                apiProfile?.farming_experience,
+                me?.farming_experience
+              )
+            )
+          );
+        } catch (error: any) {
+          const message = error?.message || "Farmer details not found";
+
+          setFarmerDetailsExists(false);
+
+          if (isNotFoundMessage(message)) {
+            setFarmerLoadMessage(
+              "Farmer details are not created yet for this user. Fill the form and save to create it."
+            );
+          } else {
+            setFarmerLoadMessage(message);
+          }
+        }
+      } catch (error: any) {
+        setFarmerLoadMessage(error?.message || "Unable to load profile details.");
       } finally {
         setLoading(false);
       }
@@ -265,7 +357,7 @@ export default function AquaProfileScreen() {
 
   const validate = () => {
     if (!userId) {
-      Alert.alert("Error", "User ID not found. Please login again.");
+      Alert.alert("Error", "User ID not found. Please logout and login again.");
       return false;
     }
 
@@ -296,53 +388,77 @@ export default function AquaProfileScreen() {
     try {
       setSaving(true);
 
-      const payload: FarmerProfilePayload = {};
-
-      if (fatherName.trim()) payload.Father_name = fatherName.trim();
-      if (dob.trim()) payload.DOB = dob.trim();
-      if (email.trim()) payload.email = email.trim();
-      if (farmerLicence.trim()) payload.farmer_liscence = farmerLicence.trim();
-
-      if (farmingExperience.trim()) {
-        payload.farming_experience = farmingExperience.trim();
-      }
-
-      const response = await updateFarmerDetailsByUserId(userId, payload);
-      const updatedProfile = response?.data || response;
-
-      const cacheProfile = {
-        username: username.trim(),
-        phone_no: phoneNo.trim(),
-        Father_name:
-          updatedProfile?.Father_name ?? payload.Father_name ?? fatherName.trim(),
-        DOB: onlyDate(updatedProfile?.DOB ?? payload.DOB ?? dob),
-        email: updatedProfile?.email ?? payload.email ?? email.trim(),
-        farmer_liscence:
-          updatedProfile?.farmer_liscence ??
-          payload.farmer_liscence ??
-          farmerLicence.trim(),
-        farming_experience: onlyDate(
-          updatedProfile?.farming_experience ??
-            payload.farming_experience ??
-            farmingExperience
-        ),
-        updated_at: new Date().toISOString(),
+      const payload: FarmerProfilePayload = {
+        Father_name: fatherName.trim(),
+        DOB: dob.trim(),
+        email: email.trim(),
+        farmer_liscence: farmerLicence.trim(),
+        farming_experience: farmingExperience.trim(),
       };
 
-      await AsyncStorage.setItem(
-        FARMER_PROFILE_CACHE_KEY,
-        JSON.stringify(cacheProfile)
+      const response = await saveFarmerDetailsByUserId(userId, payload);
+      const updatedProfile: any = response?.data || response;
+
+      if (updatedProfile && !isSameUser(updatedProfile, userId)) {
+        Alert.alert(
+          "Error",
+          "Updated profile does not match current logged-in user."
+        );
+        return;
+      }
+
+      setFarmerDetailsExists(true);
+      setFarmerLoadMessage("");
+
+      setFatherName(
+        firstText(
+          updatedProfile?.Father_name,
+          updatedProfile?.father_name,
+          payload.Father_name
+        )
       );
 
-      Alert.alert("Success", "Profile updated successfully.", [
-        {
-          text: "OK",
-          onPress: () => router.replace("/(aqua)/tabs/dashboard"),
-        },
-      ]);
+      setDob(
+        onlyDate(firstText(updatedProfile?.DOB, updatedProfile?.dob, payload.DOB))
+      );
+
+      setEmail(firstText(updatedProfile?.email, payload.email));
+
+      setFarmerLicence(
+        firstText(
+          updatedProfile?.farmer_liscence,
+          updatedProfile?.farmer_licence,
+          payload.farmer_liscence
+        )
+      );
+
+      setFarmingExperience(
+        onlyDate(
+          firstText(
+            updatedProfile?.farming_experience,
+            payload.farming_experience
+          )
+        )
+      );
+
+      Alert.alert(
+        "Success",
+        farmerDetailsExists
+          ? "Profile updated successfully."
+          : "Farmer details created successfully.",
+        [
+          {
+            text: "OK",
+            onPress: () => router.replace("/(aqua)/tabs/dashboard"),
+          },
+        ]
+      );
     } catch (error: any) {
-      console.error("profile update failed:", error);
-      Alert.alert("Update Failed", error?.message || "Unable to update profile.");
+      Alert.alert(
+        "Save Failed",
+        error?.message ||
+          "Unable to save farmer details. Backend may not support create API."
+      );
     } finally {
       setSaving(false);
     }
@@ -473,6 +589,30 @@ export default function AquaProfileScreen() {
           </View>
         </View>
 
+        {farmerLoadMessage ? (
+          <View
+            style={{
+              marginTop: 14,
+              borderRadius: 14,
+              backgroundColor: "#FEF3C7",
+              borderWidth: 1,
+              borderColor: "#F59E0B",
+              padding: 12,
+            }}
+          >
+            <Text
+              style={{
+                color: "#92400E",
+                fontSize: 12,
+                fontWeight: "700",
+                lineHeight: 17,
+              }}
+            >
+              {farmerLoadMessage}
+            </Text>
+          </View>
+        ) : null}
+
         <View
           style={{
             marginTop: 16,
@@ -499,7 +639,7 @@ export default function AquaProfileScreen() {
             value={username}
             onChangeText={setUsername}
             editable={false}
-            helper="Name belongs to rootverse_user. This API does not update name."
+            helper="Name comes from the logged-in rootverse_user."
           />
 
           <ProfileInput
@@ -507,7 +647,7 @@ export default function AquaProfileScreen() {
             value={phoneNo}
             onChangeText={setPhoneNo}
             editable={false}
-            helper="Phone number belongs to rootverse_user. This API does not update phone number."
+            helper="Phone number comes from the logged-in rootverse_user."
           />
         </View>
 
@@ -536,7 +676,7 @@ export default function AquaProfileScreen() {
             label="Email"
             value={email}
             onChangeText={setEmail}
-            placeholder="updated-farmer@example.com"
+            placeholder="farmer@example.com"
             keyboardType="email-address"
           />
 
@@ -594,7 +734,11 @@ export default function AquaProfileScreen() {
               fontWeight: "800",
             }}
           >
-            {saving ? "Saving..." : "Update Profile"}
+            {saving
+              ? "Saving..."
+              : farmerDetailsExists
+                ? "Update Profile"
+                : "Create Farmer Details"}
           </Text>
         </Pressable>
       </ScrollView>

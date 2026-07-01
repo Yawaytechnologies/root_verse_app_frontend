@@ -503,6 +503,49 @@ async function getJson(path: string) {
   return data;
 }
 
+function unwrapApiData<T = any>(response: any): T {
+  if (response?.data && !Array.isArray(response.data)) {
+    return response.data as T;
+  }
+
+  return response as T;
+}
+
+function getRootverseUserFromMe(me: any) {
+  return (
+    me?.rootverse_user ||
+    me?.data?.rootverse_user ||
+    me?.user?.rootverse_user ||
+    me?.user ||
+    me?.data ||
+    me ||
+    {}
+  );
+}
+
+function getFarmerDetailsUserId(details: any) {
+  return toNumericUserId(
+    pickId(
+      details?.rootverse_user?.id,
+      details?.user_id,
+      details?.rootverse_user_id,
+      details?.userId,
+      details?.farmer_id,
+    ),
+  );
+}
+
+function isFarmerDetailsForCurrentUser(details: any, currentUserId: any) {
+  const current = toNumericUserId(currentUserId);
+  const detailsUserId = getFarmerDetailsUserId(details);
+
+  if (!current || !detailsUserId) {
+    return true;
+  }
+
+  return sameId(detailsUserId, current);
+}
+
 export default function Dashboard() {
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch<AppDispatch>();
@@ -527,13 +570,22 @@ export default function Dashboard() {
     await i18n.changeLanguage(lang);
   };
 
-  const numericOwnerId = toNumericUserId(
-    pickId(
-      (me as any)?.user_id,
-      (me as any)?.id,
-      (me as any)?.owner_id,
-      (me as any)?.owner_code,
-    ),
+  const loggedRootUser = useMemo(() => getRootverseUserFromMe(me), [me]);
+
+  const numericOwnerId = useMemo(
+    () =>
+      toNumericUserId(
+        pickId(
+          loggedRootUser?.id,
+          (me as any)?.rootverse_user_id,
+          (me as any)?.user_id,
+          (me as any)?.id,
+          loggedRootUser?.owner_id,
+          (me as any)?.owner_id,
+          (me as any)?.owner_code,
+        ),
+      ),
+    [loggedRootUser, me],
   );
 
   const reduxAllFarms = useSelector(selectAllFarms);
@@ -662,9 +714,24 @@ export default function Dashboard() {
     }
 
     try {
+      setFarmerDetails(null);
       setFarmerDetailsError("");
 
-      const data = await getFarmerDetailsByUserId(numericOwnerId);
+      const response = await getFarmerDetailsByUserId(numericOwnerId);
+      const data = unwrapApiData<FarmerDetails>(response);
+
+      if (!isFarmerDetailsForCurrentUser(data, numericOwnerId)) {
+        console.warn("Ignored mismatched farmer profile on dashboard:", {
+          currentUserId: numericOwnerId,
+          returnedUserId: getFarmerDetailsUserId(data),
+        });
+
+        setFarmerDetails(null);
+        setFarmerDetailsError(
+          "Farmer details returned for another user, so it was ignored.",
+        );
+        return;
+      }
 
       setFarmerDetails(data);
     } catch (error: any) {
@@ -814,10 +881,42 @@ export default function Dashboard() {
 
   const canCreateHarvestRequest = activatedPonds > 0 && totalSamplingLogs > 0;
 
+  const farmerRootUser = loggedRootUser;
+
+  const profileUsername = pickName(
+    farmerRootUser?.username,
+    farmerRootUser?.name,
+    (me as any)?.username,
+    (me as any)?.name,
+    "User",
+  );
+
+  const profileType = pickName(
+    farmerRootUser?.rootverse_type,
+    (me as any)?.rootverse_type,
+    "-",
+  );
+
+  const profilePhone = pickName(
+    farmerRootUser?.phone_no,
+    farmerRootUser?.mobile,
+    farmerRootUser?.phone,
+    (me as any)?.phone_no,
+    (me as any)?.mobile,
+    (me as any)?.phone,
+  );
+
+  const profileOwnerId = pickName(
+    farmerRootUser?.owner_id,
+    (me as any)?.owner_id,
+    "—",
+  );
+
   const userRoleText = cleanStatus(
     pickName(
       (me as any)?.role,
       (me as any)?.user_role,
+      farmerRootUser?.rootverse_type,
       (me as any)?.rootverse_type,
       profileType,
     ),
@@ -838,31 +937,6 @@ export default function Dashboard() {
     firstRegisteredPond?.pond_name,
     firstRegisteredPond?.name,
     tr("dashboard.registeredPond", "registered pond"),
-  );
-
-  const farmerRootUser = farmerDetails?.rootverse_user ?? (me as any);
-
-  const profileUsername = pickName(
-    farmerRootUser?.username,
-    (me as any)?.username,
-    "User",
-  );
-
-  const profileType = pickName(
-    farmerRootUser?.rootverse_type,
-    (me as any)?.rootverse_type,
-    "-",
-  );
-
-  const profilePhone = pickName(
-    farmerRootUser?.phone_no,
-    (me as any)?.phone_no,
-  );
-
-  const profileOwnerId = pickName(
-    farmerRootUser?.owner_id,
-    (me as any)?.owner_id,
-    "—",
   );
 
   const initials = useMemo(() => {
@@ -1148,6 +1222,7 @@ export default function Dashboard() {
         "owner_id",
         "owner_code",
         "me_cache_v1",
+        "aqua_profile_edit_cache_v1",
       ]);
 
       dispatch(clearMe());
