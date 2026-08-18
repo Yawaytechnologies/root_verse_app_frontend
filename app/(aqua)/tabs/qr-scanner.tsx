@@ -147,33 +147,53 @@ function isQrActivated(qr: any) {
 }
 
 function isPondActivated(pond: any) {
+  // IMPORTANT:
+  // Pond registration / field verification is NOT the same as Pond QR activation.
+  // Do not use pond_status or verification_status here.
   const status = String(
     pickName(
       pond?.qr_status,
       pond?.pond_qr_status,
       pond?.activation_status,
-      pond?.pond_status,
-      pond?.status,
-      pond?.verification_status,
+      pond?.qrs?.status,
+      pond?.qr?.status,
     ),
   )
     .trim()
     .toUpperCase();
 
-  return (
+  if (
     status === "ACTIVE" ||
     status === "ACTIVATED" ||
-    status === "VERIFIED" ||
-    pond?.is_active === true ||
+    status === "QR_ACTIVATED" ||
+    status === "LINKED"
+  ) {
+    return true;
+  }
+
+  if (
     pond?.is_activated === true ||
     pond?.qr_activated === true ||
     pond?.pond_qr_activated === true ||
-    !!pickName(
-      pond?.pond_qr_id,
-      pond?.pond_qr_code,
-      pond?.qr_code,
-      pond?.qr_value,
-    )
+    pond?.qrs?.is_active === true ||
+    pond?.qrs?.is_activated === true ||
+    pond?.qr?.is_active === true ||
+    pond?.qr?.is_activated === true
+  ) {
+    return true;
+  }
+
+  // Backend can store the linked pre-printed Pond QR in qrs_code.
+  return !!pickName(
+    pond?.qrs_code,
+    pond?.qrsCode,
+    pond?.qrs?.qrs_code,
+    pond?.qrs?.qrsCode,
+    pond?.pond_qr_id,
+    pond?.pond_qr_code,
+    pond?.activated_qr_code,
+    pond?.qr_code,
+    pond?.qr_value,
   );
 }
 
@@ -250,8 +270,13 @@ export default function QrScannerScreen() {
       ponds.find((p) => sameId(p.id, linkedPondId)) ||
       ponds.find((p) =>
         [
+          p.qrs_code,
+          p.qrsCode,
+          p.qrs?.qrs_code,
+          p.qrs?.qrsCode,
           p.pond_qr_id,
           p.pond_qr_code,
+          p.activated_qr_code,
           p.qr_code,
           p.qr_value,
           p.pond_id,
@@ -451,6 +476,12 @@ export default function QrScannerScreen() {
           pathname: "/(aqua)/registration/capture-farm-gate",
           params: {
             ...params,
+            purpose: "FARM_ACTIVATION",
+            farmDbId,
+            farmId: farmDbId,
+            cultureCycleId,
+            userId,
+            farmName,
             code: qrValue,
             qrValue,
             scannedValue: qrValue,
@@ -460,10 +491,21 @@ export default function QrScannerScreen() {
       }
 
       if (purpose === "POND_ACTIVATION") {
+        // Preserve the exact pond selected on Dashboard.
+        // Explicit values are placed AFTER ...params so nothing can override them.
         router.push({
           pathname: "/(aqua)/registration/capture-pond-image",
           params: {
             ...params,
+            purpose: "POND_ACTIVATION",
+            pondDbId,
+            pondId: pondDbId,
+            farmDbId,
+            farmId: farmDbId,
+            cultureCycleId,
+            userId,
+            pondName,
+            farmName,
             code: qrValue,
             qrValue,
             scannedValue: qrValue,

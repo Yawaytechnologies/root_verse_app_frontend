@@ -15,6 +15,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system";
 import * as ImageManipulator from "expo-image-manipulator";
+import { captureRef } from "react-native-view-shot";
 
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 
@@ -146,6 +147,36 @@ type LocalLocationSnap = {
   capturedAt: number;
   coords: { latitude: number; longitude: number; accuracy?: number | null };
 };
+
+type WatermarkJob = {
+  uri: string;
+  renderWidth: number;
+  renderHeight: number;
+  outputWidth: number;
+  outputHeight: number;
+  inspectorId: string;
+  latitude: string;
+  longitude: string;
+  accuracy: string;
+  capturedAt: string;
+  qrCode: string;
+};
+
+function formatWatermarkTimestamp(timestamp: number): string {
+  const d = new Date(timestamp);
+  let hour = d.getHours();
+  const amPm = hour >= 12 ? "PM" : "AM";
+  hour = hour % 12 || 12;
+
+  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()} ${pad2(
+    hour
+  )}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())} ${amPm}`;
+}
+
+function coordForWatermark(value: any): string {
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(5) : "N/A";
+}
 
 function toCoordString(n: any): string | null {
   const num = Number(n);
@@ -412,6 +443,10 @@ export default function QcScannerScreen({
   const [locPermGranted, setLocPermGranted] = useState<boolean>(false);
   const [locCache, setLocCache] = useState<LocalLocationSnap | null>(null);
   const locCacheRef = useRef<LocalLocationSnap | null>(null);
+
+  const watermarkRef = useRef<View>(null);
+  const watermarkImageReadyRef = useRef<(() => void) | null>(null);
+  const [watermarkJob, setWatermarkJob] = useState<WatermarkJob | null>(null);
 
   useEffect(() => {
     locCacheRef.current = locCache;
@@ -737,43 +772,159 @@ export default function QcScannerScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editDraft?.qrCode]);
 
-  const pickImages = async (max: number) => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Permission needed", "Please allow gallery permission");
+  const getCurrentFormImages = (): string[] => {
+    if (division === "WILD") {
+      return Array.isArray(wildForm.images) ? wildForm.images : [];
+    }
+
+    if (division === "AQUA") {
+      return Array.isArray((aquaForm as any).images)
+        ? ((aquaForm as any).images as string[])
+        : [];
+    }
+
+    return Array.isArray((mariForm as any).images)
+      ? ((mariForm as any).images as string[])
+      : [];
+  };
+
+  const createWatermarkedCapture = async (sourceUri: string): Promise<string> => {
+    const dims = await getImageDims(sourceUri);
+    const sourceWidth = dims?.w || 1080;
+    const sourceHeight = dims?.h || 1440;
+    const aspectRatio = sourceHeight / sourceWidth;
+
+    // Small render size for the hidden React Native view.
+    const renderWidth = 360;
+    const renderHeight = Math.max(240, Math.round(renderWidth * aspectRatio));
+
+    // Final file size. Keep enough resolution for QC evidence.
+    const outputWidth = Math.min(1600, Math.max(900, sourceWidth));
+    const outputHeight = Math.max(
+      600,
+      Math.round(outputWidth * aspectRatio)
+    );
+
+    const locSnap = locCacheRef.current ?? (await primeLocation(true));
+    const capturedAtMs = Date.now();
+
+    const job: WatermarkJob = {
+      uri: sourceUri,
+      renderWidth,
+      renderHeight,
+      outputWidth,
+      outputHeight,
+      inspectorId: String(
+        (inspector as any)?.checker_code ?? (inspector as any)?.id ?? "N/A"
+      ),
+      latitude: coordForWatermark(locSnap?.coords?.latitude),
+      longitude: coordForWatermark(locSnap?.coords?.longitude),
+      accuracy:
+        typeof locSnap?.coords?.accuracy === "number"
+          ? `${Math.round(locSnap.coords.accuracy)} m`
+          : "N/A",
+      capturedAt: formatWatermarkTimestamp(capturedAtMs),
+      qrCode: scannedCode || "N/A",
+    };
+
+    const imageReady = new Promise<void>((resolve) => {
+      watermarkImageReadyRef.current = resolve;
+    });
+
+    setWatermarkJob(job);
+
+    // Wait until the captured image is actually rendered inside the watermark view.
+    await Promise.race([
+      imageReady,
+      new Promise<void>((resolve) => setTimeout(resolve, 2500)),
+    ]);
+
+    // Give React Native one frame to finish the overlay layout.
+    await new Promise<void>((resolve) => setTimeout(resolve, 120));
+
+    if (!watermarkRef.current) {
+      setWatermarkJob(null);
+      watermarkImageReadyRef.current = null;
+      throw new Error("Watermark preview is not ready");
+    }
+
+    try {
+      const watermarkedUri = await captureRef(watermarkRef, {
+        format: "jpg",
+        quality: 0.92,
+        result: "tmpfile",
+        width: outputWidth,
+        height: outputHeight,
+      });
+
+      // Keep the same physical watermark, only reduce file size if needed.
+      return await compressToRange(watermarkedUri, {
+        minKB: 400,
+        maxKB: 800,
+        width: 1600,
+        startQuality: 0.86,
+        minQuality: 0.58,
+        step: 0.07,
+        maxTries: 6,
+      });
+    } finally {
+      setWatermarkJob(null);
+      watermarkImageReadyRef.current = null;
+    }
+  };
+
+  const captureImage = async (max: number) => {
+    const existing = getCurrentFormImages();
+
+    if (existing.length >= max) {
+      Alert.alert(
+        "Image limit reached",
+        `You can capture maximum ${max} image${max > 1 ? "s" : ""}.`
+      );
       return;
     }
 
-    const res = await ImagePicker.launchImageLibraryAsync({
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Permission needed", "Please allow camera permission");
+      return;
+    }
+
+    const res = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: true,
-      quality: 0.8,
+      allowsEditing: false,
+      quality: 0.9,
+      exif: false,
     });
 
     if (res.canceled) return;
 
-    const uris = (res.assets || [])
-      .map((a) => a.uri)
-      .filter(Boolean) as string[];
+    const capturedUri = res.assets?.[0]?.uri;
+    if (!capturedUri) {
+      Alert.alert("Capture failed", "No captured image was returned.");
+      return;
+    }
+
+    let finalUri: string;
+
+    try {
+      finalUri = await createWatermarkedCapture(capturedUri);
+    } catch (e: any) {
+      Alert.alert(
+        "Watermark failed",
+        String(e?.message || "Unable to add watermark to captured image.")
+      );
+      return;
+    }
+
+    const nextImages = [...existing, finalUri].slice(0, max);
 
     if (division === "WILD") {
-      setWildField("images", [...wildForm.images, ...uris].slice(0, max));
+      setWildField("images", nextImages);
     } else if (division === "AQUA") {
-      setAquaField(
-        "images",
-        [...(((aquaForm as any).images || []) as string[]), ...uris].slice(
-          0,
-          max
-        )
-      );
+      setAquaField("images", nextImages);
     } else {
-      setMariField(
-        "images",
-        [...(((mariForm as any).images || []) as string[]), ...uris].slice(
-          0,
-          max
-        )
-      );
+      setMariField("images", nextImages);
     }
   };
 
@@ -1051,6 +1202,113 @@ if (division === "AQUA") {
 
   return (
     <View className="flex-1 pt-2.5">
+      {watermarkJob ? (
+        <View
+          ref={watermarkRef}
+          collapsable={false}
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: watermarkJob.renderWidth,
+            height: watermarkJob.renderHeight,
+            zIndex: -9999,
+            backgroundColor: "#000",
+            overflow: "hidden",
+          }}
+        >
+          <Image
+            source={{ uri: watermarkJob.uri }}
+            resizeMode="cover"
+            onLoadEnd={() => {
+              watermarkImageReadyRef.current?.();
+              watermarkImageReadyRef.current = null;
+            }}
+            style={{
+              position: "absolute",
+              left: 0,
+              top: 0,
+              width: watermarkJob.renderWidth,
+              height: watermarkJob.renderHeight,
+            }}
+          />
+
+          <View
+            style={{
+              position: "absolute",
+              right: 10,
+              top: 10,
+              maxWidth: watermarkJob.renderWidth * 0.78,
+              paddingHorizontal: 10,
+              paddingVertical: 8,
+              borderRadius: 10,
+              backgroundColor: "rgba(0,0,0,0.58)",
+              alignItems: "flex-end",
+            }}
+          >
+            <Text
+              style={{
+                color: "#FFFFFF",
+                fontWeight: "900",
+                fontSize: 11,
+                lineHeight: 15,
+                textAlign: "right",
+              }}
+            >
+              Powered by Rootverse
+            </Text>
+
+            <Text
+              style={{
+                color: "#FFFFFF",
+                fontWeight: "800",
+                fontSize: 10,
+                lineHeight: 14,
+                textAlign: "right",
+              }}
+            >
+              Quality Inspector ID: {watermarkJob.inspectorId}
+            </Text>
+
+            <Text
+              style={{
+                color: "#FFFFFF",
+                fontWeight: "800",
+                fontSize: 10,
+                lineHeight: 14,
+                textAlign: "right",
+              }}
+            >
+              Lat: {watermarkJob.latitude}  Lng: {watermarkJob.longitude}
+            </Text>
+
+            <Text
+              style={{
+                color: "#FFFFFF",
+                fontWeight: "800",
+                fontSize: 10,
+                lineHeight: 14,
+                textAlign: "right",
+              }}
+            >
+              Acc: {watermarkJob.accuracy} · {watermarkJob.capturedAt}
+            </Text>
+
+            <Text
+              style={{
+                color: "#FFFFFF",
+                fontWeight: "800",
+                fontSize: 10,
+                lineHeight: 14,
+                textAlign: "right",
+              }}
+            >
+              QR: {watermarkJob.qrCode}
+            </Text>
+          </View>
+        </View>
+      ) : null}
       <View className="flex-row items-center justify-between mb-0">
         <Text className="text-white text-[22px] font-black">
           QC Scanner ({division})
@@ -1176,7 +1434,7 @@ if (division === "AQUA") {
           data={catchLog}
           form={wildForm}
           setFormField={setWildField}
-          onPickImages={() => pickImages(3)}
+          onPickImages={() => captureImage(3)}
           onRemoveImage={removeImage}
           submitLoading={submitLoading}
           submitError={submitError}
@@ -1193,7 +1451,7 @@ if (division === "AQUA") {
           data={catchLog}
           form={aquaForm}
           setFormField={setAquaField}
-          onPickImages={() => pickImages(5)}
+          onPickImages={() => captureImage(5)}
           onRemoveImage={removeImage}
           submitLoading={submitLoading}
           submitError={submitError}
@@ -1210,7 +1468,7 @@ if (division === "AQUA") {
           data={catchLog}
           form={mariForm}
           setFormField={setMariField}
-          onPickImages={() => pickImages(5)}
+          onPickImages={() => captureImage(5)}
           onRemoveImage={removeImage}
           submitLoading={submitLoading}
           submitError={submitError}

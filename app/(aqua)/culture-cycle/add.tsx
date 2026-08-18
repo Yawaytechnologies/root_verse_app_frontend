@@ -91,7 +91,7 @@ function sameId(a: any, b: any) {
     return false;
   }
 
-  return String(a) === String(b);
+  return String(a).trim() === String(b).trim();
 }
 
 function pickName(...values: any[]) {
@@ -214,16 +214,34 @@ export default function CultureCycleAddScreen() {
         ? allPonds.filter(
             (pond) =>
               sameId(pond.user_id, numericUserId) ||
-              userFarmIds.includes(String(pond.farm_id)),
+              userFarmIds.some((farmId) => sameId(farmId, pond.farm_id)),
           )
         : allPonds;
 
       setFarms(userFarms);
       setPonds(userPonds);
 
-      if (!selectedFarmId && userFarms[0]?.id) {
-        setSelectedFarmId(String(userFarms[0].id));
-      }
+      // Keep the user's farm selection if it still exists. Otherwise choose
+      // the first available farm. Never auto-change the selected pond.
+      setSelectedFarmId((currentFarmId) => {
+        const currentExists = userFarms.some((farm) =>
+          sameId(farm.id, currentFarmId),
+        );
+
+        return currentExists
+          ? currentFarmId
+          : userFarms[0]?.id !== undefined
+            ? String(userFarms[0].id)
+            : "";
+      });
+
+      setSelectedPondId((currentPondId) => {
+        const currentExists = userPonds.some((pond) =>
+          sameId(pond.id, currentPondId),
+        );
+
+        return currentExists ? currentPondId : "";
+      });
     } catch (error) {
       console.log("Culture cycle data fetch failed:", error);
       setFarms([]);
@@ -231,12 +249,10 @@ export default function CultureCycleAddScreen() {
     } finally {
       setLoading(false);
     }
-  }, [numericUserId, selectedFarmId]);
+  }, [numericUserId]);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
+  // useFocusEffect already runs on first screen focus and whenever returning
+  // to this screen. Keeping only one data trigger avoids selection race/refetch.
   useFocusEffect(
     useCallback(() => {
       fetchData();
@@ -309,17 +325,7 @@ export default function CultureCycleAddScreen() {
     };
   }, [selectedPondId, selectedPond]);
 
-  useEffect(() => {
-    if (!selectedFarmId) return;
-
-    const firstPond = ponds.find((pond) => sameId(pond.farm_id, selectedFarmId));
-
-    if (firstPond) {
-      setSelectedPondId(String(firstPond.id));
-    } else {
-      setSelectedPondId("");
-    }
-  }, [selectedFarmId, ponds]);
+ 
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -351,8 +357,16 @@ export default function CultureCycleAddScreen() {
       return false;
     }
 
-    if (!selectedPondId) {
+    if (!selectedPondId || !selectedPond) {
       Alert.alert(t("common.failed"), `${t("cultureCycle.pond")} required`);
+      return false;
+    }
+
+    if (!sameId(selectedPond.farm_id, selectedFarmId)) {
+      Alert.alert(
+        t("common.failed"),
+        "Selected pond does not belong to the selected farm. Please select the pond again.",
+      );
       return false;
     }
 
@@ -377,8 +391,8 @@ export default function CultureCycleAddScreen() {
 
       const payload = {
         user_id: Number(numericUserId),
-        farm_id: Number(selectedFarmId),
-        pond_id: Number(selectedPondId),
+        farm_id: Number(selectedFarm?.id ?? selectedFarmId),
+        pond_id: Number(selectedPond?.id ?? selectedPondId),
         start_date: startDate.trim(),
         end_date: endDate.trim(),
         verification_status: "PENDING",
@@ -487,7 +501,20 @@ export default function CultureCycleAddScreen() {
               return (
                 <Pressable
                   key={String(farm.id)}
-                  onPress={() => setSelectedFarmId(String(farm.id))}
+                  onPress={() => {
+                    const nextFarmId = String(farm.id);
+                    setSelectedFarmId(nextFarmId);
+                    setSelectedPondId((currentPondId) => {
+                      const currentPond = ponds.find((pond) =>
+                        sameId(pond.id, currentPondId),
+                      );
+
+                      return currentPond &&
+                        sameId(currentPond.farm_id, nextFarmId)
+                        ? currentPondId
+                        : "";
+                    });
+                  }}
                   className={`rounded-3xl border p-4 ${
                     active
                       ? "border-emerald-300 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10"
@@ -534,7 +561,10 @@ export default function CultureCycleAddScreen() {
               return (
                 <Pressable
                   key={String(pond.id)}
-                  onPress={() => setSelectedPondId(String(pond.id))}
+                  onPress={() => {
+                    const exactPondId = String(pond.id);
+                    setSelectedPondId(exactPondId);
+                  }}
                   className={`rounded-3xl border p-4 ${
                     active
                       ? "border-emerald-300 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10"

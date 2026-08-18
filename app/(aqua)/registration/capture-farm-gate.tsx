@@ -6,6 +6,7 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  Modal,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Location from "expo-location";
@@ -34,6 +35,144 @@ const isQrActivated = (qr: any) => {
   );
 };
 
+
+const formatCoord = (value: string) => {
+  const text = String(value ?? "").trim();
+  if (!text) return "N/A";
+
+  const n = Number(text);
+  return Number.isFinite(n) ? n.toFixed(5) : text;
+};
+
+const formatCaptureTime = (value: string) => {
+  if (!value) return "N/A";
+
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  let hours = d.getHours();
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+
+  return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()} ${pad(
+    hours,
+  )}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${ampm}`;
+};
+
+function FarmWatermark({
+  userId,
+  farmName,
+  gpsLat,
+  gpsLng,
+  gpsAccuracy,
+  capturedAt,
+  qrValue,
+}: {
+  userId: string;
+  farmName: string;
+  gpsLat: string;
+  gpsLng: string;
+  gpsAccuracy: string;
+  capturedAt: string;
+  qrValue: string;
+}) {
+  const accuracyTextValue = String(gpsAccuracy ?? "").trim();
+  const accuracyNumber = Number(accuracyTextValue);
+  const accuracyText =
+    accuracyTextValue && Number.isFinite(accuracyNumber)
+      ? `${Math.round(accuracyNumber)} m`
+      : "N/A";
+
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        position: "absolute",
+        top: 12,
+        right: 12,
+        maxWidth: "88%",
+        borderRadius: 10,
+        backgroundColor: "rgba(0,0,0,0.62)",
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+      }}
+    >
+      <Text
+        style={{
+          color: "#FFFFFF",
+          fontSize: 11,
+          fontWeight: "900",
+          lineHeight: 16,
+          textAlign: "right",
+        }}
+      >
+        Powered by Rootverse
+      </Text>
+
+      <Text
+        style={{
+          color: "#FFFFFF",
+          fontSize: 10,
+          fontWeight: "800",
+          lineHeight: 15,
+          textAlign: "right",
+        }}
+      >
+        Farmer ID: {userId || "-"}
+      </Text>
+
+      <Text
+        style={{
+          color: "#FFFFFF",
+          fontSize: 10,
+          fontWeight: "700",
+          lineHeight: 15,
+          textAlign: "right",
+        }}
+      >
+        Farm: {farmName || "-"}
+      </Text>
+
+      <Text
+        style={{
+          color: "#FFFFFF",
+          fontSize: 10,
+          fontWeight: "700",
+          lineHeight: 15,
+          textAlign: "right",
+        }}
+      >
+        Lat: {formatCoord(gpsLat)} · Lng: {formatCoord(gpsLng)}
+      </Text>
+
+      <Text
+        style={{
+          color: "#FFFFFF",
+          fontSize: 10,
+          fontWeight: "700",
+          lineHeight: 15,
+          textAlign: "right",
+        }}
+      >
+        Acc: {accuracyText} · {formatCaptureTime(capturedAt)}
+      </Text>
+
+      <Text
+        style={{
+          color: "#FFFFFF",
+          fontSize: 10,
+          fontWeight: "800",
+          lineHeight: 15,
+          textAlign: "right",
+        }}
+      >
+        QR: {qrValue || "-"}
+      </Text>
+    </View>
+  );
+}
+
 export default function CaptureFarmGateScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
@@ -48,6 +187,7 @@ export default function CaptureFarmGateScreen() {
     getParamValue(params.farmId);
 
   const farmName = getParamValue(params.farmName, "Farm Gate");
+  const userId = getParamValue(params.userId);
   const cultureCycleId = getParamValue(params.cultureCycleId);
   const nextTo = getParamValue(params.nextTo);
 
@@ -63,9 +203,12 @@ export default function CaptureFarmGateScreen() {
   const [photoUri, setPhotoUri] = useState("");
   const [capturing, setCapturing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [captureTime, setCaptureTime] = useState("");
 
   const [gpsLat, setGpsLat] = useState("");
   const [gpsLng, setGpsLng] = useState("");
+  const [gpsAccuracy, setGpsAccuracy] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -84,6 +227,11 @@ export default function CaptureFarmGateScreen() {
 
         setGpsLat(String(pos.coords.latitude));
         setGpsLng(String(pos.coords.longitude));
+        setGpsAccuracy(
+          pos.coords.accuracy !== null && pos.coords.accuracy !== undefined
+            ? String(pos.coords.accuracy)
+            : "",
+        );
       } catch {
         // GPS failure must not redirect user.
       }
@@ -235,6 +383,7 @@ export default function CaptureFarmGateScreen() {
       }
 
       setPhotoUri(photo.uri);
+      setCaptureTime(new Date().toISOString());
     } catch (error: any) {
       Alert.alert("Capture Failed", error?.message || "Camera capture failed.");
     } finally {
@@ -277,7 +426,7 @@ export default function CaptureFarmGateScreen() {
             farm_name: farmName,
             gps_latitude: gpsLat,
             gps_longitude: gpsLng,
-            timestamp_utc: new Date().toISOString(),
+            timestamp_utc: captureTime || new Date().toISOString(),
           },
         );
 
@@ -451,26 +600,23 @@ export default function CaptureFarmGateScreen() {
                     watermarkRef.current = ref;
                   }}
                 >
-                  <Image
-                    source={{ uri: photoUri }}
-                    className="h-[430px] w-full"
-                    resizeMode="cover"
-                  />
+                  <Pressable onPress={() => setPreviewVisible(true)}>
+                    <Image
+                      source={{ uri: photoUri }}
+                      className="h-[430px] w-full"
+                      resizeMode="cover"
+                    />
 
-                  <View className="absolute bottom-0 left-0 right-0 bg-black/65 p-3">
-                    <Text className="text-xs font-semibold text-white">
-                      Farm: {farmName}
-                    </Text>
-                    <Text className="mt-1 text-xs text-white/80">
-                      QR: {qrValue || "-"}
-                    </Text>
-                    <Text className="mt-1 text-xs text-white/80">
-                      GPS: {gpsLat || "-"}, {gpsLng || "-"}
-                    </Text>
-                    <Text className="mt-1 text-xs text-white/80">
-                      Time: {new Date().toISOString()}
-                    </Text>
-                  </View>
+                    <FarmWatermark
+                      userId={userId}
+                      farmName={farmName}
+                      gpsLat={gpsLat}
+                      gpsLng={gpsLng}
+                      gpsAccuracy={gpsAccuracy}
+                      capturedAt={captureTime}
+                      qrValue={qrValue}
+                    />
+                  </Pressable>
                 </View>
               ) : (
                 <CameraView
@@ -488,7 +634,11 @@ export default function CaptureFarmGateScreen() {
           {photoUri ? (
             <View className="flex-row gap-3">
               <Pressable
-                onPress={() => setPhotoUri("")}
+                onPress={() => {
+                  setPhotoUri("");
+                  setCaptureTime("");
+                  setPreviewVisible(false);
+                }}
                 disabled={saving}
                 className="flex-1 rounded-2xl border border-white/20 px-4 py-4"
               >
@@ -520,6 +670,100 @@ export default function CaptureFarmGateScreen() {
           )}
         </View>
       ) : null}
+
+      <Modal
+        visible={previewVisible && !!photoUri}
+        animationType="fade"
+        transparent={false}
+        onRequestClose={() => setPreviewVisible(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "#08162F",
+            paddingTop: insets.top + 18,
+            paddingBottom: insets.bottom + 18,
+          }}
+        >
+          <View
+            style={{
+              paddingHorizontal: 24,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <Text
+              style={{
+                color: "#FFFFFF",
+                fontSize: 24,
+                fontWeight: "900",
+              }}
+            >
+              Preview
+            </Text>
+
+            <Pressable
+              onPress={() => setPreviewVisible(false)}
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: 28,
+                backgroundColor: "#1F2E4B",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Ionicons name="close" size={34} color="#FFFFFF" />
+            </Pressable>
+          </View>
+
+          <Pressable
+            onPress={() => setPreviewVisible(false)}
+            style={{
+              flex: 1,
+              marginHorizontal: 24,
+              marginTop: 24,
+              marginBottom: 18,
+              borderRadius: 24,
+              overflow: "hidden",
+              backgroundColor: "#061126",
+            }}
+          >
+            <View style={{ flex: 1, position: "relative" }}>
+              <Image
+                source={{ uri: photoUri }}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                }}
+                resizeMode="contain"
+              />
+
+              <FarmWatermark
+                userId={userId}
+                farmName={farmName}
+                gpsLat={gpsLat}
+                gpsLng={gpsLng}
+                gpsAccuracy={gpsAccuracy}
+                capturedAt={captureTime}
+                qrValue={qrValue}
+              />
+            </View>
+          </Pressable>
+
+          <Text
+            style={{
+              color: "#FFFFFF",
+              fontSize: 18,
+              fontWeight: "900",
+              textAlign: "center",
+            }}
+          >
+            Tap to close
+          </Text>
+        </View>
+      </Modal>
     </View>
   );
 }

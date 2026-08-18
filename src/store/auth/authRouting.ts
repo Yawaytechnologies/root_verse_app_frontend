@@ -73,7 +73,7 @@ export function getRouteForRole(role: string) {
     (normalizedRole.includes("TRANSPORT") &&
       normalizedRole.includes("OPERATOR"))
   ) {
-    return "/(transport)/dashboard";
+    return "/(transport)/division";
   }
 
   if (normalizedRole === "CRATE_PACKER") {

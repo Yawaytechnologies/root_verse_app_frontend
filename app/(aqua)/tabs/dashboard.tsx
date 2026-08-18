@@ -10,6 +10,7 @@ import {
   Animated,
   Dimensions,
   Easing,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -17,7 +18,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
 import { useTranslation } from "react-i18next";
@@ -169,6 +170,73 @@ function normalizeList<T = any>(items: T[]) {
   return unique;
 }
 
+/**
+ * Pond data comes from two different sources:
+ * 1. fresh /api/ponds records
+ * 2. Redux approval records
+ *
+ * Those two records do not always use the same `id`.  A Redux approval row can
+ * have its own approval id while the actual pond id lives in `pond_id` or
+ * `pond.id`.  The old normalizeList() only compared one id and therefore the
+ * same pond could be counted more than once.  That is one reason the dashboard
+ * could show a large pending count such as 14 even though only a few ponds are
+ * visible to the farmer.
+ */
+function getPondIdentityKeys(pond: any) {
+  const rawValues = [
+    pond?.id,
+    pond?.pond_id,
+    pond?.pondId,
+    pond?.pond_db_id,
+    pond?.pondDbId,
+    pond?.pond_code,
+    pond?.pondCode,
+    pond?.pond_uid,
+    pond?.code,
+
+    pond?.pond?.id,
+    pond?.pond?.pond_id,
+    pond?.pond?.pondId,
+    pond?.pond?.pond_code,
+    pond?.pond?.pondCode,
+    pond?.pond?.pond_uid,
+    pond?.pond?.code,
+  ];
+
+  return rawValues
+    .map((value) => String(value ?? "").trim())
+    .filter(
+      (value) =>
+        value !== "" &&
+        value !== "0" &&
+        value !== "undefined" &&
+        value !== "null",
+    )
+    .map((value) => `pond:${value}`);
+}
+
+function normalizePondList<T = any>(items: T[]) {
+  const unique: T[] = [];
+  const seen = new Set<string>();
+
+  items.forEach((item: any, index) => {
+    const keys = getPondIdentityKeys(item);
+
+    // If a record has no usable pond identity at all, keep a stable fallback
+    // instead of collapsing unrelated rows together.
+    const finalKeys = keys.length ? keys : [`pond-fallback:${index}`];
+
+    if (finalKeys.some((key) => seen.has(key))) {
+      return;
+    }
+
+    finalKeys.forEach((key) => seen.add(key));
+    unique.push(item);
+  });
+
+  return unique;
+}
+
 function cleanStatus(value: any) {
   return String(value ?? "")
     .trim()
@@ -225,47 +293,66 @@ function isFarmActivated(farm: any) {
 }
 
 function isPondActivated(pond: any) {
-  const status = cleanStatus(
+  // Registration approval is NOT QR activation.
+  // Do not use pond.status / pond_status / verification_status / generic is_active.
+  const qrStatus = cleanStatus(
     pickName(
-      pond?.qr_status,
       pond?.pond_qr_status,
-      pond?.activation_status,
-      pond?.pond_status,
-      pond?.status,
-      pond?.verification_status,
+      pond?.qr_activation_status,
+      pond?.qr_status,
+      pond?.qrs?.status,
+      pond?.qr?.status,
     ),
   );
 
-  if (
-    ["active", "activated", "qr_activated", "linked", "verified"].includes(
-      status,
-    )
-  ) {
+  if (["active", "activated", "qr_activated", "linked"].includes(qrStatus)) {
     return true;
   }
 
   if (
-    isTruthyFlag(pond?.is_active) ||
-    isTruthyFlag(pond?.is_activated) ||
     isTruthyFlag(pond?.qr_activated) ||
-    isTruthyFlag(pond?.pond_qr_activated)
+    isTruthyFlag(pond?.pond_qr_activated) ||
+    isTruthyFlag(pond?.is_qr_activated) ||
+    isTruthyFlag(pond?.qrs?.is_active) ||
+    isTruthyFlag(pond?.qrs?.is_activated) ||
+    isTruthyFlag(pond?.qr?.is_active) ||
+    isTruthyFlag(pond?.qr?.is_activated)
   ) {
     return true;
   }
 
   if (
     pickName(
-      pond?.pond_qr_id,
-      pond?.pond_qr_code,
-      pond?.activated_qr_code,
-      pond?.qr_code,
-      pond?.qr_value,
+      pond?.pond_qr_activated_at,
+      pond?.qr_activated_at,
+      pond?.qrs?.activated_at,
+      pond?.qr?.activated_at,
     )
   ) {
     return true;
   }
 
-  return false;
+  /**
+   * IMPORTANT:
+   * After activatePondQrById(), the backend can expose the linked pre-printed QR
+   * through qrs_code / pond_qr_id / activated_qr_code instead of setting one of
+   * the flags above.  These are activation-specific link fields, so they are
+   * valid evidence that the pond QR was linked.
+   *
+   * Do NOT use generic qr_code / qr_value here because those can already exist
+   * during registration and would falsely mark an unactivated pond as active.
+   */
+  return Boolean(
+    pickName(
+      pond?.qrs_code,
+      pond?.qrsCode,
+      pond?.qrs?.qrs_code,
+      pond?.qrs?.qrsCode,
+      pond?.pond_qr_id,
+      pond?.pond_qr_code,
+      pond?.activated_qr_code,
+    ),
+  );
 }
 
 function getSamplingFarmId(record: any) {
@@ -417,6 +504,36 @@ function getCultureCyclePondId(cycle: any) {
     cycle?.pond?.id,
     cycle?.pond?.pond_id,
     cycle?.pond_code,
+  );
+}
+
+function getCultureCyclePossiblePondIds(cycle: any) {
+  return compactIds(
+    cycle?.pond_id,
+    cycle?.pondId,
+    cycle?.pond_db_id,
+    cycle?.pond?.id,
+    cycle?.pond?.pond_id,
+    cycle?.pond?.pond_code,
+    cycle?.pond_code,
+  );
+}
+
+function findCultureCycleForPond(pond: any, cycles: any[]) {
+  const pondIds = getPondPossibleIds(pond);
+
+  if (!pondIds.length || !Array.isArray(cycles) || !cycles.length) {
+    return null;
+  }
+
+  return (
+    cycles.find((cycle) => {
+      const cyclePondIds = getCultureCyclePossiblePondIds(cycle);
+
+      return cyclePondIds.some((cyclePondId) =>
+        pondIds.some((pondId) => sameId(pondId, cyclePondId)),
+      );
+    }) ?? null
   );
 }
 
@@ -604,6 +721,8 @@ export default function Dashboard() {
   const [farmerDetailsError, setFarmerDetailsError] = useState("");
   const [viewerMode, setViewerMode] = useState<SummaryViewerMode>(null);
   const [selectedFarmKey, setSelectedFarmKey] = useState("");
+  const [pondActivationPickerVisible, setPondActivationPickerVisible] =
+    useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadBackendData = useCallback(async () => {
@@ -741,14 +860,21 @@ export default function Dashboard() {
     }
   }, [numericOwnerId]);
 
-  useEffect(() => {
-    if (numericOwnerId) {
-      dispatch(fetchAquaApprovals(numericOwnerId));
-    }
+  useFocusEffect(
+    useCallback(() => {
+      // Re-read backend data every time Dashboard becomes active.
+      // This is required after Pond QR activation; otherwise the dashboard keeps
+      // the old pending list from before the scan and the count never changes.
+      if (numericOwnerId) {
+        dispatch(fetchAquaApprovals(numericOwnerId));
+      }
 
-    loadBackendData();
-    loadFarmerDetails();
-  }, [dispatch, numericOwnerId, loadBackendData, loadFarmerDetails]);
+      loadBackendData();
+      loadFarmerDetails();
+
+      return undefined;
+    }, [dispatch, numericOwnerId, loadBackendData, loadFarmerDetails]),
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -762,21 +888,65 @@ export default function Dashboard() {
   };
 
   const allRegisteredFarms = useMemo(() => {
+    // Fresh API data must win over older Redux approval objects.
     return normalizeList([
+      ...apiFarms,
       ...reduxApprovedFarms,
       ...reduxPendingFarms,
       ...reduxAllFarms,
-      ...apiFarms,
     ]);
   }, [reduxApprovedFarms, reduxPendingFarms, reduxAllFarms, apiFarms]);
 
   const allRegisteredPonds = useMemo(() => {
-    return normalizeList([
+    // /api/ponds has already been filtered to the logged-in farmer in
+    // loadBackendData(), so keep those fresh records first.
+    //
+    // Redux approval arrays can contain a different wrapper/id shape. Filter
+    // them again by the current user/current user's farms before merging so an
+    // unrelated approval row cannot increase the pond count.
+    const ownedFarmIds = new Set<string>();
+
+    allRegisteredFarms.forEach((farm) => {
+      getFarmPossibleIds(farm).forEach((id) => ownedFarmIds.add(id));
+    });
+
+    const reduxPondsForCurrentFarmer = [
       ...reduxApprovedPonds,
       ...reduxPendingPonds,
+    ].filter((pond: any) => {
+      const pondUserId = toNumericUserId(
+        pickId(
+          pond?.user_id,
+          pond?.userId,
+          pond?.owner_id,
+          pond?.farmer_id,
+          pond?.pond?.user_id,
+          pond?.pond?.owner_id,
+        ),
+      );
+
+      if (numericOwnerId && pondUserId) {
+        return sameId(pondUserId, numericOwnerId);
+      }
+
+      const pondFarmIds = getPondFarmPossibleIds(pond);
+
+      return pondFarmIds.some((farmId) => ownedFarmIds.has(farmId));
+    });
+
+    // Fresh API record wins because it is first. normalizePondList compares all
+    // possible pond identifiers instead of only item.id.
+    return normalizePondList([
       ...apiPonds,
+      ...reduxPondsForCurrentFarmer,
     ]);
-  }, [reduxApprovedPonds, reduxPendingPonds, apiPonds]);
+  }, [
+    apiPonds,
+    reduxApprovedPonds,
+    reduxPendingPonds,
+    allRegisteredFarms,
+    numericOwnerId,
+  ]);
 
   const activatedFarmList = useMemo(() => {
     return allRegisteredFarms.filter(isFarmActivated);
@@ -851,9 +1021,10 @@ export default function Dashboard() {
   const firstCultureCycle = useMemo(() => {
     if (!apiCultureCycles.length) return null;
 
-    if (firstRegisteredPond?.id) {
-      const pondCycle = apiCultureCycles.find((cycle) =>
-        sameId(cycle?.pond_id, firstRegisteredPond.id),
+    if (firstRegisteredPond) {
+      const pondCycle = findCultureCycleForPond(
+        firstRegisteredPond,
+        apiCultureCycles,
       );
 
       if (pondCycle) return pondCycle;
@@ -870,10 +1041,45 @@ export default function Dashboard() {
     return apiCultureCycles[0] ?? null;
   }, [apiCultureCycles, firstRegisteredFarm, firstRegisteredPond]);
 
+  const pondActivationItems = useMemo(() => {
+    return allRegisteredPonds.map((pond) => {
+      const cycle = findCultureCycleForPond(pond, apiCultureCycles);
+
+      return {
+        pond,
+        cycle,
+        activated: isPondActivated(pond),
+      };
+    });
+  }, [allRegisteredPonds, apiCultureCycles]);
+
+  const pendingPondActivationItems = useMemo(
+    () =>
+      pondActivationItems.filter(
+        (item) => !item.activated && !!item.cycle,
+      ),
+    [pondActivationItems],
+  );
+
+  const pondsWaitingForCultureCycle = useMemo(
+    () =>
+      pondActivationItems.filter(
+        (item) => !item.activated && !item.cycle,
+      ),
+    [pondActivationItems],
+  );
+
+  const allPondsActivated =
+    totalPonds > 0 && pondActivationItems.every((item) => item.activated);
+
   const canCreatePond = !!firstRegisteredFarm;
   const canCreateCultureCycle = !!firstRegisteredFarm && !!firstRegisteredPond;
   const canActivateFarmQr = !!firstRegisteredFarm && !!firstCultureCycle;
-  const canActivatePondQr = !!firstRegisteredPond && !!firstCultureCycle;
+
+  // Pond QR activation is available when ANY unactivated registered pond
+  // has its own culture cycle. It is no longer tied to firstRegisteredPond.
+  const canActivatePondQr = pendingPondActivationItems.length > 0;
+
   const canAddStocking =
     !!firstRegisteredPond && !!firstCultureCycle && activatedPonds > 0;
   const canAddSampling =
@@ -931,12 +1137,6 @@ export default function Dashboard() {
     firstRegisteredFarm?.farm_name,
     firstRegisteredFarm?.name,
     tr("dashboard.registeredFarm", "registered farm"),
-  );
-
-  const pondNameForAction = pickName(
-    firstRegisteredPond?.pond_name,
-    firstRegisteredPond?.name,
-    tr("dashboard.registeredPond", "registered pond"),
   );
 
   const initials = useMemo(() => {
@@ -1312,29 +1512,58 @@ export default function Dashboard() {
   };
 
   const goActivatePondQr = () => {
-    if (!firstRegisteredPond || !firstCultureCycle) return;
+    if (!canActivatePondQr) return;
+
+    // Let the farmer choose which pending pond to activate.
+    // This is required when one farm has Pond 1, Pond 2, Pond 3, etc.
+    setPondActivationPickerVisible(true);
+  };
+
+  const activateSelectedPondQr = (pond: any, cycle: any) => {
+    if (!pond || !cycle || isPondActivated(pond)) return;
+
+    const linkedFarm =
+      allRegisteredFarms.find((farm) =>
+        isPondLinkedToSelectedFarm(pond, farm),
+      ) ?? null;
 
     const linkedFarmId = pickId(
-      firstRegisteredPond.farm_id,
-      firstCultureCycle.farm_id,
+      pond?.farm_id,
+      pond?.farmId,
+      getCultureCycleFarmId(cycle),
+      linkedFarm?.id,
+      linkedFarm?.farm_id,
       firstRegisteredFarm?.id,
     );
+
+    const pondDbId = pickId(
+      pond?.id,
+      pond?.pond_db_id,
+      pond?.pond_id,
+      pond?.pond_code,
+    );
+
+    const cultureCycleId = pickId(
+      cycle?.id,
+      cycle?.culture_cycle_id,
+      cycle?.cycle_id,
+      cycle?.cycle_code,
+    );
+
+    setPondActivationPickerVisible(false);
 
     router.push({
       pathname: "/(aqua)/tabs/qr-scanner",
       params: {
         purpose: "POND_ACTIVATION",
         returnTo: "/(aqua)/registration/capture-pond-image",
-        cultureCycleId: String(firstCultureCycle.id ?? ""),
-        pondDbId: String(firstRegisteredPond.id ?? ""),
-        pondId: String(firstRegisteredPond.id ?? ""),
-        pondName: pickName(
-          firstRegisteredPond.pond_name,
-          firstRegisteredPond.name,
-          "Pond",
-        ),
+        cultureCycleId,
+        pondDbId,
+        pondId: pondDbId,
+        pondName: getPondDisplayName(pond),
         farmDbId: linkedFarmId,
         farmId: linkedFarmId,
+        farmName: linkedFarm ? getFarmDisplayName(linkedFarm) : "",
         userId: numericOwnerId,
       },
     } as any);
@@ -2498,22 +2727,38 @@ export default function Dashboard() {
             sub={
               canActivatePondQr
                 ? tr(
-                    "dashboard.activatePondQrSubNamed",
-                    "Scan Pond QR for {{pondName}}",
+                    "dashboard.activatePondQrMultipleSub",
+                    "{{pending}} pond QR activation(s) pending. Tap to select a pond.",
                     {
-                      pondName: pondNameForAction,
+                      pending: pendingPondActivationItems.length,
                     },
                   )
-                : tr(
-                    "dashboard.activatePondQrLockedSub",
-                    "Create culture cycle first, then activate Pond QR",
-                  )
+                : allPondsActivated
+                  ? tr(
+                      "dashboard.activatePondQrCompletedSub",
+                      "All registered pond QR codes are activated",
+                    )
+                  : pondsWaitingForCultureCycle.length > 0
+                    ? tr(
+                        "dashboard.activatePondQrNeedCycleSub",
+                        "Create a culture cycle for the remaining pond(s), then activate their QR",
+                      )
+                    : tr(
+                        "dashboard.activatePondQrLockedSub",
+                        "Register pond and create culture cycle first, then activate Pond QR",
+                      )
             }
             icon="scan-outline"
             variant="light"
             disabled={!canActivatePondQr}
             badge={
-              !canActivatePondQr ? tr("common.locked", "LOCKED") : undefined
+              allPondsActivated
+                ? tr("common.completed", "COMPLETED")
+                : !canActivatePondQr
+                  ? tr("common.locked", "LOCKED")
+                  : pendingPondActivationItems.length > 1
+                    ? String(pendingPondActivationItems.length)
+                    : undefined
             }
             onPress={goActivatePondQr}
           />
@@ -2658,6 +2903,299 @@ export default function Dashboard() {
           />
         </View>
       </ScrollView>
+
+      <Modal
+        visible={pondActivationPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPondActivationPickerVisible(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.58)",
+            justifyContent: "flex-end",
+          }}
+        >
+          <Pressable
+            onPress={() => setPondActivationPickerVisible(false)}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+            }}
+          />
+
+          <View
+            style={{
+              maxHeight: "78%",
+              backgroundColor: C.cardBg,
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              borderWidth: 1,
+              borderColor: C.cardBorder,
+              paddingTop: 16,
+              paddingHorizontal: 16,
+              paddingBottom: insets.bottom + 18,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    color: C.text,
+                    fontSize: 19,
+                    fontWeight: "900",
+                  }}
+                >
+                  {tr("dashboard.selectPondForActivation", "Select Pond to Activate")}
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.subText,
+                    fontSize: 12,
+                    lineHeight: 18,
+                    marginTop: 4,
+                  }}
+                >
+                  {tr(
+                    "dashboard.selectPondForActivationSub",
+                    "Every registered pond is shown below. Select any pending pond that has a culture cycle.",
+                  )}
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={() => setPondActivationPickerVisible(false)}
+                style={{
+                  height: 38,
+                  width: 38,
+                  borderRadius: 12,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: C.iconBg,
+                }}
+              >
+                <Ionicons name="close" size={20} color={C.text} />
+              </Pressable>
+            </View>
+
+            <View
+              style={{
+                marginTop: 12,
+                borderRadius: 14,
+                backgroundColor: C.ownerBg,
+                borderWidth: 1,
+                borderColor: C.cardBorder,
+                padding: 11,
+              }}
+            >
+              <Text
+                style={{
+                  color: C.subText,
+                  fontSize: 12,
+                  fontWeight: "700",
+                }}
+              >
+                {tr(
+                  "dashboard.pondActivationProgress",
+                  "Registered: {{total}}  •  Activated: {{activated}}  •  Pending: {{pending}}",
+                  {
+                    total: totalPonds,
+                    activated: activatedPonds,
+                    pending: pendingPondActivation,
+                  },
+                )}
+              </Text>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{
+                paddingTop: 12,
+                paddingBottom: 6,
+                gap: 10,
+              }}
+            >
+              {pondActivationItems.map((item, index) => {
+                const pond = item.pond;
+                const cycle = item.cycle;
+                const activated = item.activated;
+
+                const linkedFarm =
+                  allRegisteredFarms.find((farm) =>
+                    isPondLinkedToSelectedFarm(pond, farm),
+                  ) ?? null;
+
+                const selectable = !activated && !!cycle;
+
+                const statusText = activated
+                  ? tr("common.activated", "ACTIVATED")
+                  : cycle
+                    ? tr("common.pending", "PENDING")
+                    : tr("dashboard.noCultureCycle", "NO CULTURE CYCLE");
+
+                const statusColor = activated
+                  ? "#16A34A"
+                  : cycle
+                    ? "#D97706"
+                    : C.subText;
+
+                return (
+                  <Pressable
+                    key={`${getPondUiKey(pond, index)}-activation-${index}`}
+                    disabled={!selectable}
+                    onPress={() => activateSelectedPondQr(pond, cycle)}
+                    style={{
+                      borderRadius: 15,
+                      borderWidth: 1.5,
+                      borderColor: selectable ? C.tapHint : C.cardBorder,
+                      backgroundColor: dark
+                        ? "rgba(255,255,255,0.04)"
+                        : "#F8FAFC",
+                      padding: 13,
+                      opacity: activated ? 0.62 : 1,
+                    }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 11,
+                      }}
+                    >
+                      <View
+                        style={{
+                          height: 44,
+                          width: 44,
+                          borderRadius: 14,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor: C.iconBg,
+                        }}
+                      >
+                        <Ionicons
+                          name={activated ? "checkmark-circle-outline" : "water-outline"}
+                          size={22}
+                          color={activated ? "#16A34A" : C.iconColor}
+                        />
+                      </View>
+
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={{
+                            color: C.text,
+                            fontSize: 14,
+                            fontWeight: "900",
+                          }}
+                          numberOfLines={1}
+                        >
+                          {getPondDisplayName(pond)}
+                        </Text>
+
+                        <Text
+                          style={{
+                            color: C.subText,
+                            fontSize: 11,
+                            fontWeight: "700",
+                            marginTop: 3,
+                          }}
+                          numberOfLines={1}
+                        >
+                          Pond ID: {getPondDisplayCode(pond)}
+                        </Text>
+
+                        <Text
+                          style={{
+                            color: C.subText,
+                            fontSize: 11,
+                            marginTop: 3,
+                          }}
+                          numberOfLines={1}
+                        >
+                          Farm:{" "}
+                          {linkedFarm
+                            ? getFarmDisplayName(linkedFarm)
+                            : pickName(pond?.farm_id, pond?.farm_code, "—")}
+                        </Text>
+
+                        <Text
+                          style={{
+                            color: C.subText,
+                            fontSize: 11,
+                            marginTop: 3,
+                          }}
+                          numberOfLines={1}
+                        >
+                          Culture Cycle:{" "}
+                          {cycle ? getCultureCycleDisplayCode(cycle) : "—"}
+                        </Text>
+                      </View>
+
+                      <View style={{ alignItems: "flex-end", gap: 5 }}>
+                        <Text
+                          style={{
+                            color: statusColor,
+                            fontSize: 9,
+                            fontWeight: "900",
+                          }}
+                        >
+                          {statusText}
+                        </Text>
+
+                        {selectable ? (
+                          <Ionicons
+                            name="chevron-forward"
+                            size={18}
+                            color={C.tapHint}
+                          />
+                        ) : null}
+                      </View>
+                    </View>
+
+                    {!activated && !cycle ? (
+                      <Text
+                        style={{
+                          color: "#D97706",
+                          fontSize: 11,
+                          fontWeight: "700",
+                          marginTop: 9,
+                          lineHeight: 16,
+                        }}
+                      >
+                        {tr(
+                          "dashboard.createCycleForThisPond",
+                          "Create a culture cycle for this pond before QR activation.",
+                        )}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+
+              {pondActivationItems.length === 0 ? (
+                <EmptyState
+                  title={tr("dashboard.noRegisteredPonds", "No registered ponds found")}
+                  sub={tr(
+                    "dashboard.noRegisteredPondsSub",
+                    "Register a pond first. Registered ponds will show here.",
+                  )}
+                />
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {profileVisible ? (
         <View
