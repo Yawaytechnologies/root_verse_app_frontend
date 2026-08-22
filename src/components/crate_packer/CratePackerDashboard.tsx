@@ -28,6 +28,7 @@ import CratePackerTabs, { type CrateTabKey } from "./CratePackerTabs";
 import CrateScannerScreen from "./CrateScannerScreen";
 import PackedCratesScreen from "./PackedCratesScreen";
 import CratePackModal from "./modals/CratePackModal";
+import AquaCratePackerDashboard from "./aqua/AquaCratePackerDashboard";
 
 // Redux
 import { useAppDispatch } from "../../store/hooks";
@@ -198,7 +199,7 @@ function StatBox({
 }
 
 
-export default function CratePackerDashboard({ meOverride }: { meOverride: any }) {
+function LegacyCratePackerDashboard({ meOverride }: { meOverride: any }) {
   const dispatch = useAppDispatch();
   const me = meOverride;
 
@@ -767,4 +768,19 @@ export default function CratePackerDashboard({ meOverride }: { meOverride: any }
       />
     </SafeAreaView>
   );
+}
+
+/**
+ * Division router for the crate-packer module.
+ * Aqua MUST use the aquaculture API flow; Wild/Mariculture keep the legacy flow.
+ */
+export default function CratePackerDashboard({ meOverride }: { meOverride: any }) {
+  const params = useLocalSearchParams();
+  const division = safeDivision(params.division);
+
+  if (division === "aqua") {
+    return <AquaCratePackerDashboard meOverride={meOverride} />;
+  }
+
+  return <LegacyCratePackerDashboard meOverride={meOverride} />;
 }

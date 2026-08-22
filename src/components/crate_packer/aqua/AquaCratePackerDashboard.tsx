@@ -69,10 +69,36 @@ function fmtKg(v: any) {
   const n = Number(v);
 
   if (!Number.isFinite(n)) {
-    return "-";
+    return "0 kg";
   }
 
   return `${Number(n.toFixed(2))} kg`;
+}
+
+function packedDateKey(value?: string) {
+  if (!value) return "UNKNOWN";
+
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "UNKNOWN";
+
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function packedDateLabel(key: string) {
+  if (!key || key === "UNKNOWN") return "Unknown date";
+
+  const d = new Date(`${key}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return key;
+
+  return d.toLocaleDateString(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function SmallLabel({ children }: { children: React.ReactNode }) {
@@ -266,7 +292,6 @@ export default function AquaCratePackerDashboard({
   const [scanTarget, setScanTarget] = useState<ScanTarget>("POND");
 
   const [pondQrInput, setPondQrInput] = useState("");
-  const [harvestIdInput, setHarvestIdInput] = useState("");
   const [scanData, setScanData] = useState<AquaCratePackingScanData | null>(
     null
   );
@@ -290,6 +315,46 @@ export default function AquaCratePackerDashboard({
         .toFixed(2)
     );
   }, [pendingCrates]);
+
+  // Only use crates that belong to the currently selected Harvest ID.
+  const packedForCurrentHarvest = useMemo(() => {
+    if (!scanData?.harvest_id) return [];
+
+    return packedCrates.filter((c) => {
+      // The harvest crates API is already scoped by harvest ID.
+      // Keep rows with no harvest_id too, because some backend responses omit it.
+      if (c.harvest_id === undefined || c.harvest_id === null) return true;
+      return Number(c.harvest_id) === Number(scanData.harvest_id);
+    });
+  }, [packedCrates, scanData?.harvest_id]);
+
+  // Date-wise total packed weight for the current Harvest ID.
+  const dateWisePackedTotals = useMemo(() => {
+    const grouped = new Map<
+      string,
+      { dateKey: string; totalWeight: number; crateCount: number }
+    >();
+
+    for (const crate of packedForCurrentHarvest) {
+      const dateKey = packedDateKey(crate.packed_at);
+      const current = grouped.get(dateKey) || {
+        dateKey,
+        totalWeight: 0,
+        crateCount: 0,
+      };
+
+      current.totalWeight += Number(crate.weight_kg || 0);
+      current.crateCount += 1;
+      grouped.set(dateKey, current);
+    }
+
+    return Array.from(grouped.values())
+      .map((item) => ({
+        ...item,
+        totalWeight: Number(item.totalWeight.toFixed(2)),
+      }))
+      .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+  }, [packedForCurrentHarvest]);
 
   const alreadyPackedQrSet = useMemo(() => {
     const set = new Set<string>();
@@ -336,19 +401,15 @@ export default function AquaCratePackerDashboard({
     setError(null);
 
     try {
-      const harvestId = toPosNumber(harvestIdInput);
+      const data = await scanAquaPondForCratePacking({
+        pondQr,
+        cratePackerId: packerId,
+        cratePackerCode: packerCode || undefined,
+      });
 
-const data = await scanAquaPondForCratePacking({
-  pondQr,
-  harvestId: harvestId || undefined,
-  cratePackerId: packerId,
-  cratePackerCode: packerCode || undefined,
-});
-
-     setScanData(data);
-setPondQrInput(data.pond_qr || pondQr);
-setHarvestIdInput(data.harvest_id ? String(data.harvest_id) : harvestIdInput);
-setPackedCrates(data.crates || []);
+      setScanData(data);
+      setPondQrInput(data.pond_qr || pondQr);
+      setPackedCrates(data.crates || []);
       setPendingCrates([]);
       setCrateQrInput("");
       setWeightInput("");
@@ -675,31 +736,20 @@ setPackedCrates(data.crates || []);
             >
               <SmallLabel>Enter Pond QR manually</SmallLabel>
 
-<Input
-  value={pondQrInput}
-  onChangeText={setPondQrInput}
-  placeholder="IN-TN-NA-P-2600001"
-/>
+              <Input
+                value={pondQrInput}
+                onChangeText={setPondQrInput}
+                placeholder="IN-TN-NA-P-2600001"
+              />
 
-<View style={{ marginTop: 12 }}>
-  <SmallLabel>Accepted Harvest ID</SmallLabel>
-
-  <Input
-    value={harvestIdInput}
-    onChangeText={setHarvestIdInput}
-    placeholder="31"
-    keyboardType="numeric"
-  />
-</View>
-
-<View style={{ marginTop: 12 }}>
-  <PrimaryButton
-    label="Fetch Harvest Prefill"
-    icon="search-outline"
-    loading={scanLoading}
-    onPress={() => scanPond(pondQrInput)}
-  />
-</View>
+              <View style={{ marginTop: 12 }}>
+                <PrimaryButton
+                  label="Fetch Harvest Prefill"
+                  icon="search-outline"
+                  loading={scanLoading}
+                  onPress={() => scanPond(pondQrInput)}
+                />
+              </View>
             </View>
 
             {scanData ? (
@@ -918,6 +968,78 @@ setPackedCrates(data.crates || []);
                 onPress={() => reloadPacked()}
               />
             </View>
+
+            {scanData?.harvest_id ? (
+              <View style={{ marginTop: 14 }}>
+                {dateWisePackedTotals.length ? (
+                  dateWisePackedTotals.map((item) => (
+                    <View
+                      key={`${scanData.harvest_id}_${item.dateKey}`}
+                      style={{
+                        marginBottom: 10,
+                        borderRadius: 15,
+                        borderWidth: 1,
+                        borderColor: BORDER,
+                        backgroundColor: "rgba(59,130,246,0.10)",
+                        padding: 12,
+                      }}
+                    >
+                      <Text style={{ color: "white", fontWeight: "900", fontSize: 15 }}>
+                        Harvest ID: {scanData.harvest_id}
+                      </Text>
+
+                      <Text
+                        style={{
+                          color: "rgba(255,255,255,0.72)",
+                          marginTop: 6,
+                          fontWeight: "800",
+                        }}
+                      >
+                        Date: {packedDateLabel(item.dateKey)}
+                      </Text>
+
+                      <Text
+                        style={{
+                          color: "#93c5fd",
+                          marginTop: 6,
+                          fontWeight: "900",
+                          fontSize: 16,
+                        }}
+                      >
+                        Total Packed Weight: {fmtKg(item.totalWeight)}
+                      </Text>
+
+                      <Text
+                        style={{
+                          color: "rgba(255,255,255,0.62)",
+                          marginTop: 4,
+                          fontWeight: "800",
+                        }}
+                      >
+                        Total Crates: {item.crateCount}
+                      </Text>
+                    </View>
+                  ))
+                ) : (
+                  <View
+                    style={{
+                      borderRadius: 15,
+                      borderWidth: 1,
+                      borderColor: BORDER,
+                      backgroundColor: "rgba(59,130,246,0.10)",
+                      padding: 12,
+                    }}
+                  >
+                    <Text style={{ color: "white", fontWeight: "900" }}>
+                      Harvest ID: {scanData.harvest_id}
+                    </Text>
+                    <Text style={{ color: "#93c5fd", marginTop: 6, fontWeight: "900" }}>
+                      Total Packed Weight: 0 kg
+                    </Text>
+                  </View>
+                )}
+              </View>
+            ) : null}
 
             {packedLoading ? (
               <View

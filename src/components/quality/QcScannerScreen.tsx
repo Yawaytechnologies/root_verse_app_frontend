@@ -154,12 +154,22 @@ type WatermarkJob = {
   renderHeight: number;
   outputWidth: number;
   outputHeight: number;
+  division: Division;
   inspectorId: string;
   latitude: string;
   longitude: string;
   accuracy: string;
   capturedAt: string;
   qrCode: string;
+
+  // AQUA traceability watermark fields
+  farmerId?: string;
+  traderId?: string;
+  farmId?: string;
+  pondId?: string;
+  harvestId?: string;
+  gpsCoordinates?: string;
+  utcTimestamp?: string;
 };
 
 function formatWatermarkTimestamp(timestamp: number): string {
@@ -176,6 +186,25 @@ function formatWatermarkTimestamp(timestamp: number): string {
 function coordForWatermark(value: any): string {
   const n = Number(value);
   return Number.isFinite(n) ? n.toFixed(5) : "N/A";
+}
+
+function firstText(...values: any[]): string {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function toPositiveNumber(value: any): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function round4(value: number): number {
+  return Number(value.toFixed(4));
 }
 
 function toCoordString(n: any): string | null {
@@ -660,6 +689,16 @@ export default function QcScannerScreen({
 
   next.sample_count = String(payload.sample_count ?? "");
   next.sample_weight = String(payload.sample_weight ?? "");
+  next.abw_g = String(
+    payload.abw_g ?? payload.abw ?? payload.average_body_weight ?? ""
+  );
+  next.size_count_kg = String(
+    payload.size_count_kg ??
+      payload.size_count_per_kg ??
+      payload.size_count ??
+      payload.size ??
+      ""
+  );
 
   next.grade = payload.grade ?? "A";
   next.disease_observation = String(
@@ -772,6 +811,62 @@ export default function QcScannerScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editDraft?.qrCode]);
 
+  // AQUA scan prefill: copy server sampling/traceability values into the editable form
+  // only when the corresponding local form field is still empty.
+  useEffect(() => {
+    if (division !== "AQUA" || !catchLog) return;
+
+    setAquaForm((prev: any) => {
+      const next: any = { ...prev };
+      let changed = false;
+
+      const setIfEmpty = (key: string, value: any) => {
+        const current = String(next?.[key] ?? "").trim();
+        if (current) return;
+        if (value === undefined || value === null || String(value).trim() === "") return;
+        next[key] = String(value);
+        changed = true;
+      };
+
+      setIfEmpty("harvest_id", (catchLog as any)?.harvest_id);
+      setIfEmpty("sample_count", (catchLog as any)?.sample_count);
+      setIfEmpty("sample_weight", (catchLog as any)?.sample_weight);
+      setIfEmpty(
+        "abw_g",
+        (catchLog as any)?.abw_g ??
+          (catchLog as any)?.abw ??
+          (catchLog as any)?.average_body_weight
+      );
+      setIfEmpty(
+        "size_count_kg",
+        (catchLog as any)?.size_count_kg ??
+          (catchLog as any)?.size_count_per_kg ??
+          (catchLog as any)?.size_count ??
+          (catchLog as any)?.size
+      );
+
+      const sampleCount = toPositiveNumber(next.sample_count);
+      const sampleWeight = toPositiveNumber(next.sample_weight);
+
+      if (
+        sampleCount &&
+        sampleWeight &&
+        !String(next.abw_g ?? "").trim()
+      ) {
+        next.abw_g = String(round4(sampleWeight / sampleCount));
+        changed = true;
+      }
+
+      const abw = toPositiveNumber(next.abw_g);
+      if (abw && !String(next.size_count_kg ?? "").trim()) {
+        next.size_count_kg = String(round4(1000 / abw));
+        changed = true;
+      }
+
+      return changed ? next : prev;
+    });
+  }, [division, catchLog]);
+
   const getCurrentFormImages = (): string[] => {
     if (division === "WILD") {
       return Array.isArray(wildForm.images) ? wildForm.images : [];
@@ -808,23 +903,91 @@ export default function QcScannerScreen({
     const locSnap = locCacheRef.current ?? (await primeLocation(true));
     const capturedAtMs = Date.now();
 
+    const farmerId = firstText(
+      (catchLog as any)?.farmer_id,
+      (catchLog as any)?.user_id,
+      (catchLog as any)?.raw?.data?.farmer_id,
+      (catchLog as any)?.raw?.data?.user_id,
+      (catchLog as any)?.raw?.farmer_id,
+      (catchLog as any)?.raw?.user_id
+    );
+    const traderId = firstText(
+      (catchLog as any)?.trader_id,
+      (catchLog as any)?.raw?.data?.trader_id,
+      (catchLog as any)?.raw?.data?.traderId,
+      (catchLog as any)?.raw?.data?.assigned_trader_id,
+      (catchLog as any)?.raw?.data?.booked_trader_id,
+      (catchLog as any)?.raw?.trader_id,
+      (catchLog as any)?.raw?.traderId,
+      (catchLog as any)?.raw?.assigned_trader_id,
+      (catchLog as any)?.raw?.booked_trader_id
+    );
+    const farmId = firstText(
+      (catchLog as any)?.farm_id,
+      (catchLog as any)?.raw?.data?.farm_id,
+      (catchLog as any)?.raw?.farm_id
+    );
+    const pondId = firstText(
+      (catchLog as any)?.pond_id,
+      (catchLog as any)?.raw?.data?.pond_id,
+      (catchLog as any)?.raw?.pond_id
+    );
+    const harvestId = firstText(
+      (aquaForm as any)?.harvest_id,
+      (catchLog as any)?.harvest_id,
+      (catchLog as any)?.raw?.data?.harvest_id,
+      (catchLog as any)?.raw?.harvest_id
+    );
+
+    const latitude = coordForWatermark(locSnap?.coords?.latitude);
+    const longitude = coordForWatermark(locSnap?.coords?.longitude);
+    const utcTimestamp = new Date(capturedAtMs).toISOString();
+
+    // AQUA evidence is not accepted without the complete required traceability watermark.
+    if (division === "AQUA") {
+      const missing: string[] = [];
+      if (!farmerId) missing.push("Farmer ID");
+      if (!farmId) missing.push("Farm ID");
+      if (!pondId) missing.push("Pond ID");
+      if (!harvestId) missing.push("Harvest ID");
+      if (!locSnap) missing.push("GPS Coordinates");
+
+      if (missing.length) {
+        throw new Error(
+          `Cannot capture compliant shrimp image. Missing: ${missing.join(", ")}.`
+        );
+      }
+    }
+
     const job: WatermarkJob = {
       uri: sourceUri,
       renderWidth,
       renderHeight,
       outputWidth,
       outputHeight,
+      division,
       inspectorId: String(
         (inspector as any)?.checker_code ?? (inspector as any)?.id ?? "N/A"
       ),
-      latitude: coordForWatermark(locSnap?.coords?.latitude),
-      longitude: coordForWatermark(locSnap?.coords?.longitude),
+      latitude,
+      longitude,
       accuracy:
         typeof locSnap?.coords?.accuracy === "number"
           ? `${Math.round(locSnap.coords.accuracy)} m`
           : "N/A",
       capturedAt: formatWatermarkTimestamp(capturedAtMs),
       qrCode: scannedCode || "N/A",
+      ...(division === "AQUA"
+        ? {
+            farmerId,
+            traderId: traderId || "N/A",
+            farmId,
+            pondId,
+            harvestId,
+            gpsCoordinates: `${latitude}, ${longitude}`,
+            utcTimestamp,
+          }
+        : {}),
     };
 
     const imageReady = new Promise<void>((resolve) => {
@@ -1016,6 +1179,19 @@ if (division === "AQUA") {
     Alert.alert("Cannot submit", "Harvest ID is required for aquaculture.");
     return;
   }
+
+  const sampleCount = toPositiveNumber(payload?.sample_count);
+  const sampleWeight = toPositiveNumber(payload?.sample_weight);
+
+  if (!sampleCount) {
+    Alert.alert("Cannot submit", "Enter a valid Sample Count greater than 0.");
+    return;
+  }
+
+  if (!sampleWeight) {
+    Alert.alert("Cannot submit", "Enter a valid Sample Weight greater than 0.");
+    return;
+  }
 }
 
   if (!inspector?.checker_code || !inspector?.id) {
@@ -1045,7 +1221,35 @@ if (division === "AQUA") {
   const longitude = locSnap ? toCoordString(locSnap.coords.longitude) : null;
 
   // ✅ removed heavy image compression during submit
-  const processedPayload = payload;
+  // AQUA: keep inspector-entered overrides when present; otherwise calculate
+  // ABW = sample weight / sample count, Size = 1000 / ABW.
+  let processedPayload = payload;
+
+  if (division === "AQUA") {
+    const sampleCount = toPositiveNumber(payload?.sample_count)!;
+    const sampleWeight = toPositiveNumber(payload?.sample_weight)!;
+
+    const overriddenAbw = toPositiveNumber(
+      payload?.abw_g ?? payload?.abw ?? payload?.average_body_weight
+    );
+    const abwG = overriddenAbw ?? sampleWeight / sampleCount;
+
+    const overriddenSize = toPositiveNumber(
+      payload?.size_count_kg ??
+        payload?.size_count_per_kg ??
+        payload?.size_count ??
+        payload?.size
+    );
+    const sizeCountKg = overriddenSize ?? 1000 / abwG;
+
+    processedPayload = {
+      ...payload,
+      sample_count: sampleCount,
+      sample_weight: sampleWeight,
+      abw_g: round4(abwG),
+      size_count_kg: round4(sizeCountKg),
+    };
+  }
 
   const finalPayload =
   division === "AQUA"
@@ -1054,6 +1258,14 @@ if (division === "AQUA") {
         pond_qr_scan: scannedCode,
         harvest_id:
           processedPayload?.harvest_id ?? (catchLog as any)?.harvest_id,
+        farmer_id:
+          processedPayload?.farmer_id ??
+          (catchLog as any)?.farmer_id ??
+          (catchLog as any)?.user_id,
+        farm_id:
+          processedPayload?.farm_id ?? (catchLog as any)?.farm_id,
+        pond_id:
+          processedPayload?.pond_id ?? (catchLog as any)?.pond_id,
         checker_code: inspector.checker_code,
         quality_checker_id: inspector.id,
         division,
@@ -1259,53 +1471,137 @@ if (division === "AQUA") {
               Powered by Rootverse
             </Text>
 
-            <Text
-              style={{
-                color: "#FFFFFF",
-                fontWeight: "800",
-                fontSize: 10,
-                lineHeight: 14,
-                textAlign: "right",
-              }}
-            >
-              Quality Inspector ID: {watermarkJob.inspectorId}
-            </Text>
+            {watermarkJob.division === "AQUA" ? (
+              <>
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontWeight: "800",
+                    fontSize: 10,
+                    lineHeight: 14,
+                    textAlign: "right",
+                  }}
+                >
+                  Farmer ID: {watermarkJob.farmerId}
+                </Text>
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontWeight: "800",
+                    fontSize: 10,
+                    lineHeight: 14,
+                    textAlign: "right",
+                  }}
+                >
+                  Trader ID: {watermarkJob.traderId}
+                </Text>
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontWeight: "800",
+                    fontSize: 10,
+                    lineHeight: 14,
+                    textAlign: "right",
+                  }}
+                >
+                  Farm ID: {watermarkJob.farmId}
+                </Text>
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontWeight: "800",
+                    fontSize: 10,
+                    lineHeight: 14,
+                    textAlign: "right",
+                  }}
+                >
+                  Pond ID: {watermarkJob.pondId}
+                </Text>
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontWeight: "800",
+                    fontSize: 10,
+                    lineHeight: 14,
+                    textAlign: "right",
+                  }}
+                >
+                  Harvest ID: {watermarkJob.harvestId}
+                </Text>
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontWeight: "800",
+                    fontSize: 10,
+                    lineHeight: 14,
+                    textAlign: "right",
+                  }}
+                >
+                  GPS: {watermarkJob.gpsCoordinates}
+                </Text>
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontWeight: "800",
+                    fontSize: 10,
+                    lineHeight: 14,
+                    textAlign: "right",
+                  }}
+                >
+                  UTC: {watermarkJob.utcTimestamp}
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontWeight: "800",
+                    fontSize: 10,
+                    lineHeight: 14,
+                    textAlign: "right",
+                  }}
+                >
+                  Quality Inspector ID: {watermarkJob.inspectorId}
+                </Text>
 
-            <Text
-              style={{
-                color: "#FFFFFF",
-                fontWeight: "800",
-                fontSize: 10,
-                lineHeight: 14,
-                textAlign: "right",
-              }}
-            >
-              Lat: {watermarkJob.latitude}  Lng: {watermarkJob.longitude}
-            </Text>
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontWeight: "800",
+                    fontSize: 10,
+                    lineHeight: 14,
+                    textAlign: "right",
+                  }}
+                >
+                  Lat: {watermarkJob.latitude}  Lng: {watermarkJob.longitude}
+                </Text>
 
-            <Text
-              style={{
-                color: "#FFFFFF",
-                fontWeight: "800",
-                fontSize: 10,
-                lineHeight: 14,
-                textAlign: "right",
-              }}
-            >
-              Acc: {watermarkJob.accuracy} · {watermarkJob.capturedAt}
-            </Text>
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontWeight: "800",
+                    fontSize: 10,
+                    lineHeight: 14,
+                    textAlign: "right",
+                  }}
+                >
+                  Acc: {watermarkJob.accuracy} · {watermarkJob.capturedAt}
+                </Text>
 
-            <Text
-              style={{
-                color: "#FFFFFF",
-                fontWeight: "800",
-                fontSize: 10,
-                lineHeight: 14,
-                textAlign: "right",
-              }}
-            >
-              QR: {watermarkJob.qrCode}
-            </Text>
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontWeight: "800",
+                    fontSize: 10,
+                    lineHeight: 14,
+                    textAlign: "right",
+                  }}
+                >
+                  QR: {watermarkJob.qrCode}
+                </Text>
+              </>
+            )}
           </View>
         </View>
       ) : null}

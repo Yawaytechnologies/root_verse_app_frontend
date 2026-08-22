@@ -1,3 +1,4 @@
+// src/store/quality/qrDetails.slice.ts
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import { httpJson } from "../../services/http";
 import type { RootState } from "../auth/store";
@@ -23,12 +24,37 @@ export type CatchLogDetails = {
 
   rv_vessel_id?: number | null;
   fish_id?: number | null;
+
+  // AQUA quality inspection prefill / traceability fields
+  harvest_id?: string | number | null;
+  farmer_id?: string | number | null;
+  user_id?: string | number | null;
+  trader_id?: string | number | null;
+  farm_id?: string | number | null;
+  pond_id?: string | number | null;
+  culture_id?: string | number | null;
+
+  farmer_name?: string | null;
+  farm_name?: string | null;
+  pond_name?: string | null;
+  species?: string | null;
+
+  sample_count?: string | number | null;
+  sample_weight?: string | number | null;
+  abw_g?: string | number | null;
+  size_count_kg?: string | number | null;
+
+  inspection_latitude?: number | null;
+  inspection_longitude?: number | null;
+
+  raw?: any;
 };
 
 type ApiAnyResponse = {
   success?: boolean;
   qr?: any;
   data?: any;
+  result?: any;
 };
 
 type State = {
@@ -106,14 +132,166 @@ type FetchArg =
       division?: "WILD" | "AQUA" | "MARICULTURE" | string;
     };
 
-    function numOrNull(v: any): number | null {
+function numOrNull(v: any): number | null {
   if (v === undefined || v === null || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
-function normalizeAquaScan(raw: any, code: string): CatchLogDetails {
+function firstValue(...values: any[]) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && !value.trim()) continue;
+    return value;
+  }
+  return null;
+}
+
+
+function unwrapHarvestDetail(raw: any): any {
   const root = raw?.data ?? raw?.result ?? raw ?? {};
+
+  if (root?.harvest && typeof root.harvest === "object") return root.harvest;
+  if (root?.record && typeof root.record === "object") return root.record;
+  if (root?.item && typeof root.item === "object") return root.item;
+
+  return root && typeof root === "object" && !Array.isArray(root) ? root : {};
+}
+
+function enrichAquaScanWithHarvest(
+  scan: CatchLogDetails,
+  harvestRaw: any
+): CatchLogDetails {
+  const h = unwrapHarvestDetail(harvestRaw);
+
+  const farmer =
+    h?.farmer ??
+    h?.user ??
+    h?.owner ??
+    h?.farmer_details ??
+    h?.farmerDetails ??
+    {};
+
+  const farm = h?.farm ?? h?.farm_details ?? h?.farmDetails ?? {};
+  const pond = h?.pond ?? h?.pond_details ?? h?.pondDetails ?? {};
+
+  const speciesName = firstValue(
+    scan?.species,
+    scan?.fish_name,
+    typeof h?.species === "string" ? h.species : undefined,
+    h?.species_name,
+    h?.speciesName,
+    h?.shrimp_species,
+    h?.shrimp_species_name,
+    h?.fish_name,
+    h?.species?.name,
+    h?.species?.species_name,
+    h?.species?.common_name
+  );
+
+  const farmerId = firstValue(
+    scan?.farmer_id,
+    scan?.user_id,
+    h?.user_id,
+    h?.userId,
+    h?.farmer_id,
+    h?.farmerId,
+    h?.owner_id,
+    h?.ownerId,
+    farmer?.id,
+    farmer?.user_id,
+    farmer?.farmer_id,
+    farmer?.owner_id
+  );
+
+  const traderId = firstValue(
+    scan?.trader_id,
+    h?.trader_id,
+    h?.traderId,
+    h?.assigned_trader_id,
+    h?.assignedTraderId,
+    h?.booked_trader_id,
+    h?.bookedTraderId,
+    h?.trader?.id,
+    h?.trader?.trader_id
+  );
+
+  return {
+    ...scan,
+
+    // Harvest.user_id is the farmer/rootverse user identifier in the
+    // documented Harvest contract. Use it as Farmer ID when the scan
+    // prefill itself does not expose farmer_id.
+    farmer_id: farmerId,
+    user_id: firstValue(scan?.user_id, h?.user_id, h?.userId, farmerId),
+    trader_id: traderId,
+
+    farm_id: firstValue(
+      scan?.farm_id,
+      h?.farm_id,
+      h?.farmId,
+      farm?.id,
+      farm?.farm_id
+    ),
+
+    pond_id: firstValue(
+      scan?.pond_id,
+      h?.pond_id,
+      h?.pondId,
+      pond?.id,
+      pond?.pond_id
+    ),
+
+    culture_id: firstValue(
+      scan?.culture_id,
+      h?.culture_id,
+      h?.cultureId,
+      h?.culture_cycle_id,
+      h?.cultureCycleId
+    ),
+
+    farmer_name:
+      scan?.farmer_name ??
+      h?.farmer_name ??
+      h?.farmerName ??
+      farmer?.farmer_name ??
+      farmer?.full_name ??
+      farmer?.name ??
+      null,
+
+    farm_name:
+      scan?.farm_name ??
+      h?.farm_name ??
+      h?.farmName ??
+      farm?.farm_name ??
+      farm?.name ??
+      null,
+
+    pond_name:
+      scan?.pond_name ??
+      h?.pond_name ??
+      h?.pondName ??
+      pond?.pond_name ??
+      pond?.name ??
+      null,
+
+    fish_name: speciesName ?? null,
+    species: speciesName ?? null,
+
+    raw: {
+      ...(scan?.raw && typeof scan.raw === "object" ? scan.raw : {}),
+      _harvest_detail: harvestRaw,
+    },
+  };
+}
+
+function normalizeAquaScan(raw: any, code: string): CatchLogDetails {
+  const rootCandidate = raw?.data ?? raw?.result ?? raw ?? {};
+  const root =
+    rootCandidate?.prefill ??
+    rootCandidate?.quality_inspection_prefill ??
+    rootCandidate?.qualityInspectionPrefill ??
+    rootCandidate;
 
   const harvest =
     root?.harvest ??
@@ -122,17 +300,191 @@ function normalizeAquaScan(raw: any, code: string): CatchLogDetails {
     root?.harvest_data ??
     {};
 
-  const farm = root?.farm ?? root?.farm_data ?? {};
-  const pond = root?.pond ?? root?.pond_data ?? {};
-  const culture = root?.culture ?? root?.culture_cycle ?? root?.cultureCycle ?? {};
+  const farm = root?.farm ?? root?.farm_data ?? harvest?.farm ?? {};
+  const pond = root?.pond ?? root?.pond_data ?? harvest?.pond ?? {};
+  const culture =
+    root?.culture ??
+    root?.culture_cycle ??
+    root?.cultureCycle ??
+    harvest?.culture_cycle ??
+    {};
+  const sampling =
+    root?.latest_sampling ??
+    root?.sampling ??
+    root?.sampling_record ??
+    root?.samplingRecord ??
+    harvest?.latest_sampling ??
+    {};
+  const farmer =
+    root?.farmer ??
+    root?.user ??
+    root?.owner ??
+    harvest?.farmer ??
+    harvest?.user ??
+    harvest?.owner ??
+    farm?.farmer ??
+    farm?.user ??
+    farm?.owner ??
+    {};
+
+  const trader =
+    root?.trader ??
+    root?.assigned_trader ??
+    root?.booked_trader ??
+    harvest?.trader ??
+    harvest?.assigned_trader ??
+    harvest?.booked_trader ??
+    {};
+
+  const speciesObj =
+    root?.species_data ??
+    root?.species_detail ??
+    root?.speciesDetail ??
+    harvest?.species_data ??
+    harvest?.species_detail ??
+    culture?.species_data ??
+    culture?.species_detail ??
+    {};
 
   const status = normalizeStatus(root);
   const finalStatus = status === "UNKNOWN" ? "NEW" : status;
+
+  const sampleCount = firstValue(
+    root?.sample_count,
+    sampling?.sample_count,
+    sampling?.sampleCount
+  );
+
+  const sampleWeight = firstValue(
+    root?.sample_weight,
+    root?.sample_weight_g,
+    sampling?.sample_weight,
+    sampling?.sample_weight_g,
+    sampling?.sampleWeight
+  );
+
+  const sampleCountNumber = numOrNull(sampleCount);
+  const sampleWeightNumber = numOrNull(sampleWeight);
+
+  const calculatedAbw =
+    sampleCountNumber !== null &&
+    sampleCountNumber > 0 &&
+    sampleWeightNumber !== null
+      ? sampleWeightNumber / sampleCountNumber
+      : null;
+
+  const abwG = firstValue(
+    root?.abw_g,
+    root?.abw,
+    root?.average_body_weight,
+    sampling?.abw_g,
+    sampling?.abw,
+    sampling?.ABW,
+    calculatedAbw
+  );
+
+  const abwNumber = numOrNull(abwG);
+
+  const calculatedSize =
+    abwNumber !== null && abwNumber > 0 ? 1000 / abwNumber : null;
+
+  const sizeCountKg = firstValue(
+    root?.size_count_kg,
+    root?.size_count_per_kg,
+    root?.size_count,
+    root?.size,
+    sampling?.size_count_kg,
+    sampling?.size_count_per_kg,
+    sampling?.size_count,
+    sampling?.size,
+    calculatedSize
+  );
+
+  const farmerId = firstValue(
+    root?.farmer_id,
+    root?.farmerId,
+    root?.user_id,
+    root?.userId,
+    root?.owner_id,
+    root?.ownerId,
+    harvest?.farmer_id,
+    harvest?.farmerId,
+    harvest?.user_id,
+    harvest?.userId,
+    harvest?.owner_id,
+    harvest?.ownerId,
+    farm?.farmer_id,
+    farm?.farmerId,
+    farm?.user_id,
+    farm?.userId,
+    farm?.owner_id,
+    farm?.ownerId,
+    farmer?.id,
+    farmer?.farmer_id,
+    farmer?.farmerId,
+    farmer?.user_id,
+    farmer?.userId,
+    farmer?.owner_id,
+    farmer?.ownerId
+  );
+
+  const traderId = firstValue(
+    root?.trader_id,
+    root?.traderId,
+    root?.assigned_trader_id,
+    root?.assignedTraderId,
+    root?.booked_trader_id,
+    root?.bookedTraderId,
+    harvest?.trader_id,
+    harvest?.traderId,
+    harvest?.assigned_trader_id,
+    harvest?.assignedTraderId,
+    harvest?.booked_trader_id,
+    harvest?.bookedTraderId,
+    trader?.id,
+    trader?.trader_id,
+    trader?.traderId
+  );
+
+  const speciesName = firstValue(
+    root?.species_name,
+    root?.speciesName,
+    root?.shrimp_species_name,
+    root?.shrimpSpeciesName,
+    typeof root?.species === "string" ? root.species : undefined,
+    typeof root?.shrimp_species === "string" ? root.shrimp_species : undefined,
+    harvest?.species_name,
+    harvest?.speciesName,
+    harvest?.shrimp_species_name,
+    harvest?.shrimpSpeciesName,
+    harvest?.fish_name,
+    typeof harvest?.species === "string" ? harvest.species : undefined,
+    culture?.species_name,
+    culture?.speciesName,
+    culture?.shrimp_species_name,
+    culture?.shrimpSpeciesName,
+    typeof culture?.species === "string" ? culture.species : undefined,
+    sampling?.species_name,
+    sampling?.speciesName,
+    sampling?.shrimp_species_name,
+    sampling?.shrimpSpeciesName,
+    typeof sampling?.species === "string" ? sampling.species : undefined,
+    root?.species?.name,
+    root?.species?.species_name,
+    harvest?.species?.name,
+    harvest?.species?.species_name,
+    culture?.species?.name,
+    culture?.species?.species_name,
+    speciesObj?.name,
+    speciesObj?.species_name,
+    speciesObj?.common_name
+  );
 
   return {
     code: normalizeQr(
       String(
         root?.pond_qr_scan ??
+          root?.pond_qr ??
           root?.qr_code ??
           root?.qrs_code ??
           root?.code ??
@@ -142,64 +494,109 @@ function normalizeAquaScan(raw: any, code: string): CatchLogDetails {
     type: "pond",
     status: finalStatus,
 
-    harvest_id:
-      root?.harvest_id ??
-      root?.harvestId ??
-      harvest?.id ??
-      harvest?.harvest_id ??
+    harvest_id: firstValue(
+      root?.harvest_id,
+      root?.harvestId,
+      harvest?.id,
+      harvest?.harvest_id
+    ),
+
+    farmer_id: farmerId,
+    user_id: firstValue(
+      root?.user_id,
+      root?.userId,
+      root?.owner_id,
+      root?.ownerId,
+      harvest?.user_id,
+      harvest?.userId,
+      harvest?.owner_id,
+      harvest?.ownerId,
+      farm?.user_id,
+      farm?.owner_id,
+      farmer?.id,
+      farmerId
+    ),
+
+    trader_id: traderId,
+
+    farm_id: firstValue(
+      root?.farm_id,
+      root?.farmId,
+      harvest?.farm_id,
+      harvest?.farmId,
+      farm?.id,
+      farm?.farm_id
+    ),
+
+    pond_id: firstValue(
+      root?.pond_id,
+      root?.pondId,
+      harvest?.pond_id,
+      harvest?.pondId,
+      pond?.id,
+      pond?.pond_id
+    ),
+
+    culture_id: firstValue(
+      root?.culture_id,
+      root?.culture_cycle_id,
+      root?.cultureCycleId,
+      harvest?.culture_id,
+      harvest?.culture_cycle_id,
+      culture?.id,
+      culture?.culture_id
+    ),
+
+    farmer_name:
+      root?.farmer_name ??
+      farmer?.farmer_name ??
+      farmer?.full_name ??
+      farmer?.name ??
       null,
 
-    farm_id: root?.farm_id ?? farm?.id ?? null,
-    pond_id: root?.pond_id ?? pond?.id ?? null,
-    culture_id:
-      root?.culture_id ??
-      root?.culture_cycle_id ??
-      culture?.id ??
-      culture?.culture_id ??
+    farm_name:
+      root?.farm_name ??
+      harvest?.farm_name ??
+      farm?.farm_name ??
+      farm?.name ??
       null,
 
-    farm_name: root?.farm_name ?? farm?.farm_name ?? farm?.name ?? null,
-    pond_name: root?.pond_name ?? pond?.pond_name ?? pond?.name ?? null,
-
-    fish_name:
-      root?.species ??
-      root?.shrimp_species ??
-      harvest?.species ??
-      culture?.species ??
+    pond_name:
+      root?.pond_name ??
+      harvest?.pond_name ??
+      pond?.pond_name ??
+      pond?.name ??
       null,
 
-    species:
-      root?.species ??
-      root?.shrimp_species ??
-      harvest?.species ??
-      culture?.species ??
-      null,
+    fish_name: speciesName ?? null,
 
-    sample_count:
-      root?.sample_count ??
-      root?.latest_sampling?.sample_count ??
-      root?.sampling?.sample_count ??
-      null,
+    species: speciesName ?? null,
 
-    sample_weight:
-      root?.sample_weight ??
-      root?.latest_sampling?.sample_weight ??
-      root?.sampling?.sample_weight ??
-      null,
+    sample_count: sampleCount,
+    sample_weight: sampleWeight,
+    abw_g: abwG,
+    size_count_kg: sizeCountKg,
 
     inspection_latitude: numOrNull(
-      root?.inspection_latitude ?? root?.latitude ?? pond?.latitude ?? farm?.latitude
+      firstValue(
+        root?.inspection_latitude,
+        root?.latitude,
+        pond?.latitude,
+        farm?.latitude
+      )
     ),
 
     inspection_longitude: numOrNull(
-      root?.inspection_longitude ??
-        root?.longitude ??
-        pond?.longitude ??
+      firstValue(
+        root?.inspection_longitude,
+        root?.longitude,
+        pond?.longitude,
         farm?.longitude
+      )
     ),
 
     raw,
-  } as any;
+  };
 }
 
 // ✅ PRE-SUBMIT DETAILS FLOW:
@@ -227,7 +624,33 @@ export const fetchCatchLogByQr = createAsyncThunk<
       const data = res?.data ?? res?.qr ?? res;
       if (!data) return rejectWithValue("AQUA_QR_NOT_FOUND");
 
-      return normalizeAquaScan(res, code);
+      // First normalize the dedicated Quality Inspection scan response.
+      const scan = normalizeAquaScan(res, code);
+
+      // IMPORTANT:
+      // The scan prefill may contain Farm/Pond/Harvest IDs but omit Farmer ID,
+      // Species or Trader ID. The Harvest contract contains canonical user_id,
+      // species and trader_id, so enrich only missing traceability values from
+      // the already-linked Harvest ID. This does not change the existing scan
+      // or submit flow.
+      const harvestId = scan?.harvest_id;
+
+      if (harvestId !== undefined && harvestId !== null && String(harvestId).trim()) {
+        try {
+          const harvestRes = await httpJson<any>(
+            `/api/aquaculture/harvest/${encodeURIComponent(String(harvestId))}`,
+            { method: "GET" }
+          );
+
+          return enrichAquaScanWithHarvest(scan, harvestRes);
+        } catch {
+          // Do not break Quality Inspection if the enrichment request fails.
+          // Existing scan data remains usable.
+          return scan;
+        }
+      }
+
+      return scan;
     }
 
     const tryFetch = async (path: string) => {
@@ -290,7 +713,11 @@ export default slice.reducer;
 export const selectQrDetailsState = (state: RootState): State =>
   ((state as any).qrDetails as State) ?? initialState;
 
-export const selectCatchLog = (state: RootState) => selectQrDetailsState(state).data;
+export const selectCatchLog = (state: RootState) =>
+  selectQrDetailsState(state).data;
+
 export const selectCatchLogLoading = (state: RootState) =>
   selectQrDetailsState(state).loading;
-export const selectCatchLogError = (state: RootState) => selectQrDetailsState(state).error;
+
+export const selectCatchLogError = (state: RootState) =>
+  selectQrDetailsState(state).error;

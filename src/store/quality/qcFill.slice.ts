@@ -210,9 +210,23 @@ export const submitQcFill = createAsyncThunk<
 
       const sampleCount = toOptionalNumber(payload?.sample_count);
       const sampleWeight = toOptionalNumber(payload?.sample_weight);
+      const abwG = toOptionalNumber(
+        payload?.abw_g ?? payload?.abw ?? payload?.average_body_weight
+      );
+      const sizeCountKg = toOptionalNumber(
+        payload?.size_count_kg ??
+          payload?.size_count_per_kg ??
+          payload?.size_count ??
+          payload?.size
+      );
 
       appendScalar(form, "sample_count", sampleCount);
       appendScalar(form, "sample_weight", sampleWeight);
+
+      // AQUA calculated/overridden values.
+      // Backend QualityInspection model exposes these canonical fields.
+      appendScalar(form, "abw_g", abwG);
+      appendScalar(form, "size_count_kg", sizeCountKg);
 
       appendScalar(form, "grade", grade);
 
