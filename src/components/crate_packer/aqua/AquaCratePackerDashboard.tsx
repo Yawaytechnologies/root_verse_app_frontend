@@ -780,6 +780,10 @@ export default function AquaCratePackerDashboard({
                   <InfoBox label="Pond QR" value={scanData.pond_qr} />
                   <InfoBox label="Harvest ID" value={scanData.harvest_id} />
                   <InfoBox
+  label="Farmer Name"
+  value={scanData.farmer_name || "-"}
+/>
+                  <InfoBox
                     label="Pond"
                     value={scanData.pond_name || scanData.pond_code}
                   />
@@ -792,13 +796,15 @@ export default function AquaCratePackerDashboard({
                     label="Size Count/kg"
                     value={scanData.size_count_kg}
                   />
+                  
                   <InfoBox
-                    label="Expected Size Count/kg"
-                    value={scanData.expected_size_count_kg}
-                  />
-                  <InfoBox
-                    label="Expected Biomass"
-                    value={fmtKg(scanData.expected_biomass)}
+                    label="ABW (g)"
+                    value={
+                      scanData.abw_g !== null &&
+                      scanData.abw_g !== undefined
+                        ? `${scanData.abw_g} g`
+                        : "-"
+                    }
                   />
                   <InfoBox label="Grade" value={scanData.grade} />
                   <InfoBox

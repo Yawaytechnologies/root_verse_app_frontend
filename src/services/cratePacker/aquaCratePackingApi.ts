@@ -1,23 +1,24 @@
 // src/services/cratePacker/aquaCratePackingApi.ts
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
-const API_BASE = (
-  process.env.EXPO_PUBLIC_API_BASE_URL ||
-  "https://rootverse-backend-5qoo.onrender.com"
-).replace(/\/$/, "");
+import { API_BASE } from "../../config/env";
 
 const TOKEN_KEY = "auth_token";
+const AQUA_CRATE_PACKING_PATH = "/api/aquaculture/crate-packing";
+const AQUA_HARVEST_PATH = "/api/aquaculture/harvest";
+const AQUA_QUALITY_PATH = "/api/aquaculture/quality-inspection";
 
 export type AquaCrateInput = {
   crate_qr: string;
   weight: number;
   grade?: string;
+  size_count_kg?: number;
 };
 
 export type AquaPackedCrate = {
   id?: number;
   crate_qr_id?: number;
-  crate_qr: string;
+  crate_qr?: string;
+  crate_code?: string;
   pond_qr_code?: string;
   harvest_id?: number;
   quality_inspection_id?: number;
@@ -34,567 +35,772 @@ export type AquaPackedCrate = {
   raw?: any;
 };
 
-export type AquaQualityInspection = {
-  id?: number;
-  quality_inspection_id?: number;
-  pond_qr_scan?: string;
-  harvest_id?: number;
-  quality_checker_id?: number;
-  checker_code?: string;
-  sample_count?: number;
-  sample_weight?: number;
-  abw_g?: number;
-  size_count_kg?: number;
-  expected_biomass?: number;
-  grade?: string;
-  disease_observation?: boolean;
-  disease_notes?: string;
-  inspection_latitude?: number;
-  inspection_longitude?: number;
-  inspected_at?: string;
-  remarks?: string;
-  created_at?: string;
-  updated_at?: string;
-  raw?: any;
-};
-
 export type AquaCratePackingScanData = {
-  pond_id?: number;
-  pond_code?: string;
-  pond_name?: string;
+  harvest_id: number;
   pond_qr: string;
 
-  harvest_id: number;
-  quality_inspection_id?: number;
-
-  farm_id?: number;
-  farm_code?: string;
-  farm_name?: string;
   farmer_name?: string;
-
-  culture_id?: number;
-  culture_code?: string;
-
+  farm_name?: string;
+  farm_code?: string;
+  pond_name?: string;
+  pond_id?: number | string;
+  pond_code?: string;
   species?: string;
-  size_count_kg?: number;
-  expected_size_count_kg?: number;
-  expected_biomass?: number;
+
+  // Quality Inspection values used by Aqua crate packing.
+  abw_g?: number | null;
+  size_count_kg?: number | null;
   grade?: string;
+  quality_inspection_id?: number | null;
+  quality_inspected_at?: string | null;
 
-  trader_id?: number;
-  trader_code?: string;
+  expected_biomass?: number | null;
   trader_name?: string;
-  trader_mobile?: string;
+  trader_code?: string;
 
-  crate_packer_id?: number;
-  crate_packer_code?: string;
-  crate_packer_name?: string;
-
-  crate_count?: number;
-  total_weight?: number;
   crates: AquaPackedCrate[];
-
   raw?: any;
 };
 
-function normCode(raw: any) {
-  return String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
-}
+export type AquaSubmitResult = {
+  ok: boolean;
+  message: string;
+  data?: any;
+  raw?: any;
+};
 
-function cleanText(v: any) {
-  const s = String(v ?? "").trim();
+function apiUrl(path: string) {
+  const base = String(API_BASE || "").replace(/\/+$/, "");
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
 
-  if (!s || s.toLowerCase() === "undefined" || s.toLowerCase() === "null") {
-    return "";
+  // Prevent /api/api/... when API_BASE already ends with /api.
+  if (base.endsWith("/api") && cleanPath.startsWith("/api/")) {
+    return `${base}${cleanPath.replace(/^\/api/, "")}`;
   }
 
-  return s;
+  return `${base}${cleanPath}`;
 }
 
-function toNumber(v: any): number | undefined {
-  if (v === undefined || v === null || v === "") return undefined;
+async function authHeaders() {
+  const token =
+    (await AsyncStorage.getItem(TOKEN_KEY)) ||
+    (await AsyncStorage.getItem("token")) ||
+    "";
 
-  if (typeof v === "number") {
-    return Number.isFinite(v) ? v : undefined;
+  return {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+async function safeJson(response: Response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
   }
-
-  const s = String(v).replace(/,/g, "").trim();
-  const direct = Number(s);
-
-  if (Number.isFinite(direct)) return direct;
-
-  const m = s.match(/-?\d+(\.\d+)?/);
-  if (!m) return undefined;
-
-  const parsed = Number(m[0]);
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function toBool(v: any): boolean | undefined {
-  if (v === undefined || v === null || v === "") return undefined;
-  if (typeof v === "boolean") return v;
+function getErrorMessage(data: any, fallback: string, status?: number) {
+  if (typeof data?.message === "string" && data.message.trim()) {
+    return data.message;
+  }
+  if (typeof data?.error === "string" && data.error.trim()) {
+    return data.error;
+  }
+  if (typeof data?.detail === "string" && data.detail.trim()) {
+    return data.detail;
+  }
+  if (Array.isArray(data?.message)) return data.message.join(" | ");
+  if (Array.isArray(data?.error)) return data.error.join(" | ");
 
-  const s = String(v).trim().toLowerCase();
-
-  if (s === "true" || s === "1" || s === "yes") return true;
-  if (s === "false" || s === "0" || s === "no") return false;
-
-  return undefined;
+  return status ? `HTTP ${status}: ${fallback}` : fallback;
 }
 
-function cleanObject<T extends Record<string, any>>(obj: T): T {
-  const out: Record<string, any> = {};
-
-  Object.entries(obj).forEach(([k, v]) => {
-    if (v === undefined || v === null) return;
-    if (typeof v === "string" && v.trim() === "") return;
-    out[k] = v;
+async function requestJson<T = any>(
+  path: string,
+  options?: { method?: "GET" | "POST"; body?: any }
+): Promise<T> {
+  const response = await fetch(apiUrl(path), {
+    method: options?.method || "GET",
+    headers: await authHeaders(),
+    ...(options?.body !== undefined
+      ? { body: JSON.stringify(options.body) }
+      : {}),
   });
 
-  return out as T;
-}
+  const data = await safeJson(response);
 
-async function readToken(): Promise<string | null> {
-  const token = (
-    (await AsyncStorage.getItem(TOKEN_KEY).catch(() => "")) || ""
-  ).trim();
-
-  return token || null;
-}
-
-async function requestJson<T>(
-  path: string,
-  options?: {
-    method?: "GET" | "POST";
-    body?: any;
-    timeoutMs?: number;
+  if (
+    !response.ok ||
+    data?.success === false ||
+    data?.ok === false
+  ) {
+    throw new Error(
+      getErrorMessage(data, "Aqua crate packing request failed", response.status)
+    );
   }
-): Promise<T> {
-  const token = await readToken();
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), options?.timeoutMs ?? 20000);
-
-  try {
-    const res = await fetch(`${API_BASE}${path}`, {
-      method: options?.method || "GET",
-      headers: {
-        Accept: "application/json",
-        ...(options?.body ? { "Content-Type": "application/json" } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: options?.body ? JSON.stringify(options.body) : undefined,
-      signal: ctrl.signal,
-    });
-
-    const text = await res.text();
-    let data: any = null;
-
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = text;
-    }
-
-    if (!res.ok) {
-      const msg =
-        data?.message || data?.error || data?.details || `HTTP ${res.status}`;
-
-      throw new Error(Array.isArray(msg) ? msg.join(", ") : String(msg));
-    }
-
-    return data as T;
-  } finally {
-    clearTimeout(timer);
-  }
+  return data as T;
 }
 
-function extractArray(raw: any): any[] {
-  const root = raw?.data ?? raw;
+function unwrapObject(data: any): any {
+  if (!data) return {};
 
-  if (Array.isArray(root)) return root;
-  if (Array.isArray(root?.data)) return root.data;
-  if (Array.isArray(root?.items)) return root.items;
-  if (Array.isArray(root?.rows)) return root.rows;
-  if (Array.isArray(raw?.items)) return raw.items;
-  if (Array.isArray(raw?.rows)) return raw.rows;
+  const one =
+    data?.data ??
+    data?.result ??
+    data?.item ??
+    data?.record ??
+    data?.harvest ??
+    data;
+
+  // Some APIs use { data: { data: {...} } }.
+  if (one && !Array.isArray(one) && one?.data && !Array.isArray(one.data)) {
+    return one.data;
+  }
+
+  return one || {};
+}
+
+function extractArray<T = any>(data: any): T[] {
+  if (Array.isArray(data)) return data;
+
+  const candidates = [
+    data?.data,
+    data?.result,
+    data?.items,
+    data?.records,
+    data?.rows,
+    data?.crates,
+    data?.inspections,
+    data?.quality_inspections,
+    data?.qualityInspections,
+    data?.data?.data,
+    data?.data?.items,
+    data?.data?.records,
+    data?.data?.rows,
+    data?.data?.crates,
+    data?.data?.inspections,
+    data?.data?.quality_inspections,
+    data?.data?.qualityInspections,
+  ];
+
+  for (const value of candidates) {
+    if (Array.isArray(value)) return value as T[];
+  }
 
   return [];
 }
 
-function normalizeCrate(raw: any): AquaPackedCrate {
-  return {
-    id: toNumber(raw?.id),
-    crate_qr_id: toNumber(raw?.crate_qr_id ?? raw?.crateQrId),
-    crate_qr: normCode(
-      raw?.crate_qr ?? raw?.crateQr ?? raw?.crate_code ?? raw?.code
-    ),
-    pond_qr_code: normCode(
-      raw?.pond_qr_code ?? raw?.pondQrCode ?? raw?.pond_qr_scan
-    ),
-    harvest_id: toNumber(raw?.harvest_id ?? raw?.harvestId),
-    quality_inspection_id: toNumber(
-      raw?.quality_inspection_id ?? raw?.qualityInspectionId
-    ),
-    species: raw?.species ? String(raw.species) : undefined,
-    size_count_kg: toNumber(raw?.size_count_kg ?? raw?.sizeCountKg),
-    weight_kg: toNumber(raw?.weight_kg ?? raw?.weightKg ?? raw?.weight),
-    grade: raw?.grade ? String(raw.grade).toUpperCase() : undefined,
-    crate_packer_id: toNumber(raw?.crate_packer_id ?? raw?.cratePackerId),
-    trader_id: toNumber(raw?.trader_id ?? raw?.traderId),
-    gps_latitude: toNumber(raw?.gps_latitude ?? raw?.gpsLatitude),
-    gps_longitude: toNumber(raw?.gps_longitude ?? raw?.gpsLongitude),
-    packing_status: raw?.packing_status ?? raw?.packingStatus,
-    packed_at: raw?.packed_at ?? raw?.packedAt,
-    raw,
-  };
+function firstValue(...values: any[]) {
+  return values.find(
+    (value) =>
+      value !== undefined &&
+      value !== null &&
+      String(value).trim() !== ""
+  );
 }
 
-function normalizeInspection(raw: any): AquaQualityInspection {
-  const root = raw?.data ?? raw?.inspection ?? raw?.quality_inspection ?? raw;
-  const q = root?.quality_inspection ?? root?.inspection ?? root;
-
-  return {
-    id: toNumber(q?.id ?? q?.quality_inspection_id ?? q?.qualityInspectionId),
-    quality_inspection_id: toNumber(
-      q?.quality_inspection_id ?? q?.qualityInspectionId ?? q?.id
-    ),
-    pond_qr_scan: normCode(
-      q?.pond_qr_scan ??
-        q?.pond_qr ??
-        q?.pond_qr_code ??
-        q?.pondQr ??
-        q?.qr_code ??
-        q?.code
-    ),
-    harvest_id: toNumber(q?.harvest_id ?? q?.harvestId ?? q?.harvest?.id),
-    quality_checker_id: toNumber(
-      q?.quality_checker_id ?? q?.qualityCheckerId
-    ),
-    checker_code: q?.checker_code ?? q?.checkerCode,
-    sample_count: toNumber(q?.sample_count ?? q?.sampleCount),
-    sample_weight: toNumber(q?.sample_weight ?? q?.sampleWeight),
-    abw_g: toNumber(q?.abw_g ?? q?.abwG),
-    size_count_kg: toNumber(q?.size_count_kg ?? q?.sizeCountKg),
-    expected_biomass: toNumber(q?.expected_biomass ?? q?.expectedBiomass),
-    grade: q?.grade ? String(q.grade).toUpperCase() : undefined,
-    disease_observation: toBool(
-      q?.disease_observation ?? q?.diseaseObservation
-    ),
-    disease_notes: q?.disease_notes ?? q?.diseaseNotes,
-    inspection_latitude: toNumber(
-      q?.inspection_latitude ?? q?.inspectionLatitude
-    ),
-    inspection_longitude: toNumber(
-      q?.inspection_longitude ?? q?.inspectionLongitude
-    ),
-    inspected_at: q?.inspected_at ?? q?.inspectedAt,
-    remarks: q?.remarks,
-    created_at: q?.created_at ?? q?.createdAt,
-    updated_at: q?.updated_at ?? q?.updatedAt,
-    raw,
-  };
+function textOrEmpty(...values: any[]) {
+  const value = firstValue(...values);
+  return value === undefined || value === null ? "" : String(value).trim();
 }
 
-function normalizeScanData(
-  raw: any,
-  inspection?: AquaQualityInspection
-): AquaCratePackingScanData {
-  const data = raw?.data ?? raw?.result ?? raw;
+function toNumberOrNull(value: any): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
 
-  const trader = data?.trader || {};
-  const packer = data?.crate_packer || data?.cratePacker || {};
+function toPositiveNumberOrNull(value: any): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
-  const cratesRaw = Array.isArray(data?.crates) ? data.crates : [];
+function normCode(value: any) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+}
 
-  const harvestId =
-    toNumber(data?.harvest_id ?? data?.harvestId) ||
-    inspection?.harvest_id ||
-    0;
+function dateMs(value: any): number {
+  if (!value) return 0;
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * Pick the newest usable Quality Inspection.
+ * Prefer CHECKED. If the backend does not persist/return CHECKED status,
+ * fall back to the newest non-REJECTED inspection for the same harvest.
+ */
+function pickLatestQualityInspection(rows: any[]): any | null {
+  if (!Array.isArray(rows) || !rows.length) return null;
+
+  const sortLatest = (list: any[]) =>
+    [...list].sort((a, b) => {
+      const aMs = Math.max(
+        dateMs(a?.inspected_at ?? a?.inspectedAt),
+        dateMs(a?.updated_at ?? a?.updatedAt),
+        dateMs(a?.created_at ?? a?.createdAt)
+      );
+      const bMs = Math.max(
+        dateMs(b?.inspected_at ?? b?.inspectedAt),
+        dateMs(b?.updated_at ?? b?.updatedAt),
+        dateMs(b?.created_at ?? b?.createdAt)
+      );
+
+      if (aMs !== bMs) return bMs - aMs;
+      return Number(b?.id || 0) - Number(a?.id || 0);
+    });
+
+  const checked = rows.filter((row) => {
+    const status = String(
+      row?.inspection_status ?? row?.inspectionStatus ?? row?.status ?? ""
+    )
+      .trim()
+      .toUpperCase();
+    return status === "CHECKED";
+  });
+
+  if (checked.length) return sortLatest(checked)[0];
+
+  const nonRejected = rows.filter((row) => {
+    const status = String(
+      row?.inspection_status ?? row?.inspectionStatus ?? row?.status ?? ""
+    )
+      .trim()
+      .toUpperCase();
+    return status !== "REJECTED";
+  });
+
+  return sortLatest(nonRejected.length ? nonRejected : rows)[0] || null;
+}
+
+function inspectionFromScan(scanRaw: any): any | null {
+  const scan = unwrapObject(scanRaw || {});
+
+  const candidates = [
+    scan?.quality_inspection,
+    scan?.latest_quality_inspection,
+    scan?.latest_checked_quality_inspection,
+    scan?.inspection,
+    scan?.qualityInspection,
+    scan?.quality,
+    scan?.prefill?.quality_inspection,
+    scan?.prefill?.inspection,
+    scan?.data?.quality_inspection,
+    scan?.data?.inspection,
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+
+  // Some crate-packing scan responses flatten quality fields at the top level.
+  const hasQualityFields =
+    firstValue(
+      scan?.abw_g,
+      scan?.abw,
+      scan?.average_body_weight,
+      scan?.sample_count,
+      scan?.sample_weight,
+      scan?.size_count_kg,
+      scan?.quality_inspection_id
+    ) !== undefined;
+
+  return hasQualityFields ? scan : null;
+}
+
+function normalizePackedCrate(row: any, harvestId: number): AquaPackedCrate {
+  const crateCode = normCode(
+    firstValue(row?.crate_qr, row?.crateQr, row?.crate_code, row?.crateCode)
+  );
 
   return {
-    pond_id: toNumber(data?.pond_id ?? data?.pondId),
-    pond_code: data?.pond_code ?? data?.pondCode,
-    pond_name: data?.pond_name ?? data?.pondName,
-    pond_qr: normCode(
-      data?.pond_qr_scan ??
-        data?.pond_qr_code ??
-        data?.pondQr ??
-        data?.pond_qr ??
-        inspection?.pond_qr_scan
-    ),
-
-    harvest_id: harvestId,
-
+    id: toPositiveNumberOrNull(row?.id) ?? undefined,
+    crate_qr_id: toPositiveNumberOrNull(row?.crate_qr_id ?? row?.crateQrId) ?? undefined,
+    crate_qr: crateCode,
+    crate_code: crateCode,
+    pond_qr_code: textOrEmpty(row?.pond_qr_code, row?.pondQrCode),
+    harvest_id:
+      toPositiveNumberOrNull(row?.harvest_id ?? row?.harvestId) ?? harvestId,
     quality_inspection_id:
-      toNumber(data?.quality_inspection_id ?? data?.qualityInspectionId) ||
-      inspection?.quality_inspection_id ||
-      inspection?.id,
-
-    farm_id: toNumber(data?.farm_id ?? data?.farmId),
-    farm_code: data?.farm_code ?? data?.farmCode,
-    farm_name: data?.farm_name ?? data?.farmName,
-    farmer_name: data?.farmer_name ?? data?.farmerName,
-
-    culture_id: toNumber(data?.culture_id ?? data?.cultureId),
-    culture_code: data?.culture_code ?? data?.cultureCode,
-
-    species: data?.species,
+      toPositiveNumberOrNull(
+        row?.quality_inspection_id ?? row?.qualityInspectionId
+      ) ?? undefined,
+    species: textOrEmpty(row?.species),
     size_count_kg:
-      toNumber(data?.size_count_kg ?? data?.sizeCountKg) ||
-      inspection?.size_count_kg,
+      toNumberOrNull(row?.size_count_kg ?? row?.sizeCountKg) ?? undefined,
+    weight_kg:
+      toNumberOrNull(row?.weight_kg ?? row?.weightKg ?? row?.weight) ?? undefined,
+    grade: textOrEmpty(row?.grade).toUpperCase(),
+    crate_packer_id:
+      toPositiveNumberOrNull(row?.crate_packer_id ?? row?.cratePackerId) ?? undefined,
+    trader_id:
+      toPositiveNumberOrNull(row?.trader_id ?? row?.traderId) ?? undefined,
+    gps_latitude:
+      toNumberOrNull(row?.gps_latitude ?? row?.gpsLatitude) ?? undefined,
+    gps_longitude:
+      toNumberOrNull(row?.gps_longitude ?? row?.gpsLongitude) ?? undefined,
+    packing_status: textOrEmpty(row?.packing_status, row?.packingStatus, row?.status),
+    packed_at: textOrEmpty(row?.packed_at, row?.packedAt, row?.created_at),
+    raw: row,
+  };
+}
 
-    expected_size_count_kg: toNumber(
-      data?.expected_size_count_kg ??
-        data?.expected_size_count ??
-        data?.expectedSizeCountKg ??
-        data?.expected_size ??
-        data?.expectedSize
+export async function listAquaHarvestPackedCrates(
+  harvestIdValue: number | string
+): Promise<AquaPackedCrate[]> {
+  const harvestId = toPositiveNumberOrNull(harvestIdValue);
+  if (!harvestId) throw new Error("Valid Harvest ID is required.");
+
+  const response = await requestJson<any>(
+    `${AQUA_CRATE_PACKING_PATH}/harvest/${harvestId}/crates`
+  );
+
+  return extractArray<any>(response).map((row) =>
+    normalizePackedCrate(row, harvestId)
+  );
+}
+
+async function getHarvestById(harvestId: number) {
+  const response = await requestJson<any>(`${AQUA_HARVEST_PATH}/${harvestId}`);
+  return unwrapObject(response);
+}
+
+async function getLatestQualityInspection(
+  harvestId: number,
+  scanRaw?: any
+) {
+  const scanInspection = inspectionFromScan(scanRaw);
+  let latest: any | null = null;
+
+  // 1) Prefer the documented CHECKED filter.
+  try {
+    const checkedResponse = await requestJson<any>(
+      `${AQUA_QUALITY_PATH}?harvest_id=${encodeURIComponent(
+        String(harvestId)
+      )}&inspection_status=CHECKED`
+    );
+
+    latest = pickLatestQualityInspection(extractArray<any>(checkedResponse));
+  } catch {
+    // Continue with the harvest-wide fallback below.
+  }
+
+  // 2) Some backend builds do not return/persist CHECKED in the list response.
+  //    In that case, get the latest non-REJECTED inspection for this harvest.
+  if (!latest) {
+    try {
+      const allResponse = await requestJson<any>(
+        `${AQUA_QUALITY_PATH}?harvest_id=${encodeURIComponent(String(harvestId))}`
+      );
+
+      latest = pickLatestQualityInspection(extractArray<any>(allResponse));
+    } catch {
+      // Continue with the crate-packing scan payload.
+    }
+  }
+
+  // 3) The crate-packing scan endpoint already validates that quality inspection
+  //    is completed. Reuse its quality data when the list endpoint has no row.
+  latest = latest || scanInspection;
+
+  if (!latest) return null;
+
+  const inspectionId = toPositiveNumberOrNull(
+    firstValue(
+      latest?.id,
+      latest?.quality_inspection_id,
+      scanInspection?.id,
+      scanInspection?.quality_inspection_id
+    )
+  );
+
+  // 4) Load the full inspection when possible because list/scan responses may be summaries.
+  if (inspectionId) {
+    try {
+      const detailResponse = await requestJson<any>(
+        `${AQUA_QUALITY_PATH}/${inspectionId}`
+      );
+      const detail = unwrapObject(detailResponse);
+
+      if (detail && typeof detail === "object") {
+        return {
+          ...(scanInspection || {}),
+          ...(latest || {}),
+          ...detail,
+        };
+      }
+    } catch {
+      // Keep the data already resolved from list/scan.
+    }
+  }
+
+  return {
+    ...(scanInspection || {}),
+    ...(latest || {}),
+  };
+}
+
+function normalizePrefill(args: {
+  scan?: any;
+  harvest: any;
+  inspection: any;
+  crates: AquaPackedCrate[];
+  forcedPondQr?: string;
+}): AquaCratePackingScanData {
+  const scan = unwrapObject(args.scan || {});
+  const harvest = unwrapObject(args.harvest || {});
+  const inspection = args.inspection || {};
+
+  const harvestId = toPositiveNumberOrNull(
+    firstValue(
+      scan?.harvest_id,
+      scan?.harvestId,
+      harvest?.id,
+      harvest?.harvest_id,
+      harvest?.harvestId,
+      inspection?.harvest_id
+    )
+  );
+
+  if (!harvestId) {
+    throw new Error("Harvest ID is missing from Aqua prefill response.");
+  }
+
+  const pondQr = normCode(
+    firstValue(
+      args.forcedPondQr,
+      scan?.pond_qr,
+      scan?.pond_qr_scan,
+      scan?.pondQr,
+      harvest?.qr_code,
+      harvest?.pond_qr,
+      harvest?.pondQr,
+      inspection?.pond_qr_scan,
+      inspection?.pond_qr,
+      harvest?.pond_code
+    )
+  );
+
+  // Quality values: prefer the resolved QualityInspection record, then the
+  // successful crate-packing scan payload (which may flatten the same values).
+  const inspectionSampleCount = toPositiveNumberOrNull(
+    firstValue(
+      inspection?.sample_count,
+      inspection?.sampleCount,
+      scan?.sample_count,
+      scan?.sampleCount
+    )
+  );
+
+  const inspectionSampleWeight = toPositiveNumberOrNull(
+    firstValue(
+      inspection?.sample_weight,
+      inspection?.sampleWeight,
+      inspection?.sample_weight_g,
+      scan?.sample_weight,
+      scan?.sampleWeight,
+      scan?.sample_weight_g
+    )
+  );
+
+  const storedInspectionAbw = toPositiveNumberOrNull(
+    firstValue(
+      inspection?.abw_g,
+      inspection?.abw,
+      inspection?.average_body_weight,
+      inspection?.average_body_weight_g,
+      scan?.abw_g,
+      scan?.abw,
+      scan?.average_body_weight,
+      scan?.average_body_weight_g
+    )
+  );
+
+  const storedInspectionSize = toPositiveNumberOrNull(
+    firstValue(
+      inspection?.size_count_kg,
+      inspection?.sizeCountKg,
+      inspection?.size_count_per_kg,
+      inspection?.size_count,
+      inspection?.size,
+      scan?.size_count_kg,
+      scan?.sizeCountKg,
+      scan?.size_count_per_kg,
+      scan?.size_count,
+      scan?.size
+    )
+  );
+
+  // Canonical ABW first. If an older inspection did not persist abw_g, use the
+  // same inspection's sample measurements. As a final compatibility fallback,
+  // invert the quality Size Count/kg value returned by the scan/list endpoint.
+  const qualityAbwG =
+    storedInspectionAbw ??
+    (inspectionSampleCount && inspectionSampleWeight
+      ? Number((inspectionSampleWeight / inspectionSampleCount).toFixed(4))
+      : storedInspectionSize
+        ? Number((1000 / storedInspectionSize).toFixed(4))
+        : null);
+
+  const qualitySizeCountKg =
+    storedInspectionSize ??
+    (qualityAbwG
+      ? Number((1000 / qualityAbwG).toFixed(4))
+      : null);
+
+  return {
+    harvest_id: harvestId,
+    pond_qr: pondQr,
+
+    farmer_name: textOrEmpty(
+      scan?.farmer_name,
+      scan?.farmerName,
+      harvest?.farmer_name,
+      harvest?.farmerName,
+      harvest?.farmer?.name,
+      harvest?.farmer?.full_name,
+      harvest?.user?.name,
+      harvest?.user?.full_name
+    ),
+    farm_name: textOrEmpty(
+      scan?.farm_name,
+      scan?.farmName,
+      harvest?.farm_name,
+      harvest?.farmName,
+      harvest?.farm?.name,
+      harvest?.farm?.farm_name
+    ),
+    farm_code: textOrEmpty(scan?.farm_code, harvest?.farm_code, harvest?.farm?.farm_code),
+    pond_name: textOrEmpty(
+      scan?.pond_name,
+      scan?.pondName,
+      harvest?.pond_name,
+      harvest?.pondName,
+      harvest?.pond?.name,
+      harvest?.pond?.pond_name
+    ),
+    pond_id:
+      firstValue(
+        scan?.pond_id,
+        scan?.pondId,
+        harvest?.pond_id,
+        harvest?.pondId,
+        harvest?.pond?.id,
+        inspection?.pond_id
+      ) ?? "",
+    pond_code: textOrEmpty(
+      scan?.pond_code,
+      harvest?.pond_code,
+      harvest?.pond?.pond_code,
+      pondQr
+    ),
+    species: textOrEmpty(
+      scan?.species,
+      harvest?.species,
+      harvest?.species_name,
+      harvest?.speciesName,
+      inspection?.species
     ),
 
-    expected_biomass:
-      toNumber(data?.expected_biomass ?? data?.expectedBiomass) ||
-      inspection?.expected_biomass,
+    abw_g: qualityAbwG,
+    size_count_kg: qualitySizeCountKg,
+    grade: textOrEmpty(inspection?.grade, scan?.grade).toUpperCase(),
+    quality_inspection_id: toPositiveNumberOrNull(
+      firstValue(
+        inspection?.id,
+        inspection?.quality_inspection_id,
+        scan?.quality_inspection_id,
+        scan?.qualityInspectionId
+      )
+    ),
+    quality_inspected_at:
+      textOrEmpty(
+        inspection?.inspected_at,
+        inspection?.inspectedAt,
+        inspection?.updated_at,
+        inspection?.created_at,
+        scan?.inspected_at,
+        scan?.quality_inspected_at
+      ) || null,
 
-    grade: data?.grade
-      ? String(data.grade).toUpperCase()
-      : inspection?.grade
-      ? inspection.grade
-      : undefined,
+    expected_biomass: toNumberOrNull(
+      firstValue(scan?.expected_biomass, harvest?.expected_biomass, inspection?.expected_biomass)
+    ),
+    trader_name: textOrEmpty(scan?.trader_name, harvest?.trader_name, harvest?.trader?.name),
+    trader_code: textOrEmpty(scan?.trader_code, harvest?.trader_code, harvest?.trader?.code),
 
-    trader_id: toNumber(trader?.trader_id ?? trader?.id ?? data?.trader_id),
-    trader_code: trader?.trader_code ?? trader?.code,
-    trader_name: trader?.trader_name ?? trader?.name,
-    trader_mobile: trader?.mobile ?? trader?.phone,
-
-    crate_packer_id: toNumber(packer?.id ?? data?.crate_packer_id),
-    crate_packer_code: packer?.code ?? data?.crate_packer_code,
-    crate_packer_name: packer?.name ?? data?.crate_packer_name,
-
-    crate_count:
-      toNumber(data?.crate_count ?? data?.crateCount) ?? cratesRaw.length,
-    total_weight: toNumber(data?.total_weight ?? data?.totalWeight),
-
-    crates: cratesRaw.map(normalizeCrate),
-    raw,
+    crates: args.crates,
+    raw: {
+      scan,
+      harvest,
+      latest_quality_inspection: inspection,
+      latest_checked_quality_inspection: inspection,
+    },
   };
 }
 
 /**
- * Important fix:
- * The mobile screen may still hold an old harvest ID like 31.
- * Backend quality-inspection record may be for harvest_id 1.
- *
- * So for crate packing we first find the completed quality inspection
- * by pond_qr_scan and then use that inspection's harvest_id.
+ * Main prefill function.
+ * - With Pond QR: calls Aqua crate-packing scan endpoint first to resolve Harvest ID.
+ * - With Harvest ID: loads the Harvest directly.
+ * - In both cases: resolves the latest usable quality inspection and packed crates.
  */
-async function findCompletedInspectionForPond(
-  pondQr: string,
-  preferredHarvestId?: number | string | null
-): Promise<AquaQualityInspection> {
-  const code = normCode(pondQr);
-  const wantedHarvestId = toNumber(preferredHarvestId);
-
-  if (!code) {
-    throw new Error("Pond QR is required");
-  }
-
-  const listRes = await requestJson<any>("/api/aquaculture/quality-inspection");
-  const list = extractArray(listRes);
-
-  const inspections = list
-    .map(normalizeInspection)
-    .filter((i) => normCode(i.pond_qr_scan) === code)
-    .filter((i) => !!i.id || !!i.quality_inspection_id)
-    .filter((i) => !!i.harvest_id);
-
-  if (!inspections.length) {
-    throw new Error(
-      `Quality Inspection must be completed for pond ${code} before crate packing`
-    );
-  }
-
-  const exactHarvest = wantedHarvestId
-    ? inspections.find((i) => Number(i.harvest_id) === Number(wantedHarvestId))
-    : null;
-
-  if (exactHarvest) {
-    return exactHarvest;
-  }
-
-  const latest = inspections
-    .slice()
-    .sort((a, b) => {
-      const bid = Number(b.id || b.quality_inspection_id || 0);
-      const aid = Number(a.id || a.quality_inspection_id || 0);
-      return bid - aid;
-    })[0];
-
-  return latest;
-}
-
-export async function scanAquaPondForCratePacking(params: {
-  pondQr: string;
-  harvestId?: number | string | null;
-  cratePackerId?: number | string | null;
-  cratePackerCode?: string | null;
+export async function fetchAquaHarvestPrefill(params: {
+  pondQr?: string;
+  harvestId?: number | string;
+  cratePackerId?: number | null;
+  cratePackerCode?: string;
 }): Promise<AquaCratePackingScanData> {
   const pondQr = normCode(params.pondQr);
+  let harvestId = toPositiveNumberOrNull(params.harvestId);
+  let scanRaw: any = {};
 
-  if (!pondQr) {
-    throw new Error("Pond QR is required");
+  if (!pondQr && !harvestId) {
+    throw new Error("Scan Pond QR or enter Harvest ID.");
   }
 
-  const inspection = await findCompletedInspectionForPond(
-    pondQr,
-    params.harvestId
-  );
+  if (pondQr) {
+    const query = new URLSearchParams();
+    if (harvestId) query.set("harvest_id", String(harvestId));
+    if (params.cratePackerId) query.set("crate_packer_id", String(params.cratePackerId));
+    if (params.cratePackerCode?.trim()) {
+      query.set("crate_packer_code", params.cratePackerCode.trim());
+    }
 
-  const finalHarvestId = inspection.harvest_id;
-
-  if (!finalHarvestId) {
-    throw new Error("Harvest ID missing from completed quality inspection");
-  }
-
-  const query = new URLSearchParams();
-
-  query.set("harvest_id", String(finalHarvestId));
-
-  if (inspection.quality_inspection_id || inspection.id) {
-    query.set(
-      "quality_inspection_id",
-      String(inspection.quality_inspection_id || inspection.id)
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const scanResponse = await requestJson<any>(
+      `${AQUA_CRATE_PACKING_PATH}/scan/${encodeURIComponent(pondQr)}${suffix}`
     );
+
+    scanRaw = unwrapObject(scanResponse);
+    harvestId =
+      toPositiveNumberOrNull(
+        firstValue(
+          scanRaw?.harvest_id,
+          scanRaw?.harvestId,
+          scanRaw?.harvest?.id,
+          scanRaw?.data?.harvest_id
+        )
+      ) ?? harvestId;
   }
 
-  if (params.cratePackerId) {
-    query.set("crate_packer_id", String(params.cratePackerId));
+  if (!harvestId) {
+    throw new Error("No booked Harvest ID was resolved for this Pond QR.");
   }
 
-  if (params.cratePackerCode) {
-    query.set("crate_packer_code", String(params.cratePackerCode));
-  }
+  const [harvest, inspection, crates] = await Promise.all([
+    getHarvestById(harvestId),
+    getLatestQualityInspection(harvestId, scanRaw),
+    listAquaHarvestPackedCrates(harvestId),
+  ]);
 
-  const qs = query.toString();
+  // Do not block a successful crate-packing Pond QR scan only because the
+  // quality-inspection list endpoint did not return a CHECKED row. The scan
+  // endpoint itself validates that quality inspection is completed, and its
+  // payload is also used as the quality-data fallback above.
 
-  const path = `/api/aquaculture/crate-packing/scan/${encodeURIComponent(
-    pondQr
-  )}${qs ? `?${qs}` : ""}`;
+  return normalizePrefill({
+    scan: scanRaw,
+    harvest,
+    inspection,
+    crates,
+    forcedPondQr: pondQr,
+  });
+}
 
-  const res = await requestJson<any>(path);
-  const normalized = normalizeScanData(res, inspection);
-
-  if (!normalized.harvest_id) {
-    normalized.harvest_id = finalHarvestId;
-  }
-
-  if (!normalized.quality_inspection_id) {
-    normalized.quality_inspection_id =
-      inspection.quality_inspection_id || inspection.id;
-  }
-
-  if (!normalized.grade && inspection.grade) {
-    normalized.grade = inspection.grade;
-  }
-
-  return normalized;
+// Backward-compatible function used by the existing Aqua dashboard.
+export async function scanAquaPondForCratePacking(params: {
+  pondQr: string;
+  harvestId?: number | string;
+  cratePackerId?: number | null;
+  cratePackerCode?: string;
+}): Promise<AquaCratePackingScanData> {
+  return fetchAquaHarvestPrefill({
+    pondQr: params.pondQr,
+    harvestId: params.harvestId,
+    cratePackerId: params.cratePackerId,
+    cratePackerCode: params.cratePackerCode,
+  });
 }
 
 export async function submitAquaCratePacking(params: {
   pondQr: string;
   harvestId: number | string;
-  cratePackerId?: number | string | null;
-  gpsLatitude?: number | string | null;
-  gpsLongitude?: number | string | null;
+  cratePackerId?: number | null;
+  cratePackerCode?: string;
   crates: AquaCrateInput[];
-}) {
+  gpsLatitude?: number;
+  gpsLongitude?: number;
+  remarks?: string;
+}): Promise<AquaSubmitResult> {
   const pondQr = normCode(params.pondQr);
+  const harvestId = toPositiveNumberOrNull(params.harvestId);
 
-  if (!pondQr) {
-    throw new Error("Pond QR is required");
+  if (!pondQr) throw new Error("Pond QR is required.");
+  if (!harvestId) throw new Error("Valid Harvest ID is required.");
+  if (!Array.isArray(params.crates) || !params.crates.length) {
+    throw new Error("Add at least one crate.");
   }
 
-  const inspection = await findCompletedInspectionForPond(
-    pondQr,
-    params.harvestId
-  );
+  const crates = params.crates.map((crate) => {
+    const crateQr = normCode(crate?.crate_qr);
+    const weight = Number(crate?.weight);
+    const grade = String(crate?.grade || "").trim().toUpperCase();
 
-  const finalHarvestId = Number(inspection.harvest_id);
-
-  if (!Number.isFinite(finalHarvestId) || finalHarvestId <= 0) {
-    throw new Error("Valid harvest ID is required from quality inspection");
-  }
-
-  const crates = params.crates.map((c) => {
-    const crateQr = normCode(c.crate_qr);
-    const weight = Number(c.weight);
-    const grade = String(c.grade || inspection.grade || "").trim().toUpperCase();
-
-    if (!crateQr) {
-      throw new Error("Crate QR is required");
-    }
-
+    if (!crateQr) throw new Error("Crate QR is required.");
     if (!Number.isFinite(weight) || weight <= 0) {
-      throw new Error(`Invalid weight for crate ${crateQr}`);
+      throw new Error(`Valid weight is required for crate ${crateQr}.`);
+    }
+    if (!grade || !["A", "B", "C", "D"].includes(grade)) {
+      throw new Error(`Valid grade A/B/C/D is required for crate ${crateQr}.`);
     }
 
-    return cleanObject({
+    return {
       crate_qr: crateQr,
       weight: Number(weight.toFixed(2)),
       grade,
-    });
+      ...(Number.isFinite(Number(crate?.size_count_kg))
+        ? { size_count_kg: Number(crate.size_count_kg) }
+        : {}),
+    };
   });
 
-  if (!crates.length) {
-    throw new Error("Add at least one crate");
-  }
-
-  const body = cleanObject({
+  const body = {
     pond_qr: pondQr,
-    pond_qr_scan: pondQr,
-    harvest_id: finalHarvestId,
-    quality_inspection_id: inspection.quality_inspection_id || inspection.id,
-    crate_packer_id: params.cratePackerId
-      ? Number(params.cratePackerId)
-      : undefined,
-    gps_latitude: params.gpsLatitude ? Number(params.gpsLatitude) : undefined,
-    gps_longitude: params.gpsLongitude ? Number(params.gpsLongitude) : undefined,
+    harvest_id: harvestId,
+    ...(params.cratePackerId
+      ? { crate_packer_id: Number(params.cratePackerId) }
+      : {}),
+    ...(params.cratePackerCode?.trim()
+      ? { crate_packer_code: params.cratePackerCode.trim() }
+      : {}),
+    ...(Number.isFinite(params.gpsLatitude as number)
+      ? { gps_latitude: params.gpsLatitude }
+      : {}),
+    ...(Number.isFinite(params.gpsLongitude as number)
+      ? { gps_longitude: params.gpsLongitude }
+      : {}),
+    packed_at: new Date().toISOString(),
+    ...(params.remarks?.trim() ? { remarks: params.remarks.trim() } : {}),
     crates,
-  });
+  };
 
-  const res = await requestJson<any>("/api/aquaculture/crate-packing", {
+  const response = await requestJson<any>(AQUA_CRATE_PACKING_PATH, {
     method: "POST",
     body,
   });
 
   return {
-    success: !!res?.success,
-    message: res?.message || "Crates packed successfully",
-    data: res?.data ?? res,
-    raw: res,
+    ok: true,
+    message:
+      textOrEmpty(response?.message, response?.data?.message) ||
+      "Crates packed successfully.",
+    data: unwrapObject(response),
+    raw: response,
   };
-}
-
-export async function listAquaHarvestPackedCrates(
-  harvestId: number | string
-): Promise<AquaPackedCrate[]> {
-  const id = Number(harvestId);
-
-  if (!Number.isFinite(id) || id <= 0) {
-    throw new Error("Valid harvest ID is required");
-  }
-
-  const res = await requestJson<any>(
-    `/api/aquaculture/crate-packing/harvest/${id}/crates`
-  );
-
-  const list = Array.isArray(res?.data)
-    ? res.data
-    : Array.isArray(res?.crates)
-    ? res.crates
-    : Array.isArray(res)
-    ? res
-    : [];
-
-  return list.map(normalizeCrate);
 }
